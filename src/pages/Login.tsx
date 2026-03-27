@@ -198,7 +198,12 @@ export default function Login() {
         </div>
 
         {modo === "senha" ? (
-          <form onSubmit={handleLoginSenha}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleLoginSenha(e);
+            }}
+          >
             <div style={{ marginBottom: 16 }}>
               <label
                 style={{
@@ -306,7 +311,12 @@ export default function Login() {
             </button>
           </form>
         ) : etapaCodigo === "solicitar" ? (
-          <form onSubmit={handleEnviarCodigo}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleEnviarCodigo(e);
+            }}
+          >
             <div style={{ marginBottom: 20 }}>
               <label
                 style={{
@@ -387,7 +397,12 @@ export default function Login() {
             </button>
           </form>
         ) : (
-          <form onSubmit={handleVerificarCodigo}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleVerificarCodigo(e);
+            }}
+          >
             <div style={{ marginBottom: 16 }}>
               <label
                 style={{
