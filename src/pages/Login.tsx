@@ -21,6 +21,14 @@ export default function Login() {
     setSucesso("");
   }
 
+  function alternarModo(novoModo: ModoLogin) {
+    setModo(novoModo);
+    setEtapaCodigo("solicitar");
+    setSenha("");
+    setCodigo("");
+    limparMensagens();
+  }
+
   async function handleLoginSenha(e: FormEvent) {
     e.preventDefault();
     limparMensagens();
@@ -64,7 +72,7 @@ export default function Login() {
         return;
       }
 
-      setSucesso("Código enviado para o seu email.");
+      setSucesso("Código enviado para o seu e-mail.");
       setEtapaCodigo("verificar");
     } catch (err) {
       setErro(err instanceof Error ? err.message : "Something went wrong");
@@ -103,22 +111,14 @@ export default function Login() {
     }
   }
 
-  function alternarModo(novoModo: ModoLogin) {
-    setModo(novoModo);
-    setEtapaCodigo("solicitar");
-    setSenha("");
-    setCodigo("");
-    limparMensagens();
-  }
-
   return (
     <div
       style={{
         minHeight: "100vh",
+        background: "#020b2d",
         display: "flex",
-        justifyContent: "center",
         alignItems: "center",
-        background: "#020617",
+        justifyContent: "center",
         padding: 24,
       }}
     >
@@ -128,18 +128,37 @@ export default function Login() {
           maxWidth: 430,
           background: "#ffffff",
           borderRadius: 20,
-          padding: 32,
-          boxShadow: "0 20px 40px rgba(0,0,0,0.25)",
+          padding: "28px 28px 26px",
+          boxShadow: "0 20px 50px rgba(0, 0, 0, 0.22)",
         }}
       >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            marginBottom: 18,
+          }}
+        >
+          <img
+            src="/logo-rg.png"
+            alt="RG Ambiental"
+            style={{
+              width: 185,
+              maxWidth: "100%",
+              height: "auto",
+              objectFit: "contain",
+            }}
+          />
+        </div>
+
         <h1
           style={{
-            marginTop: 0,
-            marginBottom: 8,
+            margin: 0,
             textAlign: "center",
-            color: "#0f172a",
-            fontSize: 36,
+            fontSize: 28,
+            lineHeight: 1.1,
             fontWeight: 800,
+            color: "#0b1736",
           }}
         >
           Login
@@ -147,10 +166,10 @@ export default function Login() {
 
         <p
           style={{
+            margin: "10px 0 24px 0",
             textAlign: "center",
-            color: "#64748b",
-            marginTop: 0,
-            marginBottom: 24,
+            fontSize: 15,
+            color: "#6b7a99",
           }}
         >
           Acesse o sistema da RG Ambiental
@@ -161,18 +180,19 @@ export default function Login() {
             display: "grid",
             gridTemplateColumns: "1fr 1fr",
             gap: 10,
-            marginBottom: 20,
+            marginBottom: 18,
           }}
         >
           <button
             type="button"
             onClick={() => alternarModo("senha")}
             style={{
-              height: 44,
+              height: 38,
               borderRadius: 12,
               border: modo === "senha" ? "none" : "1px solid #cbd5e1",
-              background: modo === "senha" ? "#16a34a" : "#ffffff",
-              color: modo === "senha" ? "#ffffff" : "#0f172a",
+              background: modo === "senha" ? "#1fad49" : "#ffffff",
+              color: modo === "senha" ? "#ffffff" : "#0b1736",
+              fontSize: 14,
               fontWeight: 700,
               cursor: "pointer",
             }}
@@ -184,11 +204,12 @@ export default function Login() {
             type="button"
             onClick={() => alternarModo("codigo")}
             style={{
-              height: 44,
+              height: 38,
               borderRadius: 12,
               border: modo === "codigo" ? "none" : "1px solid #cbd5e1",
-              background: modo === "codigo" ? "#16a34a" : "#ffffff",
-              color: modo === "codigo" ? "#ffffff" : "#0f172a",
+              background: modo === "codigo" ? "#1fad49" : "#ffffff",
+              color: modo === "codigo" ? "#ffffff" : "#0b1736",
+              fontSize: 14,
               fontWeight: 700,
               cursor: "pointer",
             }}
@@ -198,62 +219,67 @@ export default function Login() {
         </div>
 
         {modo === "senha" ? (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleLoginSenha(e);
-            }}
-          >
-            <div style={{ marginBottom: 16 }}>
+          <form onSubmit={handleLoginSenha}>
+            <div style={{ marginBottom: 14 }}>
               <label
+                htmlFor="email"
                 style={{
                   display: "block",
                   marginBottom: 8,
+                  fontSize: 15,
                   fontWeight: 700,
-                  color: "#0f172a",
+                  color: "#0b1736",
                 }}
               >
                 E-mail
               </label>
+
               <input
+                id="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 style={{
                   width: "100%",
-                  height: 46,
+                  height: 40,
                   borderRadius: 12,
                   border: "1px solid #cbd5e1",
                   padding: "0 14px",
                   boxSizing: "border-box",
                   fontSize: 15,
+                  outline: "none",
                 }}
               />
             </div>
 
-            <div style={{ marginBottom: 20 }}>
+            <div style={{ marginBottom: 18 }}>
               <label
+                htmlFor="senha"
                 style={{
                   display: "block",
                   marginBottom: 8,
+                  fontSize: 15,
                   fontWeight: 700,
-                  color: "#0f172a",
+                  color: "#0b1736",
                 }}
               >
                 Senha
               </label>
+
               <input
+                id="senha"
                 type="password"
                 value={senha}
                 onChange={(e) => setSenha(e.target.value)}
                 style={{
                   width: "100%",
-                  height: 46,
+                  height: 40,
                   borderRadius: 12,
                   border: "1px solid #cbd5e1",
                   padding: "0 14px",
                   boxSizing: "border-box",
                   fontSize: 15,
+                  outline: "none",
                 }}
               />
             </div>
@@ -265,10 +291,9 @@ export default function Login() {
                   padding: "12px 14px",
                   borderRadius: 12,
                   background: "#fef2f2",
-                  color: "#991b1b",
+                  color: "#b91c1c",
                   border: "1px solid #fecaca",
                   fontSize: 14,
-                  whiteSpace: "pre-wrap",
                 }}
               >
                 {erro}
@@ -285,7 +310,6 @@ export default function Login() {
                   color: "#166534",
                   border: "1px solid #bbf7d0",
                   fontSize: 14,
-                  whiteSpace: "pre-wrap",
                 }}
               >
                 {sucesso}
@@ -297,10 +321,10 @@ export default function Login() {
               disabled={carregando}
               style={{
                 width: "100%",
-                height: 48,
+                height: 42,
                 border: "none",
                 borderRadius: 12,
-                background: "#16a34a",
+                background: "#1fad49",
                 color: "#ffffff",
                 fontSize: 16,
                 fontWeight: 800,
@@ -311,35 +335,35 @@ export default function Login() {
             </button>
           </form>
         ) : etapaCodigo === "solicitar" ? (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleEnviarCodigo(e);
-            }}
-          >
-            <div style={{ marginBottom: 20 }}>
+          <form onSubmit={handleEnviarCodigo}>
+            <div style={{ marginBottom: 18 }}>
               <label
+                htmlFor="email-codigo"
                 style={{
                   display: "block",
                   marginBottom: 8,
+                  fontSize: 15,
                   fontWeight: 700,
-                  color: "#0f172a",
+                  color: "#0b1736",
                 }}
               >
                 E-mail
               </label>
+
               <input
+                id="email-codigo"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 style={{
                   width: "100%",
-                  height: 46,
+                  height: 40,
                   borderRadius: 12,
                   border: "1px solid #cbd5e1",
                   padding: "0 14px",
                   boxSizing: "border-box",
                   fontSize: 15,
+                  outline: "none",
                 }}
               />
             </div>
@@ -351,10 +375,9 @@ export default function Login() {
                   padding: "12px 14px",
                   borderRadius: 12,
                   background: "#fef2f2",
-                  color: "#991b1b",
+                  color: "#b91c1c",
                   border: "1px solid #fecaca",
                   fontSize: 14,
-                  whiteSpace: "pre-wrap",
                 }}
               >
                 {erro}
@@ -371,7 +394,6 @@ export default function Login() {
                   color: "#166534",
                   border: "1px solid #bbf7d0",
                   fontSize: 14,
-                  whiteSpace: "pre-wrap",
                 }}
               >
                 {sucesso}
@@ -383,10 +405,10 @@ export default function Login() {
               disabled={carregando}
               style={{
                 width: "100%",
-                height: 48,
+                height: 42,
                 border: "none",
                 borderRadius: 12,
-                background: "#16a34a",
+                background: "#1fad49",
                 color: "#ffffff",
                 fontSize: 16,
                 fontWeight: 800,
@@ -397,64 +419,69 @@ export default function Login() {
             </button>
           </form>
         ) : (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleVerificarCodigo(e);
-            }}
-          >
-            <div style={{ marginBottom: 16 }}>
+          <form onSubmit={handleVerificarCodigo}>
+            <div style={{ marginBottom: 14 }}>
               <label
+                htmlFor="email-verificacao"
                 style={{
                   display: "block",
                   marginBottom: 8,
+                  fontSize: 15,
                   fontWeight: 700,
-                  color: "#0f172a",
+                  color: "#0b1736",
                 }}
               >
                 E-mail
               </label>
+
               <input
+                id="email-verificacao"
                 type="email"
                 value={email}
                 readOnly
                 style={{
                   width: "100%",
-                  height: 46,
+                  height: 40,
                   borderRadius: 12,
                   border: "1px solid #cbd5e1",
                   padding: "0 14px",
                   boxSizing: "border-box",
                   fontSize: 15,
+                  outline: "none",
                   background: "#f8fafc",
                 }}
               />
             </div>
 
-            <div style={{ marginBottom: 20 }}>
+            <div style={{ marginBottom: 18 }}>
               <label
+                htmlFor="codigo"
                 style={{
                   display: "block",
                   marginBottom: 8,
+                  fontSize: 15,
                   fontWeight: 700,
-                  color: "#0f172a",
+                  color: "#0b1736",
                 }}
               >
-                Código recebido por e-mail
+                Código
               </label>
+
               <input
+                id="codigo"
                 type="text"
                 value={codigo}
                 onChange={(e) => setCodigo(e.target.value)}
-                placeholder="Digite o código"
+                placeholder="Digite o código enviado"
                 style={{
                   width: "100%",
-                  height: 46,
+                  height: 40,
                   borderRadius: 12,
                   border: "1px solid #cbd5e1",
                   padding: "0 14px",
                   boxSizing: "border-box",
                   fontSize: 15,
+                  outline: "none",
                 }}
               />
             </div>
@@ -466,10 +493,9 @@ export default function Login() {
                   padding: "12px 14px",
                   borderRadius: 12,
                   background: "#fef2f2",
-                  color: "#991b1b",
+                  color: "#b91c1c",
                   border: "1px solid #fecaca",
                   fontSize: 14,
-                  whiteSpace: "pre-wrap",
                 }}
               >
                 {erro}
@@ -486,7 +512,6 @@ export default function Login() {
                   color: "#166534",
                   border: "1px solid #bbf7d0",
                   fontSize: 14,
-                  whiteSpace: "pre-wrap",
                 }}
               >
                 {sucesso}
@@ -499,10 +524,10 @@ export default function Login() {
                 disabled={carregando}
                 style={{
                   width: "100%",
-                  height: 48,
+                  height: 42,
                   border: "none",
                   borderRadius: 12,
-                  background: "#16a34a",
+                  background: "#1fad49",
                   color: "#ffffff",
                   fontSize: 16,
                   fontWeight: 800,
@@ -521,12 +546,12 @@ export default function Login() {
                 }}
                 style={{
                   width: "100%",
-                  height: 44,
-                  border: "1px solid #cbd5e1",
+                  height: 40,
                   borderRadius: 12,
+                  border: "1px solid #cbd5e1",
                   background: "#ffffff",
-                  color: "#0f172a",
-                  fontSize: 15,
+                  color: "#0b1736",
+                  fontSize: 14,
                   fontWeight: 700,
                   cursor: "pointer",
                 }}
