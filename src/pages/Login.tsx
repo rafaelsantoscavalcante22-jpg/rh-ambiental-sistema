@@ -1,169 +1,172 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { useState, type FormEvent } from "react";
+import { supabase } from "../lib/supabase";
 
-function Login() {
-  const navigate = useNavigate()
+export default function Login() {
+  const [email, setEmail] = useState("");
+  const [senha, setSenha] = useState("");
+  const [carregando, setCarregando] = useState(false);
+  const [erro, setErro] = useState("");
 
-  const [email, setEmail] = useState('')
-  const [senha, setSenha] = useState('')
-  const [carregando, setCarregando] = useState(false)
+  async function handleLogin(e: FormEvent) {
+    e.preventDefault();
+    setCarregando(true);
+    setErro("");
 
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault()
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: senha,
+      });
 
-    if (!email.trim() || !senha.trim()) {
-      alert('Preencha e-mail e senha.')
-      return
+      if (error) {
+        setErro(error.message);
+        return;
+      }
+
+      window.location.href = "/dashboard";
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setCarregando(false);
     }
-
-    setCarregando(true)
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password: senha,
-    })
-
-    setCarregando(false)
-
-    if (error) {
-      alert('Erro no login: ' + error.message)
-      return
-    }
-
-    navigate('/dashboard')
   }
 
   return (
     <div
       style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(135deg, #020617, #0f172a)',
-        padding: '24px',
+        minHeight: "100vh",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        background: "#020617",
+        padding: 24,
       }}
     >
       <div
         style={{
-          width: '100%',
-          maxWidth: '420px',
-          background: '#ffffff',
-          borderRadius: '18px',
-          boxShadow: '0 20px 50px rgba(0,0,0,0.25)',
-          padding: '32px',
+          width: "100%",
+          maxWidth: 420,
+          background: "#ffffff",
+          borderRadius: 20,
+          padding: 32,
+          boxShadow: "0 20px 40px rgba(0,0,0,0.25)",
         }}
       >
-        <div style={{ textAlign: 'center', marginBottom: '28px' }}>
-          <img
-            src="/logo-rg.png"
-            alt="RG Ambiental"
-            style={{
-              width: '180px',
-              height: 'auto',
-              marginBottom: '14px',
-            }}
-          />
+        <h1
+          style={{
+            marginTop: 0,
+            marginBottom: 8,
+            textAlign: "center",
+            color: "#0f172a",
+            fontSize: 36,
+            fontWeight: 800,
+          }}
+        >
+          Login
+        </h1>
 
-          <h1
-            style={{
-              margin: 0,
-              fontSize: '28px',
-              color: '#0f172a',
-            }}
-          >
-            Login
-          </h1>
-
-          <p
-            style={{
-              margin: '8px 0 0',
-              color: '#64748b',
-              fontSize: '14px',
-            }}
-          >
-            Acesse o sistema da RG Ambiental
-          </p>
-        </div>
+        <p
+          style={{
+            textAlign: "center",
+            color: "#64748b",
+            marginTop: 0,
+            marginBottom: 24,
+          }}
+        >
+          Acesse o sistema da RG Ambiental
+        </p>
 
         <form onSubmit={handleLogin}>
-          <div style={{ marginBottom: '16px' }}>
+          <div style={{ marginBottom: 16 }}>
             <label
               style={{
-                display: 'block',
-                marginBottom: '8px',
-                fontSize: '14px',
-                fontWeight: 600,
-                color: '#334155',
+                display: "block",
+                marginBottom: 8,
+                fontWeight: 700,
+                color: "#0f172a",
               }}
             >
               E-mail
             </label>
-
             <input
               type="email"
-              placeholder="Digite seu e-mail"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              style={inputStyle}
+              style={{
+                width: "100%",
+                height: 46,
+                borderRadius: 12,
+                border: "1px solid #cbd5e1",
+                padding: "0 14px",
+                boxSizing: "border-box",
+                fontSize: 15,
+              }}
             />
           </div>
 
-          <div style={{ marginBottom: '22px' }}>
+          <div style={{ marginBottom: 20 }}>
             <label
               style={{
-                display: 'block',
-                marginBottom: '8px',
-                fontSize: '14px',
-                fontWeight: 600,
-                color: '#334155',
+                display: "block",
+                marginBottom: 8,
+                fontWeight: 700,
+                color: "#0f172a",
               }}
             >
               Senha
             </label>
-
             <input
               type="password"
-              placeholder="Digite sua senha"
               value={senha}
               onChange={(e) => setSenha(e.target.value)}
-              style={inputStyle}
+              style={{
+                width: "100%",
+                height: 46,
+                borderRadius: 12,
+                border: "1px solid #cbd5e1",
+                padding: "0 14px",
+                boxSizing: "border-box",
+                fontSize: 15,
+              }}
             />
           </div>
+
+          {erro ? (
+            <div
+              style={{
+                marginBottom: 16,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "#fef2f2",
+                color: "#991b1b",
+                border: "1px solid #fecaca",
+                fontSize: 14,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {erro}
+            </div>
+          ) : null}
 
           <button
             type="submit"
             disabled={carregando}
             style={{
-              width: '100%',
-              padding: '12px 16px',
-              border: 'none',
-              borderRadius: '10px',
-              background: '#16a34a',
-              color: '#ffffff',
-              fontWeight: 700,
-              fontSize: '15px',
-              cursor: 'pointer',
+              width: "100%",
+              height: 48,
+              border: "none",
+              borderRadius: 12,
+              background: "#16a34a",
+              color: "#ffffff",
+              fontSize: 16,
+              fontWeight: 800,
+              cursor: "pointer",
             }}
           >
-            {carregando ? 'Entrando...' : 'Entrar'}
+            {carregando ? "Entrando..." : "Entrar"}
           </button>
         </form>
       </div>
     </div>
-  )
+  );
 }
-
-const inputStyle = {
-  width: '100%',
-  padding: '12px 14px',
-  border: '1px solid #cbd5e1',
-  borderRadius: '10px',
-  fontSize: '14px',
-  outline: 'none',
-  boxSizing: 'border-box' as const,
-  backgroundColor: '#ffffff',
-}
-
-export default Login
