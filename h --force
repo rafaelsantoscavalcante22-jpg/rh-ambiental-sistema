@@ -1,0 +1,9 @@
+[33mff67a9c[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Corrige vercel.json
+[33m1189842[m Corrige rotas Vercel
+[33me450273[m Corrige layout da página de usuários
+[33m032f9c5[m remover login por codigo e simplificar tela
+[33m69b1174[m restaurar layout original login com logo e opcoes
+[33mac4d9b8[m ajuste final login safari
+[33mcc2e062[m corrigir login otp e senha
+[33m6429c65[m corrigir login por senha
+[33m697d8ea[m deploy inicial
