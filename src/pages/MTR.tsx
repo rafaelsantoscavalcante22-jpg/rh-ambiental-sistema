@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import jsPDF from 'jspdf'
 import MainLayout from '../layouts/MainLayout'
 import { supabase } from '../lib/supabase'
 
@@ -88,7 +89,7 @@ const estadoInicialFormulario = {
   status: 'Rascunho',
 }
 
-function MTR() {
+function MTRPage() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [mtrs, setMtrs] = useState<MTR[]>([])
   const [busca, setBusca] = useState('')
@@ -131,11 +132,91 @@ function MTR() {
   function formatarDataBr(dataIso: string) {
     if (!dataIso) return ''
 
-    const partes = dataIso.split('-')
+    const limpa = dataIso.includes('T') ? dataIso.split('T')[0] : dataIso
+    const partes = limpa.split('-')
     if (partes.length !== 3) return dataIso
 
     const [ano, mes, dia] = partes
     return `${dia}/${mes}/${ano}`
+  }
+
+  function gerarPDF(mtr: MTR) {
+    const doc = new jsPDF()
+    let y = 12
+
+    function linhaRotulo(rotulo: string, valor?: string, espacamento = 7) {
+      const texto = `${rotulo}: ${valor?.trim() ? valor : '-'}`
+      const linhas = doc.splitTextToSize(texto, 185)
+      doc.text(linhas, 10, y)
+      y += linhas.length * 5 + (espacamento - 5)
+    }
+
+    function tituloSecao(titulo: string) {
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(12)
+      doc.text(titulo, 10, y)
+      y += 6
+
+      doc.setDrawColor(200, 200, 200)
+      doc.line(10, y, 200, y)
+      y += 6
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+    }
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(16)
+    doc.text('MANIFESTO DE TRANSPORTE DE RESÍDUOS', 10, y)
+    y += 8
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    linhaRotulo('Status', mtr.status)
+    linhaRotulo('Data da coleta', formatarDataBr(mtr.data_coleta))
+
+    tituloSecao('DADOS DO GERADOR')
+    linhaRotulo('Nome fantasia', mtr.nome_cliente)
+    linhaRotulo('Razão social', mtr.razao_social)
+    linhaRotulo('CNPJ', mtr.cnpj)
+    linhaRotulo('CEP', mtr.cep)
+    linhaRotulo('Endereço', `${mtr.rua || ''}, ${mtr.numero || ''}`)
+    linhaRotulo('Complemento', mtr.complemento)
+    linhaRotulo('Bairro', mtr.bairro)
+    linhaRotulo('Cidade / Estado', `${mtr.cidade || ''} - ${mtr.estado || ''}`)
+    linhaRotulo('Responsável', mtr.responsavel_nome)
+    linhaRotulo('Telefone', mtr.responsavel_telefone)
+    linhaRotulo('E-mail', mtr.responsavel_email)
+
+    tituloSecao('DADOS DO RESÍDUO')
+    linhaRotulo('Tipo de resíduo', mtr.tipo_residuo)
+    linhaRotulo('Classe do resíduo', mtr.classe_residuo)
+    linhaRotulo('Quantidade', `${mtr.quantidade || ''} ${mtr.unidade_medida || ''}`)
+    linhaRotulo('Acondicionamento', mtr.acondicionamento)
+
+    tituloSecao('DADOS OPERACIONAIS')
+    linhaRotulo('Transportador', mtr.transportador)
+    linhaRotulo('Motorista', mtr.motorista)
+    linhaRotulo('Veículo', mtr.veiculo)
+    linhaRotulo('Destino final', mtr.destino_final)
+
+    tituloSecao('DADOS AMBIENTAIS')
+    linhaRotulo('Número da licença', mtr.numero_licenca)
+    linhaRotulo('Validade da licença', formatarDataBr(mtr.validade_licenca || ''))
+    linhaRotulo('Observações', mtr.observacoes, 10)
+
+    y += 10
+    doc.setFont('helvetica', 'normal')
+    doc.text('__________________________________________', 10, y)
+    y += 6
+    doc.text('Assinatura / conferência', 10, y)
+
+    const nomeArquivoBase = (mtr.nome_cliente || 'MTR')
+      .replace(/[^\w\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '_')
+
+    doc.save(`MTR_${nomeArquivoBase || 'documento'}.pdf`)
   }
 
   async function buscarClientes() {
@@ -155,7 +236,7 @@ function MTR() {
       return
     }
 
-    setClientes(data || [])
+    setClientes((data || []) as Cliente[])
   }
 
   async function buscarMtrs() {
@@ -174,7 +255,7 @@ function MTR() {
       return
     }
 
-    setMtrs(data || [])
+    setMtrs((data || []) as MTR[])
   }
 
   function atualizarCampo(
@@ -296,7 +377,7 @@ function MTR() {
     return true
   }
 
-  async function adicionarOuAtualizarMtr() {
+  async function salvarMtr(gerarPdfAposSalvar = false) {
     if (!validarFormulario()) return
 
     setSalvando(true)
@@ -332,6 +413,8 @@ function MTR() {
       status: form.status.trim(),
     }
 
+    let mtrParaPdf: MTR | null = null
+
     if (editandoId) {
       const { error } = await supabase
         .from('mtrs')
@@ -346,10 +429,19 @@ function MTR() {
         return
       }
 
+      mtrParaPdf = {
+        id: editandoId,
+        ...payload,
+      } as MTR
+
       setMensagem('MTR atualizada com sucesso.')
       setEditandoId(null)
     } else {
-      const { error } = await supabase.from('mtrs').insert([payload])
+      const { data, error } = await supabase
+        .from('mtrs')
+        .insert([payload])
+        .select()
+        .single()
 
       setSalvando(false)
 
@@ -359,15 +451,21 @@ function MTR() {
         return
       }
 
+      mtrParaPdf = data as MTR
       setMensagem('MTR criada com sucesso.')
+    }
+
+    await buscarMtrs()
+
+    if (gerarPdfAposSalvar && mtrParaPdf) {
+      gerarPDF(mtrParaPdf)
     }
 
     setForm(estadoInicialFormulario)
     setFormularioAberto(false)
-    buscarMtrs()
   }
 
-  function editarMtr(mtr: any) {
+  function editarMtr(mtr: MTR) {
     setForm({
       cliente_id: mtr.cliente_id || '',
       nome_cliente: mtr.nome_cliente || '',
@@ -588,6 +686,13 @@ function MTR() {
                     <td style={tdStyle}>{mtr.status}</td>
                     <td style={tdStyle}>
                       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          onClick={() => gerarPDF(mtr)}
+                          style={pdfButtonStyle}
+                        >
+                          PDF
+                        </button>
+
                         <button
                           onClick={() => editarMtr(mtr)}
                           style={editButtonStyle}
@@ -874,7 +979,7 @@ function MTR() {
                 placeholder="Observações"
                 value={form.observacoes}
                 onChange={atualizarCampo}
-                style={{ ...inputStyle, minHeight: '90px', resize: 'vertical' as const }}
+                style={{ ...inputStyle, minHeight: '90px', resize: 'vertical' }}
               />
             </div>
 
@@ -887,15 +992,23 @@ function MTR() {
               }}
             >
               <button
-                onClick={adicionarOuAtualizarMtr}
+                onClick={() => salvarMtr(false)}
                 disabled={salvando}
                 style={primaryButtonStyle}
               >
                 {salvando
                   ? 'Salvando...'
                   : editandoId
-                    ? 'Salvar edição'
-                    : 'Adicionar MTR'}
+                  ? 'Salvar edição'
+                  : 'Adicionar MTR'}
+              </button>
+
+              <button
+                onClick={() => salvarMtr(true)}
+                disabled={salvando}
+                style={pdfButtonStyle}
+              >
+                {salvando ? 'Salvando...' : 'Salvar e gerar PDF'}
               </button>
 
               <button onClick={cancelarEdicao} style={secondaryButtonStyle}>
@@ -913,7 +1026,7 @@ function MTR() {
   )
 }
 
-const sectionTitleStyle = {
+const sectionTitleStyle: React.CSSProperties = {
   marginTop: '20px',
   marginBottom: '12px',
   fontSize: '16px',
@@ -921,30 +1034,30 @@ const sectionTitleStyle = {
   color: '#334155',
 }
 
-const grid4Style = {
+const grid4Style: React.CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
   gap: '12px',
 }
 
-const grid3Style = {
+const grid3Style: React.CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
   gap: '12px',
 }
 
-const inputStyle = {
+const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 12px',
   border: '1px solid #d0d7de',
   borderRadius: '8px',
   fontSize: '14px',
   outline: 'none',
-  boxSizing: 'border-box' as const,
+  boxSizing: 'border-box',
   backgroundColor: '#fff',
 }
 
-const primaryButtonStyle = {
+const primaryButtonStyle: React.CSSProperties = {
   backgroundColor: '#2563eb',
   color: '#fff',
   border: 'none',
@@ -954,7 +1067,7 @@ const primaryButtonStyle = {
   fontWeight: 'bold',
 }
 
-const secondaryButtonStyle = {
+const secondaryButtonStyle: React.CSSProperties = {
   backgroundColor: '#e5e7eb',
   color: '#111827',
   border: 'none',
@@ -964,7 +1077,17 @@ const secondaryButtonStyle = {
   fontWeight: 'bold',
 }
 
-const editButtonStyle = {
+const pdfButtonStyle: React.CSSProperties = {
+  backgroundColor: '#7c3aed',
+  color: '#fff',
+  border: 'none',
+  padding: '10px 14px',
+  borderRadius: '8px',
+  cursor: 'pointer',
+  fontWeight: 'bold',
+}
+
+const editButtonStyle: React.CSSProperties = {
   backgroundColor: '#16a34a',
   color: '#fff',
   border: 'none',
@@ -973,7 +1096,7 @@ const editButtonStyle = {
   cursor: 'pointer',
 }
 
-const deleteButtonStyle = {
+const deleteButtonStyle: React.CSSProperties = {
   backgroundColor: '#dc2626',
   color: '#fff',
   border: 'none',
@@ -982,16 +1105,16 @@ const deleteButtonStyle = {
   cursor: 'pointer',
 }
 
-const thStyle = {
-  textAlign: 'left' as const,
+const thStyle: React.CSSProperties = {
+  textAlign: 'left',
   padding: '12px',
   borderBottom: '1px solid #ddd',
   fontSize: '14px',
 }
 
-const tdStyle = {
+const tdStyle: React.CSSProperties = {
   padding: '12px',
   fontSize: '14px',
 }
 
-export default MTR
+export default MTRPage

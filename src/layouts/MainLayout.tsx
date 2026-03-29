@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
 type MainLayoutProps = {
@@ -12,6 +12,7 @@ type Notificacao = {
   descricao: string
   horario: string
   lida: boolean
+  tipo?: 'financeiro' | 'sistema'
 }
 
 type ThemeMode = 'light' | 'dark'
@@ -24,6 +25,16 @@ type UsuarioPerfil = {
   status: string
 }
 
+type ColetaFinanceiraResumo = {
+  id: string
+  numero: string
+  cliente: string
+  status: string
+  status_pagamento: string | null
+  data_vencimento: string | null
+  valor_coleta: number | null
+}
+
 function MainLayout({ children }: MainLayoutProps) {
   const location = useLocation()
 
@@ -32,16 +43,19 @@ function MainLayout({ children }: MainLayoutProps) {
   const [tema, setTema] = useState<ThemeMode>('light')
   const [usuario, setUsuario] = useState<UsuarioPerfil | null>(null)
   const [carregandoUsuario, setCarregandoUsuario] = useState(true)
+  const [quantidadeFinanceiroVencido, setQuantidadeFinanceiroVencido] = useState(0)
+  const [notificacoesFinanceiras, setNotificacoesFinanceiras] = useState<Notificacao[]>([])
 
   const notificacoesRef = useRef<HTMLDivElement | null>(null)
 
-  const [notificacoes, setNotificacoes] = useState<Notificacao[]>([
+  const [notificacoesSistema, setNotificacoesSistema] = useState<Notificacao[]>([
     {
       id: 1,
       titulo: 'Nova coleta registrada',
       descricao: 'Uma nova coleta foi cadastrada no sistema.',
       horario: 'Hoje, 09:15',
       lida: false,
+      tipo: 'sistema',
     },
     {
       id: 2,
@@ -49,6 +63,7 @@ function MainLayout({ children }: MainLayoutProps) {
       descricao: 'Os dados de um cliente foram alterados.',
       horario: 'Hoje, 10:40',
       lida: false,
+      tipo: 'sistema',
     },
     {
       id: 3,
@@ -56,6 +71,7 @@ function MainLayout({ children }: MainLayoutProps) {
       descricao: 'Sistema operando normalmente sem alertas.',
       horario: 'Hoje, 11:05',
       lida: true,
+      tipo: 'sistema',
     },
   ])
 
@@ -141,6 +157,85 @@ function MainLayout({ children }: MainLayoutProps) {
   }, [])
 
   useEffect(() => {
+    async function carregarAlertasFinanceiros() {
+      const { data, error } = await supabase
+        .from('coletas')
+        .select('id, numero, cliente, status, status_pagamento, data_vencimento, valor_coleta')
+
+      if (error) {
+        console.error('Erro ao carregar alertas financeiros:', error.message)
+        setQuantidadeFinanceiroVencido(0)
+        setNotificacoesFinanceiras([])
+        return
+      }
+
+      const hoje = new Date()
+      hoje.setHours(0, 0, 0, 0)
+
+      const registros = ((data as ColetaFinanceiraResumo[]) || []).filter((item) => {
+        const statusOperacional = String(item.status || '').toLowerCase()
+        return statusOperacional.includes('final')
+      })
+
+      const contasAbertas = registros.filter((item) => {
+        const pagamento = item.status_pagamento || 'Pendente'
+        return pagamento !== 'Pago' && pagamento !== 'Cancelado' && !!item.data_vencimento
+      })
+
+      const vencidas = contasAbertas.filter((item) => {
+        const vencimento = new Date(item.data_vencimento as string)
+        vencimento.setHours(0, 0, 0, 0)
+        return vencimento < hoje
+      })
+
+      const vencemHoje = contasAbertas.filter((item) => {
+        const vencimento = new Date(item.data_vencimento as string)
+        vencimento.setHours(0, 0, 0, 0)
+        return vencimento.getTime() === hoje.getTime()
+      })
+
+      setQuantidadeFinanceiroVencido(vencidas.length)
+
+      const novasNotificacoes: Notificacao[] = []
+
+      if (vencidas.length > 0) {
+        novasNotificacoes.push({
+          id: 1001,
+          titulo: 'Contas vencidas no financeiro',
+          descricao: `${vencidas.length} cobrança(s) vencida(s) aguardando ação.`,
+          horario: 'Agora',
+          lida: false,
+          tipo: 'financeiro',
+        })
+      }
+
+      if (vencemHoje.length > 0) {
+        novasNotificacoes.push({
+          id: 1002,
+          titulo: 'Cobranças vencem hoje',
+          descricao: `${vencemHoje.length} cobrança(s) vencem hoje no financeiro.`,
+          horario: 'Agora',
+          lida: false,
+          tipo: 'financeiro',
+        })
+      }
+
+      const topVencidas = vencidas.slice(0, 3).map((item, index) => ({
+        id: 1100 + index,
+        titulo: `Conta vencida: ${item.numero || 'Sem número'}`,
+        descricao: `${item.cliente || 'Cliente não informado'} • ${formatarMoeda(item.valor_coleta)} • vencimento ${formatarData(item.data_vencimento)}`,
+        horario: 'Financeiro',
+        lida: false,
+        tipo: 'financeiro' as const,
+      }))
+
+      setNotificacoesFinanceiras([...novasNotificacoes, ...topVencidas])
+    }
+
+    carregarAlertasFinanceiros()
+  }, [location.pathname])
+
+  useEffect(() => {
     function handleClickFora(event: MouseEvent) {
       if (
         notificacoesRef.current &&
@@ -162,7 +257,14 @@ function MainLayout({ children }: MainLayoutProps) {
   }
 
   function marcarTodasComoLidas() {
-    setNotificacoes((prev) =>
+    setNotificacoesSistema((prev) =>
+      prev.map((notificacao) => ({
+        ...notificacao,
+        lida: true,
+      }))
+    )
+
+    setNotificacoesFinanceiras((prev) =>
       prev.map((notificacao) => ({
         ...notificacao,
         lida: true,
@@ -171,7 +273,13 @@ function MainLayout({ children }: MainLayoutProps) {
   }
 
   function marcarComoLida(id: number) {
-    setNotificacoes((prev) =>
+    setNotificacoesSistema((prev) =>
+      prev.map((notificacao) =>
+        notificacao.id === id ? { ...notificacao, lida: true } : notificacao
+      )
+    )
+
+    setNotificacoesFinanceiras((prev) =>
       prev.map((notificacao) =>
         notificacao.id === id ? { ...notificacao, lida: true } : notificacao
       )
@@ -202,6 +310,21 @@ function MainLayout({ children }: MainLayoutProps) {
     if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase()
 
     return `${partes[0][0]}${partes[1][0]}`.toUpperCase()
+  }
+
+  function formatarData(data?: string | null) {
+    if (!data) return '-'
+    const limpa = data.includes('T') ? data.split('T')[0] : data
+    const partes = limpa.split('-')
+    if (partes.length !== 3) return data
+    return `${partes[2]}/${partes[1]}/${partes[0]}`
+  }
+
+  function formatarMoeda(valor?: number | null) {
+    return Number(valor || 0).toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+    })
   }
 
   const cargoUsuario = carregandoUsuario ? 'Carregando perfil...' : usuario?.cargo || 'Usuário'
@@ -237,6 +360,11 @@ function MainLayout({ children }: MainLayoutProps) {
 
     return false
   })
+
+  const notificacoes = useMemo(
+    () => [...notificacoesFinanceiras, ...notificacoesSistema],
+    [notificacoesFinanceiras, notificacoesSistema]
+  )
 
   const notificacoesNaoLidas = notificacoes.filter((n) => !n.lida).length
   const isDark = tema === 'dark'
@@ -307,6 +435,8 @@ function MainLayout({ children }: MainLayoutProps) {
         <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {menuItems.map((item) => {
             const isActive = location.pathname === item.path
+            const mostrarBadgeFinanceiro =
+              item.name === 'Financeiro' && quantidadeFinanceiroVencido > 0
 
             return (
               <Link
@@ -320,9 +450,36 @@ function MainLayout({ children }: MainLayoutProps) {
                   background: isActive ? cores.menuActiveBg : 'transparent',
                   fontWeight: isActive ? '600' : '400',
                   transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '10px',
                 }}
               >
-                {item.name}
+                <span>{item.name}</span>
+
+                {mostrarBadgeFinanceiro && (
+                  <span
+                    style={{
+                      minWidth: '22px',
+                      height: '22px',
+                      padding: '0 7px',
+                      borderRadius: '999px',
+                      background: '#dc2626',
+                      color: '#ffffff',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {quantidadeFinanceiroVencido > 99
+                      ? '99+'
+                      : quantidadeFinanceiroVencido}
+                  </span>
+                )}
               </Link>
             )
           })}
@@ -423,7 +580,8 @@ function MainLayout({ children }: MainLayoutProps) {
                       height: '20px',
                       padding: '0 6px',
                       borderRadius: '999px',
-                      background: '#16a34a',
+                      background:
+                        notificacoesFinanceiras.some((n) => !n.lida) ? '#dc2626' : '#16a34a',
                       color: '#fff',
                       fontSize: '11px',
                       fontWeight: '700',
@@ -443,7 +601,7 @@ function MainLayout({ children }: MainLayoutProps) {
                     position: 'absolute',
                     top: '52px',
                     right: '0',
-                    width: '360px',
+                    width: '380px',
                     background: cores.notificationPanelBg,
                     border: `1px solid ${cores.cardBorder}`,
                     borderRadius: '14px',
@@ -497,7 +655,7 @@ function MainLayout({ children }: MainLayoutProps) {
                     </button>
                   </div>
 
-                  <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                  <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
                     {notificacoes.length === 0 ? (
                       <div
                         style={{
@@ -510,78 +668,107 @@ function MainLayout({ children }: MainLayoutProps) {
                         Nenhuma notificação no momento.
                       </div>
                     ) : (
-                      notificacoes.map((notificacao) => (
-                        <button
-                          key={notificacao.id}
-                          onClick={() => marcarComoLida(notificacao.id)}
-                          style={{
-                            width: '100%',
-                            textAlign: 'left',
-                            background: notificacao.lida
-                              ? cores.notificationItemRead
-                              : cores.notificationItemUnread,
-                            border: 'none',
-                            borderBottom: `1px solid ${cores.separator}`,
-                            padding: '14px 16px',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <div
+                      notificacoes.map((notificacao) => {
+                        const ehFinanceiro = notificacao.tipo === 'financeiro'
+
+                        return (
+                          <button
+                            key={notificacao.id}
+                            onClick={() => marcarComoLida(notificacao.id)}
                             style={{
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              justifyContent: 'space-between',
-                              gap: '10px',
+                              width: '100%',
+                              textAlign: 'left',
+                              background: notificacao.lida
+                                ? cores.notificationItemRead
+                                : ehFinanceiro
+                                ? (isDark ? '#3f0d0d' : '#fef2f2')
+                                : cores.notificationItemUnread,
+                              border: 'none',
+                              borderBottom: `1px solid ${cores.separator}`,
+                              padding: '14px 16px',
+                              cursor: 'pointer',
                             }}
                           >
-                            <div>
-                              <div
-                                style={{
-                                  fontSize: '14px',
-                                  fontWeight: '700',
-                                  color: cores.notificationTitle,
-                                  marginBottom: '4px',
-                                }}
-                              >
-                                {notificacao.titulo}
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                justifyContent: 'space-between',
+                                gap: '10px',
+                              }}
+                            >
+                              <div>
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    marginBottom: '4px',
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: '14px',
+                                      fontWeight: '700',
+                                      color: cores.notificationTitle,
+                                    }}
+                                  >
+                                    {notificacao.titulo}
+                                  </div>
+
+                                  {ehFinanceiro && (
+                                    <span
+                                      style={{
+                                        background: '#dc2626',
+                                        color: '#fff',
+                                        padding: '2px 8px',
+                                        borderRadius: '999px',
+                                        fontSize: '10px',
+                                        fontWeight: '700',
+                                      }}
+                                    >
+                                      Financeiro
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div
+                                  style={{
+                                    fontSize: '13px',
+                                    color: cores.notificationText,
+                                    lineHeight: '1.4',
+                                  }}
+                                >
+                                  {notificacao.descricao}
+                                </div>
+
+                                <div
+                                  style={{
+                                    fontSize: '12px',
+                                    color: cores.notificationMuted,
+                                    marginTop: '8px',
+                                  }}
+                                >
+                                  {notificacao.horario}
+                                </div>
                               </div>
 
-                              <div
-                                style={{
-                                  fontSize: '13px',
-                                  color: cores.notificationText,
-                                  lineHeight: '1.4',
-                                }}
-                              >
-                                {notificacao.descricao}
-                              </div>
-
-                              <div
-                                style={{
-                                  fontSize: '12px',
-                                  color: cores.notificationMuted,
-                                  marginTop: '8px',
-                                }}
-                              >
-                                {notificacao.horario}
-                              </div>
+                              {!notificacao.lida && (
+                                <span
+                                  style={{
+                                    width: '10px',
+                                    height: '10px',
+                                    borderRadius: '999px',
+                                    background: ehFinanceiro ? '#dc2626' : '#16a34a',
+                                    marginTop: '4px',
+                                    flexShrink: 0,
+                                  }}
+                                />
+                              )}
                             </div>
-
-                            {!notificacao.lida && (
-                              <span
-                                style={{
-                                  width: '10px',
-                                  height: '10px',
-                                  borderRadius: '999px',
-                                  background: '#16a34a',
-                                  marginTop: '4px',
-                                  flexShrink: 0,
-                                }}
-                              />
-                            )}
-                          </div>
-                        </button>
-                      ))
+                          </button>
+                        )
+                      })
                     )}
                   </div>
                 </div>
