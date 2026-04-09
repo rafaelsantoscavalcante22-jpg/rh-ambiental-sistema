@@ -230,7 +230,8 @@ export default function Clientes() {
   }, [fetchClientes]);
 
   useEffect(() => {
-    setPage(1);
+    const id = window.setTimeout(() => setPage(1), 0);
+    return () => window.clearTimeout(id);
   }, [buscaDebounced, pageSize]);
 
   function handleInputChange(
@@ -451,7 +452,9 @@ export default function Clientes() {
     totalCount != null && totalCount > 0 ? Math.max(1, Math.ceil(totalCount / pageSize)) : 1;
 
   useEffect(() => {
-    if (page > totalPaginas) setPage(totalPaginas);
+    if (page <= totalPaginas) return;
+    const id = window.setTimeout(() => setPage(totalPaginas), 0);
+    return () => window.clearTimeout(id);
   }, [page, totalPaginas]);
 
   return (

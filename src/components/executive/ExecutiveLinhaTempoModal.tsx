@@ -99,7 +99,9 @@ export function ExecutiveLinhaTempoModal({ open, onClose, coletas, periodoLabel 
   }, [])
 
   useEffect(() => {
-    if (open) resetLocal()
+    if (!open) return
+    const id = window.setTimeout(() => resetLocal(), 0)
+    return () => window.clearTimeout(id)
   }, [open, resetLocal])
 
   useEffect(() => {
@@ -169,14 +171,17 @@ export function ExecutiveLinhaTempoModal({ open, onClose, coletas, periodoLabel 
   }, [filtradas])
 
   useEffect(() => {
-    if (!open || etapasParaColunas.length === 0) {
-      setEtapaColuna(null)
-      return
-    }
-    setEtapaColuna((prev) => {
-      if (prev && etapasParaColunas.some((x) => x.etapa === prev)) return prev
-      return etapasParaColunas[0]!.etapa
-    })
+    const id = window.setTimeout(() => {
+      if (!open || etapasParaColunas.length === 0) {
+        setEtapaColuna(null)
+        return
+      }
+      setEtapaColuna((prev) => {
+        if (prev && etapasParaColunas.some((x) => x.etapa === prev)) return prev
+        return etapasParaColunas[0]!.etapa
+      })
+    }, 0)
+    return () => window.clearTimeout(id)
   }, [open, etapasParaColunas])
 
   if (!open) return null
