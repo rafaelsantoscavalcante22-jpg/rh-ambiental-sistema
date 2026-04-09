@@ -1,847 +1,1283 @@
-import { useEffect, useMemo, useState } from 'react'
-import MainLayout from '../layouts/MainLayout'
-import { supabase } from '../lib/supabase'
+import { useCallback, useEffect, useState } from "react";
+import type { PostgrestError } from "@supabase/supabase-js";
+import { supabase } from "../lib/supabase";
+import MainLayout from "../layouts/MainLayout";
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from "../lib/coletasQueryLimits";
+import { sanitizeIlikePattern } from "../lib/sanitizeIlike";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 
 type Cliente = {
-  id: string
-  nome: string
-  razao_social: string
-  cnpj: string
-  cep: string
-  rua: string
-  numero: string
-  complemento: string
-  bairro: string
-  cidade: string
-  estado: string
-  responsavel_nome: string
-  responsavel_telefone: string
-  responsavel_email: string
-  tipo_residuo: string
-  classe_residuo: string
-  unidade_medida: string
-  frequencia_coleta: string
-  numero_licenca: string
-  validade_licenca: string
-  status: string
-  empresa: string
+  id: string;
+  nome: string;
+  razao_social: string;
+  cnpj: string;
+  status: string | null;
+
+  cep: string | null;
+  rua: string | null;
+  numero: string | null;
+  complemento: string | null;
+  bairro: string | null;
+  cidade: string | null;
+  estado: string | null;
+
+  responsavel_nome: string | null;
+  telefone: string | null;
+  email: string | null;
+
+  tipo_residuo: string | null;
+  classificacao: string | null;
+  unidade_medida: string | null;
+  frequencia_coleta: string | null;
+
+  licenca_numero: string | null;
+  validade: string | null;
+};
+
+type ResiduoForm = {
+  tipo_residuo: string;
+  classificacao: string;
+  unidade_medida: string;
+  frequencia_coleta: string;
+};
+
+type FormCliente = {
+  nome: string;
+  razao_social: string;
+  cnpj: string;
+  status: string;
+
+  cep: string;
+  rua: string;
+  numero: string;
+  complemento: string;
+  bairro: string;
+  cidade: string;
+  estado: string;
+
+  responsavel_nome: string;
+  telefone: string;
+  email: string;
+
+  licenca_numero: string;
+  validade: string;
+
+  residuos: ResiduoForm[];
+};
+
+const residuoInicial: ResiduoForm = {
+  tipo_residuo: "",
+  classificacao: "",
+  unidade_medida: "",
+  frequencia_coleta: "",
+};
+
+const formInicial: FormCliente = {
+  nome: "",
+  razao_social: "",
+  cnpj: "",
+  status: "Ativo",
+
+  cep: "",
+  rua: "",
+  numero: "",
+  complemento: "",
+  bairro: "",
+  cidade: "",
+  estado: "",
+
+  responsavel_nome: "",
+  telefone: "",
+  email: "",
+
+  licenca_numero: "",
+  validade: "",
+
+  residuos: [{ ...residuoInicial }],
+};
+
+function limparOuNull(valor: string) {
+  const texto = valor.trim();
+  return texto === "" ? null : texto;
 }
 
-const estadoInicialFormulario = {
-  nome: '',
-  razao_social: '',
-  cnpj: '',
-  cep: '',
-  rua: '',
-  numero: '',
-  complemento: '',
-  bairro: '',
-  cidade: '',
-  estado: '',
-  responsavel_nome: '',
-  responsavel_telefone: '',
-  responsavel_email: '',
-  tipo_residuo: '',
-  classe_residuo: '',
-  unidade_medida: '',
-  frequencia_coleta: '',
-  numero_licenca: '',
-  validade_licenca: '',
-  status: 'Ativo',
+function formatarData(data?: string | null) {
+  if (!data) return "-";
+  const limpa = data.includes("T") ? data.split("T")[0] : data;
+  const partes = limpa.split("-");
+  if (partes.length !== 3) return data;
+  return `${partes[2]}/${partes[1]}/${partes[0]}`;
 }
 
-function Clientes() {
-  const [form, setForm] = useState(estadoInicialFormulario)
-  const [busca, setBusca] = useState('')
-  const [clientes, setClientes] = useState<Cliente[]>([])
-  const [editandoId, setEditandoId] = useState<string | null>(null)
-  const [carregando, setCarregando] = useState(false)
-  const [salvando, setSalvando] = useState(false)
-  const [buscandoCep, setBuscandoCep] = useState(false)
-  const [mensagem, setMensagem] = useState('')
-  const [formularioAberto, setFormularioAberto] = useState(false)
+function formatarCNPJ(valor: string) {
+  const digitos = valor.replace(/\D/g, "").slice(0, 14);
 
-  function somenteNumeros(valor: string) {
-    return valor.replace(/\D/g, '')
+  if (digitos.length <= 2) return digitos;
+  if (digitos.length <= 5) return digitos.replace(/^(\d{2})(\d+)/, "$1.$2");
+  if (digitos.length <= 8) return digitos.replace(/^(\d{2})(\d{3})(\d+)/, "$1.$2.$3");
+  if (digitos.length <= 12) {
+    return digitos.replace(/^(\d{2})(\d{3})(\d{3})(\d+)/, "$1.$2.$3/$4");
   }
 
-  function aplicarMascaraCnpj(valor: string) {
-    const numeros = somenteNumeros(valor).slice(0, 14)
+  return digitos.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d+)/, "$1.$2.$3/$4-$5");
+}
 
-    return numeros
-      .replace(/^(\d{2})(\d)/, '$1.$2')
-      .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
-      .replace(/\.(\d{3})(\d)/, '.$1/$2')
-      .replace(/(\d{4})(\d)/, '$1-$2')
-  }
+function dividirLista(valor?: string | null) {
+  if (!valor) return [];
+  return valor
+    .split(" | ")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
-  function aplicarMascaraTelefone(valor: string) {
-    const numeros = somenteNumeros(valor).slice(0, 11)
+function serializarResiduos(residuos: ResiduoForm[]) {
+  return {
+    tipo_residuo: residuos
+      .map((item) => item.tipo_residuo.trim())
+      .filter(Boolean)
+      .join(" | "),
+    classificacao: residuos
+      .map((item) => item.classificacao.trim())
+      .filter(Boolean)
+      .join(" | "),
+    unidade_medida: residuos
+      .map((item) => item.unidade_medida.trim())
+      .filter(Boolean)
+      .join(" | "),
+    frequencia_coleta: residuos
+      .map((item) => item.frequencia_coleta.trim())
+      .filter(Boolean)
+      .join(" | "),
+  };
+}
 
-    if (numeros.length <= 10) {
-      return numeros
-        .replace(/^(\d{2})(\d)/, '($1) $2')
-        .replace(/(\d{4})(\d)/, '$1-$2')
+function montarResiduosDoCliente(cliente: Cliente): ResiduoForm[] {
+  const tipos = dividirLista(cliente.tipo_residuo);
+  const classes = dividirLista(cliente.classificacao);
+  const unidades = dividirLista(cliente.unidade_medida);
+  const frequencias = dividirLista(cliente.frequencia_coleta);
+
+  const total = Math.max(tipos.length, classes.length, unidades.length, frequencias.length, 1);
+
+  return Array.from({ length: total }).map((_, index) => ({
+    tipo_residuo: tipos[index] || "",
+    classificacao: classes[index] || "",
+    unidade_medida: unidades[index] || "",
+    frequencia_coleta: frequencias[index] || "",
+  }));
+}
+
+const CLIENTES_SELECT =
+  "id, nome, razao_social, cnpj, status, cep, rua, numero, complemento, bairro, cidade, estado, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade";
+
+export default function Clientes() {
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busca, setBusca] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+  const buscaDebounced = useDebouncedValue(busca, 400);
+  const [mostrarCadastro, setMostrarCadastro] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const [sucesso, setSucesso] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<FormCliente>(formInicial);
+
+  const fetchClientes = useCallback(async () => {
+    setLoading(true);
+
+    const term = buscaDebounced.trim();
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    let countQ = supabase.from("clientes").select("id", { count: "exact", head: true });
+    let dataQ = supabase.from("clientes").select(CLIENTES_SELECT).order("nome", { ascending: true });
+
+    if (term) {
+      const s = sanitizeIlikePattern(term);
+      const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%`;
+      countQ = countQ.or(orFilter);
+      dataQ = dataQ.or(orFilter);
     }
 
-    return numeros
-      .replace(/^(\d{2})(\d)/, '($1) $2')
-      .replace(/(\d{5})(\d)/, '$1-$2')
-  }
+    const [{ count, error: errCount }, { data, error }] = await Promise.all([
+      countQ,
+      dataQ.range(from, to),
+    ]);
 
-  function aplicarMascaraCep(valor: string) {
-    const numeros = somenteNumeros(valor).slice(0, 8)
-    return numeros.replace(/^(\d{5})(\d)/, '$1-$2')
-  }
-
-  function formatarDataBr(dataIso: string) {
-    if (!dataIso) return ''
-
-    const partes = dataIso.split('-')
-    if (partes.length !== 3) return dataIso
-
-    const [ano, mes, dia] = partes
-    return `${dia}/${mes}/${ano}`
-  }
-
-  async function buscarClientes() {
-    setCarregando(true)
-
-    const { data, error } = await supabase
-      .from('clientes')
-      .select('*')
-      .order('nome', { ascending: true })
-
-    setCarregando(false)
+    if (errCount) {
+      console.error("Erro ao contar clientes:", errCount);
+    } else {
+      setTotalCount(typeof count === "number" ? count : 0);
+    }
 
     if (error) {
-      console.error('Erro ao buscar clientes:', error.message)
-      alert('Erro ao buscar clientes: ' + error.message)
-      return
+      console.error("Erro ao buscar clientes:", error);
+      setClientes([]);
+      setLoading(false);
+      return;
     }
 
-    setClientes(data || [])
-  }
+    setClientes((data as Cliente[]) || []);
+    setLoading(false);
+  }, [page, pageSize, buscaDebounced]);
 
-  function atualizarCampo(
+  useEffect(() => {
+    queueMicrotask(() => {
+      void fetchClientes();
+    });
+  }, [fetchClientes]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [buscaDebounced, pageSize]);
+
+  function handleInputChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) {
-    const { name, value } = e.target
-
-    let valorTratado = value
-
-    if (name === 'cnpj') {
-      valorTratado = aplicarMascaraCnpj(value)
-    }
-
-    if (name === 'responsavel_telefone') {
-      valorTratado = aplicarMascaraTelefone(value)
-    }
-
-    if (name === 'cep') {
-      valorTratado = aplicarMascaraCep(value)
-    }
+    const { name, value } = e.target;
 
     setForm((prev) => ({
       ...prev,
-      [name]: valorTratado,
-    }))
+      [name]: name === "cnpj" ? formatarCNPJ(value) : value,
+    }));
   }
 
-  async function buscarEnderecoPorCep() {
-    const cepLimpo = somenteNumeros(form.cep)
+  function handleResiduoChange(
+    index: number,
+    campo: keyof ResiduoForm,
+    valor: string
+  ) {
+    setForm((prev) => {
+      const residuosAtualizados = [...prev.residuos];
+      residuosAtualizados[index] = {
+        ...residuosAtualizados[index],
+        [campo]: valor,
+      };
 
-    if (cepLimpo.length !== 8) return
+      return {
+        ...prev,
+        residuos: residuosAtualizados,
+      };
+    });
+  }
 
-    try {
-      setBuscandoCep(true)
+  function adicionarResiduo() {
+    setForm((prev) => ({
+      ...prev,
+      residuos: [...prev.residuos, { ...residuoInicial }],
+    }));
+  }
 
-      const resposta = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`)
-      const dados = await resposta.json()
-
-      setBuscandoCep(false)
-
-      if (dados.erro) {
-        alert('CEP não encontrado.')
-        return
+  function removerResiduo(index: number) {
+    setForm((prev) => {
+      if (prev.residuos.length === 1) {
+        return {
+          ...prev,
+          residuos: [{ ...residuoInicial }],
+        };
       }
 
-      setForm((prev) => ({
+      return {
         ...prev,
-        rua: dados.logradouro || prev.rua,
-        bairro: dados.bairro || prev.bairro,
-        cidade: dados.localidade || prev.cidade,
-        estado: dados.uf || prev.estado,
-        complemento: dados.complemento || prev.complemento,
-      }))
-    } catch (error) {
-      setBuscandoCep(false)
-      console.error('Erro ao buscar CEP:', error)
-      alert('Não foi possível buscar o endereço pelo CEP.')
-    }
+        residuos: prev.residuos.filter((_, i) => i !== index),
+      };
+    });
   }
 
-  function validarFormulario() {
+  function limparFormulario() {
+    setForm(formInicial);
+    setEditingId(null);
+  }
+
+  function abrirCadastroNovo() {
+    limparFormulario();
+    setMostrarCadastro(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function handleEditar(cliente: Cliente) {
+    setForm({
+      nome: cliente.nome || "",
+      razao_social: cliente.razao_social || "",
+      cnpj: cliente.cnpj || "",
+      status: cliente.status || "Ativo",
+
+      cep: cliente.cep || "",
+      rua: cliente.rua || "",
+      numero: cliente.numero || "",
+      complemento: cliente.complemento || "",
+      bairro: cliente.bairro || "",
+      cidade: cliente.cidade || "",
+      estado: cliente.estado || "",
+
+      responsavel_nome: cliente.responsavel_nome || "",
+      telefone: cliente.telefone || "",
+      email: cliente.email || "",
+
+      licenca_numero: cliente.licenca_numero || "",
+      validade: cliente.validade || "",
+
+      residuos: montarResiduosDoCliente(cliente),
+    });
+
+    setEditingId(cliente.id);
+    setMostrarCadastro(true);
+    setSucesso("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function handleSalvarCliente(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+
     if (!form.nome.trim()) {
-      alert('Preencha o nome fantasia.')
-      return false
+      alert("Preencha o nome fantasia.");
+      return;
     }
 
     if (!form.razao_social.trim()) {
-      alert('Preencha a razão social.')
-      return false
+      alert("Preencha a razão social.");
+      return;
     }
 
-    if (!form.cnpj.trim() || somenteNumeros(form.cnpj).length !== 14) {
-      alert('Preencha um CNPJ válido com 14 números.')
-      return false
+    if (!form.cnpj.trim()) {
+      alert("Preencha o CNPJ.");
+      return;
     }
 
-    const telefoneLimpo = somenteNumeros(form.responsavel_telefone)
-    if (form.responsavel_telefone.trim() && telefoneLimpo.length < 10) {
-      alert('Preencha um telefone válido do responsável.')
-      return false
+    const residuosValidos = form.residuos.filter((item) => item.tipo_residuo.trim());
+
+    if (residuosValidos.length === 0) {
+      alert("Adicione pelo menos um resíduo.");
+      return;
     }
 
-    if (
-      form.responsavel_email.trim() &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.responsavel_email.trim())
-    ) {
-      alert('Preencha um e-mail válido do responsável.')
-      return false
-    }
+    setSalvando(true);
 
-    return true
-  }
-
-  async function adicionarOuAtualizarCliente() {
-    if (!validarFormulario()) return
-
-    setSalvando(true)
+    const residuosSerializados = serializarResiduos(residuosValidos);
 
     const payload = {
       nome: form.nome.trim(),
-      empresa: form.razao_social.trim(),
       razao_social: form.razao_social.trim(),
       cnpj: form.cnpj.trim(),
-      cep: form.cep.trim(),
-      rua: form.rua.trim(),
-      numero: form.numero.trim(),
-      complemento: form.complemento.trim(),
-      bairro: form.bairro.trim(),
-      cidade: form.cidade.trim(),
-      estado: form.estado.trim(),
-      responsavel_nome: form.responsavel_nome.trim(),
-      responsavel_telefone: form.responsavel_telefone.trim(),
-      responsavel_email: form.responsavel_email.trim(),
-      tipo_residuo: form.tipo_residuo.trim(),
-      classe_residuo: form.classe_residuo.trim(),
-      unidade_medida: form.unidade_medida.trim(),
-      frequencia_coleta: form.frequencia_coleta.trim(),
-      numero_licenca: form.numero_licenca.trim(),
-      validade_licenca: form.validade_licenca,
-      status: form.status.trim(),
-    }
+      cep: limparOuNull(form.cep),
+      rua: limparOuNull(form.rua),
+      numero: limparOuNull(form.numero),
+      complemento: limparOuNull(form.complemento),
+      bairro: limparOuNull(form.bairro),
+      cidade: limparOuNull(form.cidade),
+      estado: limparOuNull(form.estado),
+      responsavel_nome: limparOuNull(form.responsavel_nome),
+      telefone: limparOuNull(form.telefone),
+      email: limparOuNull(form.email),
+      tipo_residuo: limparOuNull(residuosSerializados.tipo_residuo),
+      classificacao: limparOuNull(residuosSerializados.classificacao),
+      unidade_medida: limparOuNull(residuosSerializados.unidade_medida),
+      frequencia_coleta: limparOuNull(residuosSerializados.frequencia_coleta),
+      licenca_numero: limparOuNull(form.licenca_numero),
+      validade: limparOuNull(form.validade),
+      status: form.status?.trim() || "Ativo",
+    };
 
-    if (editandoId) {
-      const { error } = await supabase
-        .from('clientes')
+    let error: PostgrestError | null = null;
+
+    if (editingId) {
+      const response = await supabase
+        .from("clientes")
         .update(payload)
-        .eq('id', editandoId)
+        .eq("id", editingId);
 
-      setSalvando(false)
-
-      if (error) {
-        console.error('Erro ao editar cliente:', error.message)
-        alert('Erro ao editar cliente: ' + error.message)
-        return
-      }
-
-      setMensagem('Cliente atualizado com sucesso.')
-      setEditandoId(null)
+      error = response.error;
     } else {
-      const { error } = await supabase.from('clientes').insert([payload])
-
-      setSalvando(false)
-
-      if (error) {
-        console.error('Erro ao adicionar cliente:', error.message)
-        alert('Erro ao salvar cliente: ' + error.message)
-        return
-      }
-
-      setMensagem('Cliente adicionado com sucesso.')
+      const response = await supabase.from("clientes").insert([payload]);
+      error = response.error;
     }
-
-    setForm(estadoInicialFormulario)
-    setFormularioAberto(false)
-    buscarClientes()
-  }
-
-  function editarCliente(cliente: Cliente) {
-    setForm({
-      nome: cliente.nome || '',
-      razao_social: cliente.razao_social || cliente.empresa || '',
-      cnpj: aplicarMascaraCnpj(cliente.cnpj || ''),
-      cep: cliente.cep || '',
-      rua: cliente.rua || '',
-      numero: cliente.numero || '',
-      complemento: cliente.complemento || '',
-      bairro: cliente.bairro || '',
-      cidade: cliente.cidade || '',
-      estado: cliente.estado || '',
-      responsavel_nome: cliente.responsavel_nome || '',
-      responsavel_telefone: aplicarMascaraTelefone(cliente.responsavel_telefone || ''),
-      responsavel_email: cliente.responsavel_email || '',
-      tipo_residuo: cliente.tipo_residuo || '',
-      classe_residuo: cliente.classe_residuo || '',
-      unidade_medida: cliente.unidade_medida || '',
-      frequencia_coleta: cliente.frequencia_coleta || '',
-      numero_licenca: cliente.numero_licenca || '',
-      validade_licenca: cliente.validade_licenca || '',
-      status: cliente.status || 'Ativo',
-    })
-
-    setEditandoId(cliente.id)
-    setFormularioAberto(true)
-    setMensagem('')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  async function removerCliente(id: string) {
-    const confirmado = window.confirm('Tem certeza que deseja remover este cliente?')
-
-    if (!confirmado) return
-
-    const { error } = await supabase
-      .from('clientes')
-      .delete()
-      .eq('id', id)
 
     if (error) {
-      console.error('Erro ao remover cliente:', error.message)
-      alert('Erro ao remover cliente: ' + error.message)
-      return
+      console.error("Erro ao salvar cliente:", {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      });
+
+      alert(
+        `Erro ao salvar cliente.\n\nMensagem: ${error.message}${
+          error.details ? `\nDetalhes: ${error.details}` : ""
+        }`
+      );
+
+      setSalvando(false);
+      return;
     }
 
-    setMensagem('Cliente removido com sucesso.')
-    buscarClientes()
+    const mensagem = editingId
+      ? "Cliente atualizado com sucesso!"
+      : "Cliente cadastrado com sucesso!";
+
+    limparFormulario();
+    setSalvando(false);
+    setMostrarCadastro(false);
+    await fetchClientes();
+
+    setSucesso(mensagem);
+
+    setTimeout(() => {
+      setSucesso("");
+    }, 3000);
   }
 
-  function cancelarEdicao() {
-    setForm(estadoInicialFormulario)
-    setEditandoId(null)
-    setFormularioAberto(false)
-    setMensagem('')
+  async function handleDelete(id: string) {
+    const confirmar = window.confirm("Deseja realmente remover este cliente?");
+    if (!confirmar) return;
+
+    const { error } = await supabase.from("clientes").delete().eq("id", id);
+
+    if (error) {
+      console.error("Erro ao remover cliente:", error);
+      alert("Erro ao remover cliente.");
+      return;
+    }
+
+    if (editingId === id) {
+      limparFormulario();
+    }
+
+    await fetchClientes();
   }
 
-  function abrirNovoFormulario() {
-    setForm(estadoInicialFormulario)
-    setEditandoId(null)
-    setFormularioAberto((prev) => !prev)
-    setMensagem('')
-  }
-
-  const clientesFiltrados = useMemo(() => {
-    const termo = busca.trim().toLowerCase()
-
-    if (!termo) return clientes
-
-    return clientes.filter((cliente) => {
-      return (
-        (cliente.nome || '').toLowerCase().includes(termo) ||
-        (cliente.razao_social || '').toLowerCase().includes(termo) ||
-        (cliente.cnpj || '').toLowerCase().includes(termo) ||
-        (cliente.cidade || '').toLowerCase().includes(termo) ||
-        (cliente.tipo_residuo || '').toLowerCase().includes(termo) ||
-        (cliente.status || '').toLowerCase().includes(termo)
-      )
-    })
-  }, [busca, clientes])
+  const totalPaginas =
+    totalCount != null && totalCount > 0 ? Math.max(1, Math.ceil(totalCount / pageSize)) : 1;
 
   useEffect(() => {
-    buscarClientes()
-  }, [])
+    if (page > totalPaginas) setPage(totalPaginas);
+  }, [page, totalPaginas]);
 
   return (
     <MainLayout>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '24px',
-          gap: '16px',
-          flexWrap: 'wrap',
-        }}
-      >
-        <div>
-          <h1 style={{ margin: 0, fontSize: '32px' }}>Clientes</h1>
-          <p style={{ margin: '8px 0 0', color: '#555' }}>
-            Cadastro completo para operação e pré-preenchimento de MTR
-          </p>
-        </div>
-
-        <div
-          style={{
-            background: '#fff',
-            padding: '16px 20px',
-            borderRadius: '12px',
-            boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
-            minWidth: '220px',
-          }}
-        >
-          <div style={{ fontSize: '14px', color: '#666' }}>Total de clientes</div>
-          <div style={{ fontSize: '28px', fontWeight: 'bold', marginTop: '6px' }}>
-            {clientes.length}
-          </div>
-        </div>
-      </div>
-
-      {mensagem && (
-        <div
-          style={{
-            marginBottom: '20px',
-            padding: '12px 16px',
-            backgroundColor: '#e8f5e9',
-            color: '#2e7d32',
-            border: '1px solid #c8e6c9',
-            borderRadius: '8px',
-          }}
-        >
-          {mensagem}
-        </div>
-      )}
-
-      <div
-        style={{
-          background: '#fff',
-          padding: '20px',
-          borderRadius: '12px',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
-          marginBottom: '24px',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '16px',
-            gap: '12px',
-            flexWrap: 'wrap',
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: '20px' }}>Lista de clientes</h2>
-
-          <input
-            placeholder="Buscar por nome, razão social, CNPJ, cidade, resíduo ou status"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            style={{ ...inputStyle, maxWidth: '420px' }}
-          />
-        </div>
-
-        {carregando ? (
-          <p style={{ color: '#666' }}>Carregando clientes...</p>
-        ) : clientesFiltrados.length === 0 ? (
+      <div className="page-shell">
+      <div style={{ display: "flex", flexDirection: "column", gap: "22px" }}>
+        {sucesso && (
           <div
             style={{
-              padding: '24px',
-              textAlign: 'center',
-              color: '#666',
-              border: '1px dashed #ccc',
-              borderRadius: '10px',
-              backgroundColor: '#fafafa',
+              background: "#16a34a",
+              color: "#ffffff",
+              padding: "14px 16px",
+              borderRadius: "12px",
+              fontWeight: 700,
+              boxShadow: "0 4px 12px rgba(22, 163, 74, 0.18)",
+              border: "1px solid #15803d",
             }}
           >
-            Nenhum cliente encontrado.
+            {sucesso}
           </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#f8fafc' }}>
-                  <th style={thStyle}>Nome</th>
-                  <th style={thStyle}>Razão social</th>
-                  <th style={thStyle}>CNPJ</th>
-                  <th style={thStyle}>Cidade</th>
-                  <th style={thStyle}>Resíduo</th>
-                  <th style={thStyle}>Classe</th>
-                  <th style={thStyle}>Licença válida até</th>
-                  <th style={thStyle}>Status</th>
-                  <th style={thStyle}>Ações</th>
-                </tr>
-              </thead>
+        )}
 
-              <tbody>
-                {clientesFiltrados.map((cliente) => (
-                  <tr key={cliente.id} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={tdStyle}>{cliente.nome}</td>
-                    <td style={tdStyle}>{cliente.razao_social}</td>
-                    <td style={tdStyle}>{aplicarMascaraCnpj(cliente.cnpj || '')}</td>
-                    <td style={tdStyle}>{cliente.cidade}</td>
-                    <td style={tdStyle}>{cliente.tipo_residuo}</td>
-                    <td style={tdStyle}>{cliente.classe_residuo}</td>
-                    <td style={tdStyle}>{formatarDataBr(cliente.validade_licenca)}</td>
-                    <td style={tdStyle}>{cliente.status}</td>
-                    <td style={tdStyle}>
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        <button
-                          onClick={() => editarCliente(cliente)}
-                          style={editButtonStyle}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: "20px",
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <h1
+              style={{
+                margin: 0,
+                fontSize: "26px",
+                fontWeight: 800,
+                color: "#0f172a",
+              }}
+            >
+              Clientes
+            </h1>
+            <p className="page-header__lead" style={{ margin: "6px 0 0" }}>
+              Cadastro base para <strong>Programação</strong>, <strong>MTR</strong>,{" "}
+              <strong>Controle de Massa</strong> e o seguimento da coleta.
+            </p>
+          </div>
+
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+            <div
+              style={{
+                minWidth: "225px",
+                background: "#ffffff",
+                border: "1px solid #e5e7eb",
+                borderRadius: "16px",
+                padding: "16px 18px",
+                boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "14px",
+                  color: "#64748b",
+                  marginBottom: "6px",
+                }}
+              >
+                Total de clientes
+              </div>
+              <div
+                style={{
+                  fontSize: "20px",
+                  fontWeight: 800,
+                  color: "#0f172a",
+                }}
+              >
+                {clientes.length}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={abrirCadastroNovo}
+              style={{
+                background: "#16a34a",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "12px",
+                height: "50px",
+                padding: "0 18px",
+                fontWeight: 800,
+                cursor: "pointer",
+                alignSelf: "stretch",
+              }}
+            >
+              Novo cliente
+            </button>
+          </div>
+        </div>
+
+        {mostrarCadastro && (
+        <div
+          style={{
+            background: "#ffffff",
+            border: "1px solid #e5e7eb",
+            borderRadius: "18px",
+            overflow: "hidden",
+            boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+          }}
+        >
+          <div
+            style={{
+              padding: "18px 20px",
+              borderBottom: "1px solid #e5e7eb",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "18px",
+                fontWeight: 800,
+                color: "#0f172a",
+              }}
+            >
+              {editingId ? "Editar cliente" : "Novo cliente"}
+            </div>
+          </div>
+
+            <form
+              onSubmit={handleSalvarCliente}
+              style={{
+                padding: "22px 20px 20px 20px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "18px",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 800,
+                    color: "#334155",
+                    marginBottom: "12px",
+                  }}
+                >
+                  Dados básicos
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                    gap: "12px",
+                  }}
+                >
+                  <input
+                    name="nome"
+                    value={form.nome}
+                    onChange={handleInputChange}
+                    placeholder="Nome fantasia"
+                    style={inputStyle}
+                  />
+
+                  <input
+                    name="razao_social"
+                    value={form.razao_social}
+                    onChange={handleInputChange}
+                    placeholder="Razão social"
+                    style={inputStyle}
+                  />
+
+                  <input
+                    name="cnpj"
+                    value={form.cnpj}
+                    onChange={handleInputChange}
+                    placeholder="CNPJ"
+                    style={inputStyle}
+                  />
+
+                  <select
+                    name="status"
+                    value={form.status}
+                    onChange={handleInputChange}
+                    style={inputStyle}
+                  >
+                    <option value="Ativo">Ativo</option>
+                    <option value="Inativo">Inativo</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 800,
+                    color: "#334155",
+                    marginBottom: "12px",
+                  }}
+                >
+                  Endereço
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr",
+                    gap: "12px",
+                    marginBottom: "12px",
+                  }}
+                >
+                  <input
+                    name="cep"
+                    value={form.cep}
+                    onChange={handleInputChange}
+                    placeholder="CEP"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="rua"
+                    value={form.rua}
+                    onChange={handleInputChange}
+                    placeholder="Rua"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="numero"
+                    value={form.numero}
+                    onChange={handleInputChange}
+                    placeholder="Número"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="complemento"
+                    value={form.complemento}
+                    onChange={handleInputChange}
+                    placeholder="Complemento"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="bairro"
+                    value={form.bairro}
+                    onChange={handleInputChange}
+                    placeholder="Bairro"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="cidade"
+                    value={form.cidade}
+                    onChange={handleInputChange}
+                    placeholder="Cidade"
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr",
+                    gap: "12px",
+                  }}
+                >
+                  <input
+                    name="estado"
+                    value={form.estado}
+                    onChange={handleInputChange}
+                    placeholder="Estado"
+                    style={{ ...inputStyle, maxWidth: "240px" }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 800,
+                    color: "#334155",
+                    marginBottom: "12px",
+                  }}
+                >
+                  Responsável
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "2fr 2fr 2fr",
+                    gap: "12px",
+                  }}
+                >
+                  <input
+                    name="responsavel_nome"
+                    value={form.responsavel_nome}
+                    onChange={handleInputChange}
+                    placeholder="Nome do responsável"
+                    style={inputStyle}
+                  />
+
+                  <input
+                    name="telefone"
+                    value={form.telefone}
+                    onChange={handleInputChange}
+                    placeholder="Telefone"
+                    style={inputStyle}
+                  />
+
+                  <input
+                    name="email"
+                    value={form.email}
+                    onChange={handleInputChange}
+                    placeholder="E-mail"
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "12px",
+                    marginBottom: "12px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "15px",
+                      fontWeight: 800,
+                      color: "#334155",
+                    }}
+                  >
+                    Resíduos e operação
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={adicionarResiduo}
+                    style={{
+                      background: "#0f172a",
+                      color: "#ffffff",
+                      border: "none",
+                      borderRadius: "10px",
+                      height: "40px",
+                      padding: "0 16px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    + Adicionar resíduo
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  {form.residuos.map((residuo, index) => (
+                    <div
+                      key={index}
+                      style={{
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "14px",
+                        padding: "14px",
+                        background: "#f8fafc",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: "12px",
+                          gap: "12px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "14px",
+                            fontWeight: 800,
+                            color: "#0f172a",
+                          }}
                         >
-                          Editar
-                        </button>
+                          Resíduo {index + 1}
+                        </div>
 
                         <button
-                          onClick={() => removerCliente(cliente.id)}
-                          style={deleteButtonStyle}
+                          type="button"
+                          onClick={() => removerResiduo(index)}
+                          style={{
+                            background: "#ef4444",
+                            color: "#ffffff",
+                            border: "none",
+                            borderRadius: "8px",
+                            padding: "7px 12px",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
                         >
                           Remover
                         </button>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
 
-      <div
-        style={{
-          background: '#fff',
-          borderRadius: '12px',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
-          overflow: 'hidden',
-        }}
-      >
-        <button
-          onClick={abrirNovoFormulario}
-          style={{
-            width: '100%',
-            border: 'none',
-            background: editandoId ? '#dcfce7' : '#f8fafc',
-            padding: '18px 20px',
-            cursor: 'pointer',
-            textAlign: 'left',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            fontWeight: 700,
-            fontSize: '18px',
-            color: '#0f172a',
-          }}
-        >
-          <span>{editandoId ? 'Editando cliente' : 'Novo cliente'}</span>
-          <span style={{ fontSize: '22px', color: '#64748b' }}>
-            {formularioAberto ? '−' : '+'}
-          </span>
-        </button>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                          gap: "12px",
+                        }}
+                      >
+                        <input
+                          value={residuo.tipo_residuo}
+                          onChange={(e) =>
+                            handleResiduoChange(index, "tipo_residuo", e.target.value)
+                          }
+                          placeholder="Tipo de resíduo"
+                          style={inputStyle}
+                        />
 
-        {formularioAberto && (
-          <div style={{ padding: '20px', borderTop: '1px solid #e5e7eb' }}>
-            <div style={sectionTitleStyle}>Dados básicos</div>
-            <div style={grid4Style}>
-              <input
-                name="nome"
-                placeholder="Nome fantasia"
-                value={form.nome}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-              <input
-                name="razao_social"
-                placeholder="Razão social"
-                value={form.razao_social}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-              <input
-                name="cnpj"
-                placeholder="CNPJ"
-                value={form.cnpj}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-              <select
-                name="status"
-                value={form.status}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              >
-                <option value="Ativo">Ativo</option>
-                <option value="Inativo">Inativo</option>
-                <option value="Bloqueado">Bloqueado</option>
-              </select>
-            </div>
+                        <select
+                          value={residuo.classificacao}
+                          onChange={(e) =>
+                            handleResiduoChange(index, "classificacao", e.target.value)
+                          }
+                          style={inputStyle}
+                        >
+                          <option value="">Classe do resíduo</option>
+                          <option value="Classe I">Classe I</option>
+                          <option value="Classe II">Classe II</option>
+                        </select>
 
-            <div style={sectionTitleStyle}>Endereço</div>
-            <div style={grid4Style}>
-              <div style={{ position: 'relative' }}>
-                <input
-                  name="cep"
-                  placeholder="CEP"
-                  value={form.cep}
-                  onChange={atualizarCampo}
-                  onBlur={buscarEnderecoPorCep}
-                  style={inputStyle}
-                />
-                {buscandoCep && (
-                  <span
-                    style={{
-                      position: 'absolute',
-                      right: '12px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      fontSize: '12px',
-                      color: '#64748b',
-                    }}
-                  >
-                    Buscando...
-                  </span>
-                )}
+                        <select
+                          value={residuo.unidade_medida}
+                          onChange={(e) =>
+                            handleResiduoChange(index, "unidade_medida", e.target.value)
+                          }
+                          style={inputStyle}
+                        >
+                          <option value="">Unidade de medida</option>
+                          <option value="kg">kg</option>
+                          <option value="ton">ton</option>
+                          <option value="m3">m³</option>
+                          <option value="litros">litros</option>
+                        </select>
+
+                        <input
+                          value={residuo.frequencia_coleta}
+                          onChange={(e) =>
+                            handleResiduoChange(index, "frequencia_coleta", e.target.value)
+                          }
+                          placeholder="Frequência de coleta"
+                          style={inputStyle}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              <input
-                name="rua"
-                placeholder="Rua"
-                value={form.rua}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-              <input
-                name="numero"
-                placeholder="Número"
-                value={form.numero}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-              <input
-                name="complemento"
-                placeholder="Complemento"
-                value={form.complemento}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-              <input
-                name="bairro"
-                placeholder="Bairro"
-                value={form.bairro}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-              <input
-                name="cidade"
-                placeholder="Cidade"
-                value={form.cidade}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-              <input
-                name="estado"
-                placeholder="Estado"
-                value={form.estado}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-            </div>
+              <div>
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 800,
+                    color: "#334155",
+                    marginBottom: "12px",
+                  }}
+                >
+                  Dados para MTR
+                </div>
 
-            <div style={sectionTitleStyle}>Responsável</div>
-            <div style={grid3Style}>
-              <input
-                name="responsavel_nome"
-                placeholder="Nome do responsável"
-                value={form.responsavel_nome}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-              <input
-                name="responsavel_telefone"
-                placeholder="Telefone"
-                value={form.responsavel_telefone}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-              <input
-                name="responsavel_email"
-                placeholder="E-mail"
-                value={form.responsavel_email}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-            </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "12px",
+                  }}
+                >
+                  <input
+                    name="licenca_numero"
+                    value={form.licenca_numero}
+                    onChange={handleInputChange}
+                    placeholder="Número da licença ambiental"
+                    style={inputStyle}
+                  />
 
-            <div style={sectionTitleStyle}>Resíduo e operação</div>
-            <div style={grid4Style}>
-              <input
-                name="tipo_residuo"
-                placeholder="Tipo de resíduo"
-                value={form.tipo_residuo}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-              <select
-                name="classe_residuo"
-                value={form.classe_residuo}
-                onChange={atualizarCampo}
-                style={inputStyle}
+                  <input
+                    type="date"
+                    name="validade"
+                    value={form.validade}
+                    onChange={handleInputChange}
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  alignItems: "center",
+                  marginTop: "8px",
+                  flexWrap: "wrap",
+                }}
               >
-                <option value="">Classe do resíduo</option>
-                <option value="Classe I">Classe I</option>
-                <option value="Classe II">Classe II</option>
-              </select>
-              <select
-                name="unidade_medida"
-                value={form.unidade_medida}
-                onChange={atualizarCampo}
-                style={inputStyle}
+                <button
+                  type="submit"
+                  disabled={salvando}
+                  style={{
+                    background: "#16a34a",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "10px",
+                    height: "42px",
+                    padding: "0 18px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    opacity: salvando ? 0.8 : 1,
+                  }}
+                >
+                  {salvando
+                    ? "Salvando..."
+                    : editingId
+                    ? "Salvar alterações"
+                    : "Adicionar cliente"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    limparFormulario();
+                    setMostrarCadastro(false);
+                  }}
+                  style={{
+                    background: "#e5e7eb",
+                    color: "#111827",
+                    border: "none",
+                    borderRadius: "10px",
+                    height: "42px",
+                    padding: "0 18px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+        </div>
+        )}
+
+        <div
+          style={{
+            background: "#ffffff",
+            border: "1px solid #e5e7eb",
+            borderRadius: "18px",
+            padding: "16px 18px 10px 18px",
+            boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "14px",
+              marginBottom: "14px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: "18px",
+                  fontWeight: 800,
+                  color: "#0f172a",
+                }}
               >
-                <option value="">Unidade de medida</option>
-                <option value="kg">kg</option>
-                <option value="ton">ton</option>
-                <option value="m³">m³</option>
-                <option value="litros">litros</option>
-              </select>
-              <input
-                name="frequencia_coleta"
-                placeholder="Frequência de coleta"
-                value={form.frequencia_coleta}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
+                Lista de clientes
+              </h2>
             </div>
 
-            <div style={sectionTitleStyle}>Dados para MTR</div>
-            <div style={grid3Style}>
-              <input
-                name="numero_licenca"
-                placeholder="Número da licença ambiental"
-                value={form.numero_licenca}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-              <input
-                name="validade_licenca"
-                type="date"
-                value={form.validade_licenca}
-                onChange={atualizarCampo}
-                style={inputStyle}
-              />
-            </div>
+            <input
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Busca (aguarda digitar — nome, razão social, CNPJ, cidade…)"
+              style={{
+                width: "360px",
+                maxWidth: "100%",
+                height: "40px",
+                borderRadius: "10px",
+                border: "1px solid #d1d5db",
+                background: "#ffffff",
+                outline: "none",
+                padding: "0 14px",
+                fontSize: "14px",
+                color: "#111827",
+              }}
+            />
+          </div>
 
+          {loading ? (
             <div
               style={{
-                display: 'flex',
-                gap: '12px',
-                marginTop: '24px',
-                flexWrap: 'wrap',
+                padding: "30px 0",
+                textAlign: "center",
+                color: "#64748b",
+                fontSize: "14px",
               }}
             >
-              <button
-                onClick={adicionarOuAtualizarCliente}
-                disabled={salvando}
-                style={primaryButtonStyle}
-              >
-                {salvando
-                  ? 'Salvando...'
-                  : editandoId
-                    ? 'Salvar edição'
-                    : 'Adicionar cliente'}
-              </button>
-
-              <button onClick={cancelarEdicao} style={secondaryButtonStyle}>
-                Cancelar
-              </button>
+              Carregando clientes...
             </div>
-          </div>
-        )}
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "14px",
+                }}
+              >
+                <thead>
+                  <tr
+                    style={{
+                      background: "#f8fafc",
+                      borderBottom: "1px solid #e5e7eb",
+                    }}
+                  >
+                    <th style={thStyle}>Nome</th>
+                    <th style={thStyle}>Razão social</th>
+                    <th style={thStyle}>CNPJ</th>
+                    <th style={thStyle}>Cidade</th>
+                    <th style={thStyle}>Resíduo</th>
+                    <th style={thStyle}>Classe</th>
+                    <th style={thStyle}>Licença válida até</th>
+                    <th style={thStyle}>Status</th>
+                    <th style={thStyle}>Ações</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {clientes.map((cliente) => (
+                    <tr
+                      key={cliente.id}
+                      style={{
+                        borderBottom: "1px solid #eef2f7",
+                      }}
+                    >
+                      <td style={tdStyle}>{cliente.nome}</td>
+                      <td style={tdStyle}>{cliente.razao_social}</td>
+                      <td style={tdStyle}>{cliente.cnpj}</td>
+                      <td style={tdStyle}>{cliente.cidade || "-"}</td>
+                      <td style={tdStyle}>{cliente.tipo_residuo || "-"}</td>
+                      <td style={tdStyle}>{cliente.classificacao || "-"}</td>
+                      <td style={tdStyle}>{formatarData(cliente.validade)}</td>
+                      <td style={tdStyle}>{cliente.status || "Ativo"}</td>
+                      <td style={tdStyle}>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "8px",
+                            alignItems: "center",
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleEditar(cliente)}
+                            style={{
+                              background: "#16a34a",
+                              color: "#ffffff",
+                              border: "none",
+                              borderRadius: "8px",
+                              padding: "7px 14px",
+                              fontWeight: 700,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Editar
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(cliente.id)}
+                            style={{
+                              background: "#ef4444",
+                              color: "#ffffff",
+                              border: "none",
+                              borderRadius: "8px",
+                              padding: "7px 14px",
+                              fontWeight: 700,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Remover
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+
+                  {clientes.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={9}
+                        style={{
+                          textAlign: "center",
+                          padding: "28px 12px",
+                          color: "#64748b",
+                        }}
+                      >
+                        Nenhum cliente encontrado.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!loading && totalCount != null ? (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "12px",
+                marginTop: "16px",
+                paddingTop: "14px",
+                borderTop: "1px solid #e5e7eb",
+              }}
+            >
+              <span style={{ fontSize: "13px", color: "#64748b" }}>
+                {totalCount === 0
+                  ? "Nenhum registo"
+                  : `Mostrando ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, totalCount)} de ${totalCount}`}
+              </span>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px" }}>
+                <label style={{ fontSize: "13px", color: "#475569", display: "flex", alignItems: "center", gap: "8px" }}>
+                  Por página
+                  <select
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {PAGE_SIZE_OPTIONS.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    background: page <= 1 ? "#f1f5f9" : "#ffffff",
+                    cursor: page <= 1 ? "not-allowed" : "pointer",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                  }}
+                >
+                  Anterior
+                </button>
+                <span style={{ fontSize: "13px", color: "#334155", fontWeight: 600 }}>
+                  Página {page} / {totalPaginas}
+                </span>
+                <button
+                  type="button"
+                  disabled={page >= totalPaginas}
+                  onClick={() => setPage((p) => Math.min(totalPaginas, p + 1))}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    background: page >= totalPaginas ? "#f1f5f9" : "#ffffff",
+                    cursor: page >= totalPaginas ? "not-allowed" : "pointer",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                  }}
+                >
+                  Seguinte
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
       </div>
     </MainLayout>
-  )
+  );
 }
 
-const sectionTitleStyle = {
-  marginTop: '20px',
-  marginBottom: '12px',
-  fontSize: '16px',
-  fontWeight: 700,
-  color: '#334155',
-}
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  height: "40px",
+  borderRadius: "10px",
+  border: "1px solid #cbd5e1",
+  background: "#ffffff",
+  outline: "none",
+  padding: "0 12px",
+  fontSize: "14px",
+  color: "#0f172a",
+  boxSizing: "border-box",
+};
 
-const grid4Style = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-  gap: '12px',
-}
+const thStyle: React.CSSProperties = {
+  textAlign: "left",
+  padding: "14px 12px",
+  color: "#0f172a",
+  fontWeight: 800,
+  whiteSpace: "nowrap",
+};
 
-const grid3Style = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-  gap: '12px',
-}
-
-const inputStyle = {
-  width: '100%',
-  padding: '10px 12px',
-  border: '1px solid #d0d7de',
-  borderRadius: '8px',
-  fontSize: '14px',
-  outline: 'none',
-  boxSizing: 'border-box' as const,
-  backgroundColor: '#fff',
-}
-
-const primaryButtonStyle = {
-  backgroundColor: '#2563eb',
-  color: '#fff',
-  border: 'none',
-  padding: '10px 14px',
-  borderRadius: '8px',
-  cursor: 'pointer',
-  fontWeight: 'bold',
-}
-
-const secondaryButtonStyle = {
-  backgroundColor: '#e5e7eb',
-  color: '#111827',
-  border: 'none',
-  padding: '10px 14px',
-  borderRadius: '8px',
-  cursor: 'pointer',
-  fontWeight: 'bold',
-}
-
-const editButtonStyle = {
-  backgroundColor: '#16a34a',
-  color: '#fff',
-  border: 'none',
-  padding: '8px 12px',
-  borderRadius: '6px',
-  cursor: 'pointer',
-}
-
-const deleteButtonStyle = {
-  backgroundColor: '#dc2626',
-  color: '#fff',
-  border: 'none',
-  padding: '8px 12px',
-  borderRadius: '6px',
-  cursor: 'pointer',
-}
-
-const thStyle = {
-  textAlign: 'left' as const,
-  padding: '12px',
-  borderBottom: '1px solid #ddd',
-  fontSize: '14px',
-}
-
-const tdStyle = {
-  padding: '12px',
-  fontSize: '14px',
-}
-
-export default Clientes
+const tdStyle: React.CSSProperties = {
+  padding: "12px",
+  color: "#1f2937",
+  verticalAlign: "middle",
+  whiteSpace: "nowrap",
+};

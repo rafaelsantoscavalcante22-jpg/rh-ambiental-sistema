@@ -76,7 +76,7 @@ export default function Login() {
           style={{
             margin: 0,
             textAlign: "center",
-            fontSize: 28,
+            fontSize: 26,
             fontWeight: 800,
             color: "#0b1736",
           }}
@@ -85,14 +85,13 @@ export default function Login() {
         </h1>
 
         <p
+          className="page-header__lead"
           style={{
-            margin: "10px 0 24px",
+            margin: "8px 0 22px",
             textAlign: "center",
-            fontSize: 15,
-            color: "#6b7a99",
           }}
         >
-          Acesse o sistema da RG Ambiental
+          Entre com o e-mail corporativo para acessar o painel.
         </p>
 
         {/* FORM */}

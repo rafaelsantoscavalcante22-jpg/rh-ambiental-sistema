@@ -1,20 +1,37 @@
 {
-  "name": "rh-ambiental-sistema",
+  "name": "rg-ambiental-sistema",
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "test": "vitest run",
+    "preview": "vite preview",
+    "seed:simulacao-coletas": "tsx scripts/seed-simulacao-coletas.ts",
+    "seed:fluxo-completo-20": "tsx scripts/seed-fluxo-completo-20.ts",
+    "seed:historico-200-finalizadas": "tsx scripts/seed-historico-200-finalizadas.ts",
+    "reset:coletas-operacao": "tsx scripts/reset-coletas-operacao.ts",
+    "reset:dados-teste": "tsx scripts/reset-coletas-operacao.ts --yes",
+    "reset:e-seed-coletas-50": "tsx scripts/reset-coletas-operacao.ts --yes && tsx scripts/seed-simulacao-coletas.ts",
+    "reset:e-seed-fluxo-20": "tsx scripts/reset-coletas-operacao.ts --yes && tsx scripts/seed-fluxo-completo-20.ts",
+    "supabase": "supabase",
+    "functions:deploy:admin-update": "supabase functions deploy admin-update-user",
+    "functions:deploy:admin-delete": "supabase functions deploy admin-delete-user",
+    "functions:deploy:admin-all": "supabase functions deploy admin-create-user && supabase functions deploy admin-update-user && supabase functions deploy admin-delete-user"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.0",
     "jspdf": "^4.2.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-router-dom": "^7.13.2"
+    "react-router-dom": "^7.13.2",
+    "recharts": "^3.8.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
@@ -26,8 +43,11 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
+    "supabase": "^2.85.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.0",
-    "vite": "^8.0.1"
+    "vite": "^8.0.1",
+    "vitest": "^3.2.4"
   }
 }

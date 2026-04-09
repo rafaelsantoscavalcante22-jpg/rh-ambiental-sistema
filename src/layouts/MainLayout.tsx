@@ -1,840 +1,469 @@
-import { Link, useLocation } from 'react-router-dom'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from 'react'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 type MainLayoutProps = {
-  children: React.ReactNode
+  children: ReactNode
 }
 
-type Notificacao = {
-  id: number
-  titulo: string
-  descricao: string
-  horario: string
-  lida: boolean
-  tipo?: 'financeiro' | 'sistema'
+type UsuarioLogado = {
+  nome?: string | null
+  email?: string | null
+  cargo?: string | null
+  foto_url?: string | null
 }
 
-type ThemeMode = 'light' | 'dark'
+type MenuItem = { label: string; path: string }
 
-type UsuarioPerfil = {
-  id: string
-  nome: string
-  email: string
-  cargo: string
-  status: string
+const menuGroups: { title: string; items: MenuItem[] }[] = [
+  {
+    title: 'Visão geral',
+    items: [{ label: 'Dashboard', path: '/dashboard' }],
+  },
+  {
+    title: 'Cadastros',
+    items: [{ label: 'Clientes', path: '/clientes' }],
+  },
+  {
+    title: 'Fluxo operacional',
+    items: [
+      { label: 'Programação', path: '/programacao' },
+      { label: 'MTR', path: '/mtr' },
+      { label: 'Controle de Massa', path: '/controle-massa' },
+    ],
+  },
+  {
+    title: 'Seguimento da coleta',
+    items: [
+      { label: 'Conferência de transportes', path: '/conferencia-transporte' },
+      { label: 'Aprovação', path: '/aprovacao' },
+      { label: 'Faturamento', path: '/faturamento' },
+    ],
+  },
+  {
+    title: 'Financeiro e linha do tempo',
+    items: [
+      { label: 'Financeiro', path: '/financeiro' },
+      { label: 'Linha do tempo', path: '/rotas' },
+    ],
+  },
+  {
+    title: 'Sistema',
+    items: [{ label: 'Usuários', path: '/usuarios' }],
+  },
+]
+
+const allMenuItems = menuGroups.flatMap((g) => g.items)
+
+/** Itens de menu cujo path pode ter sufixo (/mtr/:id, /controle-massa/:id) usam prefix match. */
+const navLinkEndExact = (path: string) =>
+  path !== '/mtr' && path !== '/controle-massa'
+
+function formatarDataHora(date: Date) {
+  const data = new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(date)
+
+  const hora = new Intl.DateTimeFormat('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+
+  return { data, hora }
 }
 
-type ColetaFinanceiraResumo = {
-  id: string
-  numero: string
-  cliente: string
-  status: string
-  status_pagamento: string | null
-  data_vencimento: string | null
-  valor_coleta: number | null
+/** Relógio isolado: atualizar a cada segundo não re-renderiza o layout inteiro nem a página. */
+function CabecalhoDataHora() {
+  const [agora, setAgora] = useState(() => new Date())
+  useEffect(() => {
+    const id = window.setInterval(() => setAgora(new Date()), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  const { data, hora } = useMemo(() => formatarDataHora(agora), [agora])
+  return (
+    <div className="layout-header-datetime">
+      {data}, {hora}
+    </div>
+  )
 }
 
-function MainLayout({ children }: MainLayoutProps) {
+function obterTituloDaPagina(pathname: string) {
+  const ordenados = [...allMenuItems].sort((a, b) => b.path.length - a.path.length)
+  const item = ordenados.find(
+    (menu) => pathname === menu.path || pathname.startsWith(`${menu.path}/`)
+  )
+  return item?.label || 'Sistema RG Ambiental'
+}
+
+function obterIniciais(nome?: string | null, email?: string | null) {
+  const base = (nome || email || 'RG').trim()
+
+  if (!base) return 'RG'
+
+  const partes = base.split(' ').filter(Boolean)
+
+  if (partes.length >= 2) {
+    return `${partes[0][0]}${partes[1][0]}`.toUpperCase()
+  }
+
+  return base.slice(0, 2).toUpperCase()
+}
+
+const SIDEBAR_SECTIONS_KEY = 'rg-sidebar-sections-open'
+
+function lerSecoesSidebar(): Record<string, boolean> | null {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_SECTIONS_KEY)
+    if (raw) return JSON.parse(raw) as Record<string, boolean>
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+function salvarSecoesSidebar(next: Record<string, boolean>) {
+  try {
+    localStorage.setItem(SIDEBAR_SECTIONS_KEY, JSON.stringify(next))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Grupo do menu que contém a rota atual (para abrir a secção ao navegar). */
+function grupoTituloParaPathAtivo(pathname: string): string | null {
+  const ordenados = [...menuGroups].flatMap((g) =>
+    g.items.map((item) => ({ item, groupTitle: g.title }))
+  )
+  ordenados.sort((a, b) => b.item.path.length - a.item.path.length)
+
+  const hit = ordenados.find(
+    ({ item }) => pathname === item.path || pathname.startsWith(`${item.path}/`)
+  )
+  return hit?.groupTitle ?? null
+}
+
+export default function MainLayout({ children }: MainLayoutProps) {
+  const navigate = useNavigate()
   const location = useLocation()
 
-  const [dataHora, setDataHora] = useState('')
-  const [abrirNotificacoes, setAbrirNotificacoes] = useState(false)
-  const [tema, setTema] = useState<ThemeMode>('light')
-  const [usuario, setUsuario] = useState<UsuarioPerfil | null>(null)
-  const [carregandoUsuario, setCarregandoUsuario] = useState(true)
-  const [quantidadeFinanceiroVencido, setQuantidadeFinanceiroVencido] = useState(0)
-  const [notificacoesFinanceiras, setNotificacoesFinanceiras] = useState<Notificacao[]>([])
+  const [usuario, setUsuario] = useState<UsuarioLogado | null>(null)
+  const [logoCarregou, setLogoCarregou] = useState(true)
+  const [fotoIndisponivel, setFotoIndisponivel] = useState(false)
+  const [enviandoFoto, setEnviandoFoto] = useState(false)
+  const inputFotoRef = useRef<HTMLInputElement>(null)
 
-  const notificacoesRef = useRef<HTMLDivElement | null>(null)
-
-  const [notificacoesSistema, setNotificacoesSistema] = useState<Notificacao[]>([
-    {
-      id: 1,
-      titulo: 'Nova coleta registrada',
-      descricao: 'Uma nova coleta foi cadastrada no sistema.',
-      horario: 'Hoje, 09:15',
-      lida: false,
-      tipo: 'sistema',
-    },
-    {
-      id: 2,
-      titulo: 'Cliente atualizado',
-      descricao: 'Os dados de um cliente foram alterados.',
-      horario: 'Hoje, 10:40',
-      lida: false,
-      tipo: 'sistema',
-    },
-    {
-      id: 3,
-      titulo: 'Operação estável',
-      descricao: 'Sistema operando normalmente sem alertas.',
-      horario: 'Hoje, 11:05',
-      lida: true,
-      tipo: 'sistema',
-    },
-  ])
-
-  useEffect(() => {
-    const temaSalvo = localStorage.getItem('rg-tema') as ThemeMode | null
-
-    if (temaSalvo === 'light' || temaSalvo === 'dark') {
-      setTema(temaSalvo)
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    const stored = lerSecoesSidebar()
+    const init: Record<string, boolean> = {}
+    for (const g of menuGroups) {
+      init[g.title] = stored?.[g.title] ?? true
     }
-  }, [])
+    return init
+  })
 
   useEffect(() => {
-    localStorage.setItem('rg-tema', tema)
-  }, [tema])
+    const titulo = grupoTituloParaPathAtivo(location.pathname)
+    if (!titulo) return
+    setOpenSections((prev) => {
+      if (prev[titulo] !== false) return prev
+      const next = { ...prev, [titulo]: true }
+      salvarSecoesSidebar(next)
+      return next
+    })
+  }, [location.pathname])
 
-  useEffect(() => {
-    const atualizarHora = () => {
-      const agora = new Date()
-      const formatado = agora.toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-      setDataHora(formatado)
-    }
-
-    atualizarHora()
-    const intervalo = setInterval(atualizarHora, 1000)
-
-    return () => clearInterval(intervalo)
-  }, [])
+  function alternarSecaoSidebar(titulo: string) {
+    setOpenSections((prev) => {
+      const aberto = prev[titulo] !== false
+      const next = { ...prev, [titulo]: !aberto }
+      salvarSecoesSidebar(next)
+      return next
+    })
+  }
 
   useEffect(() => {
     async function carregarUsuario() {
-      setCarregandoUsuario(true)
-
       const {
         data: { user },
-        error: userError,
       } = await supabase.auth.getUser()
 
-      if (userError || !user) {
-        console.error('Erro ao buscar usuário autenticado:', userError?.message)
+      if (!user) {
         setUsuario(null)
-        setCarregandoUsuario(false)
         return
       }
 
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('usuarios')
-        .select('*')
+        .select('nome, email, cargo, foto_url')
         .eq('id', user.id)
         .maybeSingle()
-
-      if (error) {
-        console.error('Erro ao carregar perfil do usuário:', error.message)
-      }
 
       if (data) {
         setUsuario(data)
       } else {
-        const nomeFallback =
-          user.user_metadata?.nome ||
-          user.user_metadata?.name ||
-          user.email?.split('@')[0] ||
-          'Usuário'
-
         setUsuario({
-          id: user.id,
-          nome: nomeFallback,
+          nome: user.email || 'Usuário',
           email: user.email || '',
-          cargo: 'Usuário',
-          status: 'ativo',
+          cargo: '',
         })
       }
-
-      setCarregandoUsuario(false)
     }
 
     carregarUsuario()
   }, [])
 
   useEffect(() => {
-    async function carregarAlertasFinanceiros() {
-      const { data, error } = await supabase
-        .from('coletas')
-        .select('id, numero, cliente, status, status_pagamento, data_vencimento, valor_coleta')
+    setFotoIndisponivel(false)
+  }, [usuario?.foto_url])
 
-      if (error) {
-        console.error('Erro ao carregar alertas financeiros:', error.message)
-        setQuantidadeFinanceiroVencido(0)
-        setNotificacoesFinanceiras([])
-        return
-      }
+  async function handleEscolherFoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
 
-      const hoje = new Date()
-      hoje.setHours(0, 0, 0, 0)
-
-      const registros = ((data as ColetaFinanceiraResumo[]) || []).filter((item) => {
-        const statusOperacional = String(item.status || '').toLowerCase()
-        return statusOperacional.includes('final')
-      })
-
-      const contasAbertas = registros.filter((item) => {
-        const pagamento = item.status_pagamento || 'Pendente'
-        return pagamento !== 'Pago' && pagamento !== 'Cancelado' && !!item.data_vencimento
-      })
-
-      const vencidas = contasAbertas.filter((item) => {
-        const vencimento = new Date(item.data_vencimento as string)
-        vencimento.setHours(0, 0, 0, 0)
-        return vencimento < hoje
-      })
-
-      const vencemHoje = contasAbertas.filter((item) => {
-        const vencimento = new Date(item.data_vencimento as string)
-        vencimento.setHours(0, 0, 0, 0)
-        return vencimento.getTime() === hoje.getTime()
-      })
-
-      setQuantidadeFinanceiroVencido(vencidas.length)
-
-      const novasNotificacoes: Notificacao[] = []
-
-      if (vencidas.length > 0) {
-        novasNotificacoes.push({
-          id: 1001,
-          titulo: 'Contas vencidas no financeiro',
-          descricao: `${vencidas.length} cobrança(s) vencida(s) aguardando ação.`,
-          horario: 'Agora',
-          lida: false,
-          tipo: 'financeiro',
-        })
-      }
-
-      if (vencemHoje.length > 0) {
-        novasNotificacoes.push({
-          id: 1002,
-          titulo: 'Cobranças vencem hoje',
-          descricao: `${vencemHoje.length} cobrança(s) vencem hoje no financeiro.`,
-          horario: 'Agora',
-          lida: false,
-          tipo: 'financeiro',
-        })
-      }
-
-      const topVencidas = vencidas.slice(0, 3).map((item, index) => ({
-        id: 1100 + index,
-        titulo: `Conta vencida: ${item.numero || 'Sem número'}`,
-        descricao: `${item.cliente || 'Cliente não informado'} • ${formatarMoeda(item.valor_coleta)} • vencimento ${formatarData(item.data_vencimento)}`,
-        horario: 'Financeiro',
-        lida: false,
-        tipo: 'financeiro' as const,
-      }))
-
-      setNotificacoesFinanceiras([...novasNotificacoes, ...topVencidas])
-    }
-
-    carregarAlertasFinanceiros()
-  }, [location.pathname])
-
-  useEffect(() => {
-    function handleClickFora(event: MouseEvent) {
-      if (
-        notificacoesRef.current &&
-        !notificacoesRef.current.contains(event.target as Node)
-      ) {
-        setAbrirNotificacoes(false)
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickFora)
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickFora)
-    }
-  }, [])
-
-  function toggleNotificacoes() {
-    setAbrirNotificacoes(!abrirNotificacoes)
-  }
-
-  function marcarTodasComoLidas() {
-    setNotificacoesSistema((prev) =>
-      prev.map((notificacao) => ({
-        ...notificacao,
-        lida: true,
-      }))
-    )
-
-    setNotificacoesFinanceiras((prev) =>
-      prev.map((notificacao) => ({
-        ...notificacao,
-        lida: true,
-      }))
-    )
-  }
-
-  function marcarComoLida(id: number) {
-    setNotificacoesSistema((prev) =>
-      prev.map((notificacao) =>
-        notificacao.id === id ? { ...notificacao, lida: true } : notificacao
-      )
-    )
-
-    setNotificacoesFinanceiras((prev) =>
-      prev.map((notificacao) =>
-        notificacao.id === id ? { ...notificacao, lida: true } : notificacao
-      )
-    )
-  }
-
-  function alternarTema() {
-    setTema((prev) => (prev === 'light' ? 'dark' : 'light'))
-  }
-
-  async function handleLogout() {
-    const { error } = await supabase.auth.signOut()
-
-    if (error) {
-      alert('Erro ao sair: ' + error.message)
+    if (!file.type.startsWith('image/')) {
+      window.alert('Escolha um ficheiro de imagem (JPEG, PNG, WebP ou GIF).')
       return
     }
 
-    window.location.href = '/'
-  }
-
-  function obterIniciais(nome: string) {
-    if (!nome) return 'RG'
-
-    const partes = nome.trim().split(' ').filter(Boolean)
-
-    if (partes.length === 0) return 'RG'
-    if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase()
-
-    return `${partes[0][0]}${partes[1][0]}`.toUpperCase()
-  }
-
-  function formatarData(data?: string | null) {
-    if (!data) return '-'
-    const limpa = data.includes('T') ? data.split('T')[0] : data
-    const partes = limpa.split('-')
-    if (partes.length !== 3) return data
-    return `${partes[2]}/${partes[1]}/${partes[0]}`
-  }
-
-  function formatarMoeda(valor?: number | null) {
-    return Number(valor || 0).toLocaleString('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-    })
-  }
-
-  const cargoUsuario = carregandoUsuario ? 'Carregando perfil...' : usuario?.cargo || 'Usuário'
-  const nomeUsuario = carregandoUsuario ? 'Carregando...' : usuario?.nome || 'Usuário'
-  const iniciaisUsuario = obterIniciais(usuario?.nome || 'RG')
-
-  const menuItemsBase = [
-    { name: 'Dashboard', path: '/dashboard' },
-    { name: 'Clientes', path: '/clientes' },
-    { name: 'Coletas', path: '/coletas' },
-    { name: 'MTR', path: '/mtr' },
-    { name: 'Financeiro', path: '/financeiro' },
-    { name: 'Rotas', path: '/rotas' },
-    { name: 'Usuários', path: '/usuarios' },
-  ]
-
-  const menuItems = menuItemsBase.filter((item) => {
-    if (!usuario?.cargo) return true
-
-    if (usuario.cargo === 'Administrador') return true
-
-    if (usuario.cargo === 'Financeiro') {
-      return ['Dashboard', 'Financeiro', 'Clientes'].includes(item.name)
+    if (file.size > 5 * 1024 * 1024) {
+      window.alert('A imagem deve ter no máximo 5 MB.')
+      return
     }
 
-    if (usuario.cargo === 'Operacional') {
-      return ['Dashboard', 'Clientes', 'Coletas', 'MTR', 'Rotas'].includes(item.name)
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) return
+
+    setEnviandoFoto(true)
+
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase()
+      const extSeguro =
+        ext && ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg'
+      const path = `${user.id}/avatar.${extSeguro}`
+
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, {
+        upsert: true,
+        contentType: file.type || undefined,
+      })
+
+      if (uploadError) {
+        console.error(uploadError)
+        window.alert(
+          'Não foi possível enviar a foto. Aplique a migração do bucket avatars no Supabase ou tente novamente.'
+        )
+        return
+      }
+
+      const { data: publicData } = supabase.storage.from('avatars').getPublicUrl(path)
+      const publicUrl = publicData.publicUrl
+
+      const { error: updateError } = await supabase
+        .from('usuarios')
+        .update({ foto_url: publicUrl })
+        .eq('id', user.id)
+
+      if (updateError) {
+        console.error(updateError)
+        window.alert(
+          'A foto foi enviada, mas falhou ao gravar o endereço no perfil. Verifique as políticas RLS em usuarios.'
+        )
+        return
+      }
+
+      setUsuario((prev) => {
+        if (prev) {
+          return { ...prev, foto_url: publicUrl }
+        }
+        return {
+          nome: user.email || 'Usuário',
+          email: user.email || '',
+          cargo: '',
+          foto_url: publicUrl,
+        }
+      })
+      setFotoIndisponivel(false)
+    } finally {
+      setEnviandoFoto(false)
     }
+  }
 
-    if (usuario.cargo === 'Visualizador') {
-      return ['Dashboard', 'Clientes'].includes(item.name)
-    }
+  async function handleLogout() {
+    await supabase.auth.signOut()
+    navigate('/')
+  }
 
-    return false
-  })
-
-  const notificacoes = useMemo(
-    () => [...notificacoesFinanceiras, ...notificacoesSistema],
-    [notificacoesFinanceiras, notificacoesSistema]
+  const tituloPagina = useMemo(
+    () => obterTituloDaPagina(location.pathname),
+    [location.pathname]
   )
 
-  const notificacoesNaoLidas = notificacoes.filter((n) => !n.lida).length
-  const isDark = tema === 'dark'
-
-  const cores = {
-    appBg: isDark ? '#0b1220' : '#f1f5f9',
-    sidebarBg: '#020617',
-    sidebarText: '#ffffff',
-    menuText: isDark ? '#cbd5e1' : '#cbd5f5',
-    menuHoverBg: isDark ? '#172033' : '#0f172a',
-    menuActiveBg: 'linear-gradient(135deg, #22c55e, #16a34a)',
-    menuActiveText: '#022c22',
-    headerBg: isDark ? '#111827' : '#ffffff',
-    headerBorder: isDark ? '#1f2937' : '#e5e7eb',
-    titleText: isDark ? '#f8fafc' : '#0f172a',
-    subtitleText: isDark ? '#94a3b8' : '#64748b',
-    contentBg: isDark ? '#0b1220' : '#f1f5f9',
-    cardBorder: isDark ? '#1f2937' : '#e5e7eb',
-    notificationBtnBg: isDark ? '#0f172a' : '#f8fafc',
-    notificationBtnBorder: isDark ? '#1f2937' : '#e2e8f0',
-    notificationPanelBg: isDark ? '#111827' : '#ffffff',
-    notificationTitle: isDark ? '#f8fafc' : '#0f172a',
-    notificationText: isDark ? '#cbd5e1' : '#475569',
-    notificationMuted: isDark ? '#94a3b8' : '#64748b',
-    notificationItemUnread: isDark ? '#052e1a' : '#f0fdf4',
-    notificationItemRead: isDark ? '#111827' : '#ffffff',
-    separator: isDark ? '#1f2937' : '#f1f5f9',
-    onlineBg: isDark ? '#14532d' : '#dcfce7',
-    onlineText: isDark ? '#bbf7d0' : '#166534',
-    avatarBg: '#22c55e',
-    avatarText: '#ffffff',
-    themeBtnBg: isDark ? '#0f172a' : '#f8fafc',
-    themeBtnBorder: isDark ? '#1f2937' : '#e2e8f0',
-    themeBtnText: isDark ? '#f8fafc' : '#0f172a',
-  }
+  const iniciais = useMemo(
+    () => obterIniciais(usuario?.nome, usuario?.email),
+    [usuario]
+  )
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        minHeight: '100vh',
-        background: cores.appBg,
-        color: cores.titleText,
-      }}
-    >
-      <aside
-        style={{
-          width: '240px',
-          background: cores.sidebarBg,
-          color: cores.sidebarText,
-          padding: '24px',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <div style={{ marginBottom: '40px', textAlign: 'center' }}>
-          <img
-            src="/logo-rg.png"
-            alt="RG Ambiental"
-            style={{
-              width: '200px',
-              height: 'auto',
-              filter: 'drop-shadow(0 0 6px rgba(34,197,94,0.3))',
-            }}
-          />
+    <div className="layout-root">
+      <aside className="layout-sidebar">
+        <div className="layout-sidebar__brand">
+          <div className="layout-sidebar__logo-row">
+            {logoCarregou ? (
+              <img
+                className="layout-sidebar__logo-img"
+                src="/logo-rg.png"
+                alt="RG Ambiental"
+                onError={() => setLogoCarregou(false)}
+              />
+            ) : (
+              <span className="layout-sidebar__wordmark">RG Ambiental</span>
+            )}
+          </div>
+          <div className="layout-sidebar__eyebrow">Painel operacional</div>
         </div>
 
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {menuItems.map((item) => {
-            const isActive = location.pathname === item.path
-            const mostrarBadgeFinanceiro =
-              item.name === 'Financeiro' && quantidadeFinanceiroVencido > 0
-
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                style={{
-                  padding: '12px 16px',
-                  borderRadius: '10px',
-                  textDecoration: 'none',
-                  color: isActive ? cores.menuActiveText : cores.menuText,
-                  background: isActive ? cores.menuActiveBg : 'transparent',
-                  fontWeight: isActive ? '600' : '400',
-                  transition: 'all 0.2s ease',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '10px',
-                }}
-              >
-                <span>{item.name}</span>
-
-                {mostrarBadgeFinanceiro && (
-                  <span
-                    style={{
-                      minWidth: '22px',
-                      height: '22px',
-                      padding: '0 7px',
-                      borderRadius: '999px',
-                      background: '#dc2626',
-                      color: '#ffffff',
-                      fontSize: '11px',
-                      fontWeight: '700',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                    }}
+        <div className="layout-sidebar__nav-wrap">
+          <nav className="layout-sidebar__groups" aria-label="Navegação principal">
+            {menuGroups.map((group) => {
+              const secaoAberta = openSections[group.title] !== false
+              return (
+                <div key={group.title} className="layout-sidebar__group">
+                  <button
+                    type="button"
+                    className="layout-sidebar__group-toggle"
+                    aria-expanded={secaoAberta}
+                    onClick={() => alternarSecaoSidebar(group.title)}
                   >
-                    {quantidadeFinanceiroVencido > 99
-                      ? '99+'
-                      : quantidadeFinanceiroVencido}
-                  </span>
-                )}
-              </Link>
-            )
-          })}
-        </nav>
+                    <span className="layout-sidebar__group-label-bar" aria-hidden />
+                    <span className="layout-sidebar__group-title">{group.title}</span>
+                    <span className="layout-sidebar__group-chevron" aria-hidden>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </span>
+                  </button>
+                  {secaoAberta ? (
+                    <div className="layout-sidebar__group-items">
+                      {group.items.map((item) => (
+                        <NavLink
+                          key={item.path}
+                          to={item.path}
+                          end={navLinkEndExact(item.path)}
+                          className="sidebar-nav-link"
+                        >
+                          {item.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+          </nav>
+        </div>
+
+        <div className="layout-sidebar__footer">
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="layout-sidebar-logout"
+          >
+            Sair da conta
+          </button>
+        </div>
       </aside>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <header
-          style={{
-            height: '70px',
-            background: cores.headerBg,
-            borderBottom: `1px solid ${cores.headerBorder}`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '0 30px',
-          }}
-        >
-          <div>
-            <div style={{ fontSize: '14px', color: cores.subtitleText }}>
-              Sistema RG Ambiental
-            </div>
-            <div
-              style={{
-                fontSize: '18px',
-                fontWeight: '700',
-                color: cores.titleText,
-              }}
-            >
-              Painel operacional
+      <div className="layout-main">
+        <header className="layout-header">
+          <div className="layout-header-left">
+            <nav className="layout-breadcrumb" aria-label="Trilha de navegação">
+              <Link to="/dashboard">Início</Link>
+            </nav>
+            <h1 className="layout-title">{tituloPagina}</h1>
+            <p className="layout-tagline">RG Ambiental · Painel operacional</p>
+          </div>
+
+          <div className="layout-header-search">
+            <div className="layout-search-wrap">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"
+                />
+              </svg>
+              <input
+                type="search"
+                className="layout-search-input"
+                placeholder="Buscar no sistema..."
+                aria-label="Buscar no sistema"
+                autoComplete="off"
+              />
             </div>
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '20px',
-            }}
-          >
+          <div className="layout-header-actions">
+            <div className="layout-pill layout-pill--success">Online</div>
+
+            <CabecalhoDataHora />
+
+            <div className="layout-user-block">
+              <div className="layout-user-name">
+                {usuario?.nome || usuario?.email || 'Usuário'}
+              </div>
+              <div className="layout-user-role">{usuario?.cargo || 'Administrador'}</div>
+            </div>
+
+            <input
+              ref={inputFotoRef}
+              type="file"
+              className="layout-avatar-file-input"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              aria-hidden
+              tabIndex={-1}
+              onChange={handleEscolherFoto}
+            />
             <button
-              onClick={alternarTema}
-              style={{
-                background: cores.themeBtnBg,
-                border: `1px solid ${cores.themeBtnBorder}`,
-                color: cores.themeBtnText,
-                padding: '8px 14px',
-                borderRadius: '10px',
-                fontSize: '13px',
-                fontWeight: '600',
-                cursor: 'pointer',
-              }}
+              type="button"
+              className="layout-avatar layout-avatar--interactive"
+              disabled={enviandoFoto}
+              title="Alterar foto de perfil"
+              aria-label="Alterar foto de perfil"
+              onClick={() => inputFotoRef.current?.click()}
             >
-              {isDark ? 'Light mode' : 'Dark mode'}
+              {usuario?.foto_url && !fotoIndisponivel ? (
+                <img
+                  src={usuario.foto_url}
+                  alt=""
+                  className="layout-avatar__img"
+                  onError={() => setFotoIndisponivel(true)}
+                />
+              ) : (
+                <span className="layout-avatar__initials">{iniciais}</span>
+              )}
             </button>
 
-            <div
-              style={{
-                background: cores.onlineBg,
-                color: cores.onlineText,
-                padding: '6px 12px',
-                borderRadius: '999px',
-                fontSize: '12px',
-                fontWeight: '600',
-              }}
-            >
-              Online
-            </div>
-
-            <div style={{ fontSize: '13px', color: cores.notificationText }}>
-              {dataHora}
-            </div>
-
-            <div style={{ position: 'relative' }} ref={notificacoesRef}>
-              <button
-                onClick={toggleNotificacoes}
-                style={{
-                  position: 'relative',
-                  background: cores.notificationBtnBg,
-                  border: `1px solid ${cores.notificationBtnBorder}`,
-                  borderRadius: '10px',
-                  width: '42px',
-                  height: '42px',
-                  cursor: 'pointer',
-                  fontSize: '18px',
-                  color: cores.titleText,
-                }}
-              >
-                🔔
-
-                {notificacoesNaoLidas > 0 && (
-                  <span
-                    style={{
-                      position: 'absolute',
-                      top: '-6px',
-                      right: '-6px',
-                      minWidth: '20px',
-                      height: '20px',
-                      padding: '0 6px',
-                      borderRadius: '999px',
-                      background:
-                        notificacoesFinanceiras.some((n) => !n.lida) ? '#dc2626' : '#16a34a',
-                      color: '#fff',
-                      fontSize: '11px',
-                      fontWeight: '700',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    {notificacoesNaoLidas}
-                  </span>
-                )}
-              </button>
-
-              {abrirNotificacoes && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '52px',
-                    right: '0',
-                    width: '380px',
-                    background: cores.notificationPanelBg,
-                    border: `1px solid ${cores.cardBorder}`,
-                    borderRadius: '14px',
-                    boxShadow: '0 18px 40px rgba(15, 23, 42, 0.14)',
-                    overflow: 'hidden',
-                    zIndex: 50,
-                  }}
-                >
-                  <div
-                    style={{
-                      padding: '16px',
-                      borderBottom: `1px solid ${cores.cardBorder}`,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                    }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          fontSize: '15px',
-                          fontWeight: '700',
-                          color: cores.notificationTitle,
-                        }}
-                      >
-                        Notificações
-                      </div>
-                      <div
-                        style={{
-                          fontSize: '12px',
-                          color: cores.notificationMuted,
-                          marginTop: '4px',
-                        }}
-                      >
-                        {notificacoesNaoLidas} não lida(s)
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={marcarTodasComoLidas}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: '#16a34a',
-                        fontSize: '12px',
-                        fontWeight: '700',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Marcar todas
-                    </button>
-                  </div>
-
-                  <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
-                    {notificacoes.length === 0 ? (
-                      <div
-                        style={{
-                          padding: '20px',
-                          fontSize: '14px',
-                          color: cores.notificationMuted,
-                          textAlign: 'center',
-                        }}
-                      >
-                        Nenhuma notificação no momento.
-                      </div>
-                    ) : (
-                      notificacoes.map((notificacao) => {
-                        const ehFinanceiro = notificacao.tipo === 'financeiro'
-
-                        return (
-                          <button
-                            key={notificacao.id}
-                            onClick={() => marcarComoLida(notificacao.id)}
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              background: notificacao.lida
-                                ? cores.notificationItemRead
-                                : ehFinanceiro
-                                ? (isDark ? '#3f0d0d' : '#fef2f2')
-                                : cores.notificationItemUnread,
-                              border: 'none',
-                              borderBottom: `1px solid ${cores.separator}`,
-                              padding: '14px 16px',
-                              cursor: 'pointer',
-                            }}
-                          >
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'flex-start',
-                                justifyContent: 'space-between',
-                                gap: '10px',
-                              }}
-                            >
-                              <div>
-                                <div
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '8px',
-                                    marginBottom: '4px',
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      fontSize: '14px',
-                                      fontWeight: '700',
-                                      color: cores.notificationTitle,
-                                    }}
-                                  >
-                                    {notificacao.titulo}
-                                  </div>
-
-                                  {ehFinanceiro && (
-                                    <span
-                                      style={{
-                                        background: '#dc2626',
-                                        color: '#fff',
-                                        padding: '2px 8px',
-                                        borderRadius: '999px',
-                                        fontSize: '10px',
-                                        fontWeight: '700',
-                                      }}
-                                    >
-                                      Financeiro
-                                    </span>
-                                  )}
-                                </div>
-
-                                <div
-                                  style={{
-                                    fontSize: '13px',
-                                    color: cores.notificationText,
-                                    lineHeight: '1.4',
-                                  }}
-                                >
-                                  {notificacao.descricao}
-                                </div>
-
-                                <div
-                                  style={{
-                                    fontSize: '12px',
-                                    color: cores.notificationMuted,
-                                    marginTop: '8px',
-                                  }}
-                                >
-                                  {notificacao.horario}
-                                </div>
-                              </div>
-
-                              {!notificacao.lida && (
-                                <span
-                                  style={{
-                                    width: '10px',
-                                    height: '10px',
-                                    borderRadius: '999px',
-                                    background: ehFinanceiro ? '#dc2626' : '#16a34a',
-                                    marginTop: '4px',
-                                    flexShrink: 0,
-                                  }}
-                                />
-                              )}
-                            </div>
-                          </button>
-                        )
-                      })
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div style={{ textAlign: 'right' }}>
-              <div
-                style={{
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  color: cores.titleText,
-                }}
-              >
-                {nomeUsuario}
-              </div>
-              <div style={{ fontSize: '12px', color: cores.subtitleText }}>
-                {cargoUsuario}
-              </div>
-            </div>
-
-            <div
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                background: cores.avatarBg,
-                color: cores.avatarText,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: '700',
-              }}
-            >
-              {iniciaisUsuario}
-            </div>
-
-            <button
-              onClick={handleLogout}
-              style={{
-                background: '#dc2626',
-                color: '#fff',
-                border: 'none',
-                padding: '10px 14px',
-                borderRadius: '10px',
-                cursor: 'pointer',
-                fontWeight: 700,
-              }}
-            >
+            <button type="button" onClick={handleLogout} className="layout-btn-sair">
               Sair
             </button>
           </div>
         </header>
 
-        <main
-          style={{
-            flex: 1,
-            padding: '30px',
-            background: cores.contentBg,
-          }}
-        >
-          {children}
+        <main className="layout-main-scroll">
+          <div className="layout-main-scroll-inner">{children}</div>
         </main>
       </div>
     </div>
   )
 }
-
-export default MainLayout

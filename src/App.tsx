@@ -1,16 +1,40 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 
 import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
-import Clientes from './pages/Clientes'
-import Coletas from './pages/Coletas'
-import MTR from './pages/MTR'
-import Financeiro from './pages/Financeiro'
-import Rotas from './pages/Rotas'
-import Usuarios from './pages/Usuarios'
+
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Clientes = lazy(() => import('./pages/Clientes'))
+const Financeiro = lazy(() => import('./pages/Financeiro'))
+const Rotas = lazy(() => import('./pages/Rotas'))
+const Usuarios = lazy(() => import('./pages/Usuarios'))
+const ChecklistTransporte = lazy(() => import('./pages/ChecklistTransporte'))
+const ConferenciaTransporte = lazy(() => import('./pages/ConferenciaTransporte'))
+const TicketOperacional = lazy(() => import('./pages/TicketOperacional'))
+const AprovacaoDiretoria = lazy(() => import('./pages/AprovacaoDiretoria'))
+const FaturamentoOperacional = lazy(() => import('./pages/FaturamentoOperacional'))
+const Programacao = lazy(() => import('./pages/Programacao'))
+const MTR = lazy(() => import('./pages/MTR'))
+const ControleMassa = lazy(() => import('./pages/ControleMassa'))
+
+const routeSuspenseFallback = (
+  <div
+    style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: '#f1f5f9',
+      color: '#334155',
+      fontSize: '18px',
+      fontWeight: 600,
+    }}
+  >
+    Carregando página...
+  </div>
+)
 
 type UsuarioPerfil = {
   id: string
@@ -18,6 +42,7 @@ type UsuarioPerfil = {
   email: string
   cargo: string
   status: string
+  foto_url?: string | null
 }
 
 type ProtectedRouteProps = {
@@ -73,6 +98,33 @@ function ProtectedRoute({
   return <>{children}</>
 }
 
+/** Links antigos /coletas?… passam a abrir o hub operacional (Controle de Massa). */
+function RedirectColetasParaControleMassa() {
+  const { search, hash } = useLocation()
+  return <Navigate to={`/controle-massa${search}${hash}`} replace />
+}
+
+/** A página «Conferência» operacional foi integrada ao fluxo via Controle de Massa / outras etapas. */
+function RedirectConferenciaOperacionalParaControleMassa() {
+  const { search } = useLocation()
+  return <Navigate to={`/controle-massa${search}`} replace />
+}
+
+/**
+ * Mesmos perfis do Dashboard: o menu «Seguimento da coleta» deve abrir para todos.
+ * Quem pode editar em cada etapa continua definido em workflowPermissions / UI.
+ */
+const ROLES_SEGUIMENTO_COLETA = [
+  'Administrador',
+  'Operacional',
+  'Logística',
+  'Balanceiro',
+  'Diretoria',
+  'Faturamento',
+  'Financeiro',
+  'Visualizador',
+] as const
+
 function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
   const [usuario, setUsuario] = useState<UsuarioPerfil | null>(null)
@@ -124,7 +176,7 @@ function App() {
 
       const { data, error } = await supabase
         .from('usuarios')
-        .select('*')
+        .select('id, nome, email, cargo, status, foto_url')
         .eq('id', user.id)
         .maybeSingle()
 
@@ -169,6 +221,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <Suspense fallback={routeSuspenseFallback}>
       <Routes>
         {!session ? (
           <>
@@ -189,6 +242,10 @@ function App() {
                   allowedRoles={[
                     'Administrador',
                     'Operacional',
+                    'Logística',
+                    'Balanceiro',
+                    'Diretoria',
+                    'Faturamento',
                     'Financeiro',
                     'Visualizador',
                   ]}
@@ -208,11 +265,29 @@ function App() {
                   allowedRoles={[
                     'Administrador',
                     'Operacional',
+                    'Logística',
+                    'Balanceiro',
+                    'Diretoria',
+                    'Faturamento',
                     'Financeiro',
                     'Visualizador',
                   ]}
                 >
                   <Clientes />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/programacao"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={['Administrador', 'Operacional', 'Visualizador']}
+                >
+                  <Programacao />
                 </ProtectedRoute>
               }
             />
@@ -224,9 +299,18 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Operacional']}
+                  allowedRoles={[
+                    'Administrador',
+                    'Operacional',
+                    'Logística',
+                    'Balanceiro',
+                    'Diretoria',
+                    'Faturamento',
+                    'Financeiro',
+                    'Visualizador',
+                  ]}
                 >
-                  <Coletas />
+                  <RedirectColetasParaControleMassa />
                 </ProtectedRoute>
               }
             />
@@ -238,9 +322,135 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Operacional']}
+                  allowedRoles={['Administrador', 'Operacional', 'Visualizador']}
                 >
                   <MTR />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/mtr/:coletaId"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={['Administrador', 'Operacional', 'Visualizador']}
+                >
+                  <MTR />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/controle-massa"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={['Administrador', 'Operacional', 'Logística', 'Balanceiro', 'Visualizador']}
+                >
+                  <ControleMassa />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/controle-massa/:coletaId"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={['Administrador', 'Operacional', 'Logística', 'Balanceiro', 'Visualizador']}
+                >
+                  <ControleMassa />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/checklist-transporte"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                >
+                  <ChecklistTransporte />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/conferencia-transporte"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                >
+                  <ConferenciaTransporte />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/conferencia-operacional"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                >
+                  <RedirectConferenciaOperacionalParaControleMassa />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/ticket-operacional"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                >
+                  <TicketOperacional />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/aprovacao"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                >
+                  <AprovacaoDiretoria />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/faturamento"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                >
+                  <FaturamentoOperacional />
                 </ProtectedRoute>
               }
             />
@@ -252,7 +462,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Financeiro']}
+                  allowedRoles={['Administrador', 'Financeiro', 'Faturamento', 'Visualizador']}
                 >
                   <Financeiro />
                 </ProtectedRoute>
@@ -266,7 +476,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Operacional']}
+                  allowedRoles={['Administrador', 'Operacional', 'Logística', 'Visualizador']}
                 >
                   <Rotas />
                 </ProtectedRoute>
@@ -291,6 +501,7 @@ function App() {
           </>
         )}
       </Routes>
+      </Suspense>
     </BrowserRouter>
   )
 }
