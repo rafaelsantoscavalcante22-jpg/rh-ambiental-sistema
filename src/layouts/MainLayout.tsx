@@ -53,7 +53,10 @@ const menuGroups: { title: string; items: MenuItem[] }[] = [
   },
   {
     title: 'Sistema',
-    items: [{ label: 'Usuários', path: '/usuarios' }],
+    items: [
+      { label: 'Chat Interno', path: '/chat' },
+      { label: 'Usuários', path: '/usuarios' },
+    ],
   },
 ]
 

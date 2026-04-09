@@ -13,7 +13,7 @@ export const COLETAS_SELECT_SEGUIMENTO = '*'
  * Reduz muito o payload vs `*` em milhares de linhas. Se falhar (schema), usa `*`.
  */
 export const COLETAS_SELECT_CONTROLE_LISTA =
-  'id, numero_coleta, numero, cliente, nome_cliente, tipo_residuo, residuo, placa, motorista, motorista_nome, status, status_processo, fluxo_status, etapa_operacional, peso_tara, peso_bruto, peso_liquido, mtr_id, programacao_id, cliente_id, created_at'
+  'id, numero_coleta, numero, cliente, nome_cliente, tipo_residuo, residuo, residuo_catalogo_id, placa, motorista, motorista_nome, status, status_processo, fluxo_status, etapa_operacional, peso_tara, peso_bruto, peso_liquido, mtr_id, programacao_id, cliente_id, created_at'
 
 /**
  * Coletas — resumo para telas de seguimento (sem `*`): reduz payload em listas longas.

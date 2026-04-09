@@ -15,6 +15,7 @@ import {
   COLETAS_SELECT_SEGUIMENTO,
   queryColetasListaFluxoControle,
 } from "../lib/coletasSelectSeguimento";
+import { fetchResiduosCatalogo, mapResiduosPorId, type ResiduoCatalogo } from "../lib/residuosCatalogo";
 import { supabase } from "../lib/supabase";
 import MainLayout from "../layouts/MainLayout";
 import { cargoPodeMutarControleMassa, cargoPodeMutarMtr } from "../lib/workflowPermissions";
@@ -38,6 +39,11 @@ type ColetaOpcao = {
   numero: string;
   cliente: string;
   tipo_residuo: string;
+  /** FK opcional para `public.residuos` (catálogo com código). */
+  residuo_catalogo_id: string | null;
+  /** Preenchido na lista quando há vínculo ao catálogo. */
+  residuo_codigo?: string | null;
+  residuo_nome_lista?: string | null;
   placa: string;
   motorista: string;
   status: string;
@@ -68,6 +74,7 @@ type FormRegistro = {
   data: string;
   empresa: string;
   residuo: string;
+  residuo_catalogo_id: string;
   placa: string;
   motorista: string;
   peso_tara: string;
@@ -82,6 +89,7 @@ const formInicial: FormRegistro = {
   data: "",
   empresa: "",
   residuo: "",
+  residuo_catalogo_id: "",
   placa: "",
   motorista: "",
   peso_tara: "",
@@ -119,6 +127,10 @@ function mapRowToColetaOpcao(item: Record<string, unknown>): ColetaOpcao {
     numero: String(item.numero_coleta ?? item.numero ?? item.id ?? ""),
     cliente: String(item.cliente ?? item.nome_cliente ?? ""),
     tipo_residuo: String(item.tipo_residuo ?? item.residuo ?? ""),
+    residuo_catalogo_id:
+      item.residuo_catalogo_id != null && String(item.residuo_catalogo_id).trim() !== ""
+        ? String(item.residuo_catalogo_id)
+        : null,
     placa: String(item.placa ?? ""),
     motorista: String(item.motorista_nome ?? item.motorista ?? ""),
     status: String(item.status ?? item.status_processo ?? ""),
@@ -423,6 +435,7 @@ async function criarColetaVinculadaAMtr(
     motorista: string;
     placa: string;
     residuoFallback: string;
+    residuo_catalogo_id?: string | null;
   }
 ): Promise<{ ok: true; coletaId: string } | { ok: false; message: string }> {
   const { data: mtr, error: errMtr } = await supabase
@@ -472,6 +485,8 @@ async function criarColetaVinculadaAMtr(
     opts.residuoFallback.trim() ||
     String(m.tipo_residuo ?? "");
 
+  const resCat = opts.residuo_catalogo_id?.trim() || null;
+
   const row: Record<string, unknown> = {
     mtr_id: mtrId,
     programacao_id: progId,
@@ -479,6 +494,7 @@ async function criarColetaVinculadaAMtr(
     cliente: clienteNome,
     cidade: String(m.cidade ?? ""),
     tipo_residuo: tipoRes || "—",
+    residuo_catalogo_id: resCat,
     endereco: String(m.endereco ?? "—"),
     responsavel_interno: "—",
     data_agendada: dataAg,
@@ -537,6 +553,7 @@ export default function ControleMassa() {
 
   /** Todas as coletas (validação, URL e atualização no save). */
   const [todasColetas, setTodasColetas] = useState<ColetaOpcao[]>([]);
+  const [residuosCatalogo, setResiduosCatalogo] = useState<ResiduoCatalogo[]>([]);
   const [mtrsLista, setMtrsLista] = useState<MtrResumo[]>([]);
   const [loadingVinculo, setLoadingVinculo] = useState(true);
   const [salvando, setSalvando] = useState(false);
@@ -845,10 +862,58 @@ export default function ControleMassa() {
     void carregarCargo();
   }, []);
 
+  useEffect(() => {
+    void fetchResiduosCatalogo().then(setResiduosCatalogo);
+  }, []);
+
+  const catalogoResiduosPorId = useMemo(
+    () => mapResiduosPorId(residuosCatalogo),
+    [residuosCatalogo]
+  );
+
+  const coletasComCatalogoResiduo = useMemo(() => {
+    return todasColetas.map((c) => {
+      const rid = c.residuo_catalogo_id;
+      if (!rid) {
+        return {
+          ...c,
+          residuo_codigo: null as string | null,
+          residuo_nome_lista: null as string | null,
+        };
+      }
+      const r = catalogoResiduosPorId.get(rid);
+      if (!r) {
+        return { ...c, residuo_codigo: null, residuo_nome_lista: null };
+      }
+      return { ...c, residuo_codigo: r.codigo, residuo_nome_lista: r.nome };
+    });
+  }, [todasColetas, catalogoResiduosPorId]);
+
   function handleInputChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) {
     const { name, value } = e.target;
+
+    if (name === "residuo_catalogo_id") {
+      setForm((prev) => {
+        if (!value) {
+          return { ...prev, residuo_catalogo_id: "" };
+        }
+        const r = catalogoResiduosPorId.get(value);
+        const texto = r ? `${r.codigo} — ${r.nome}` : prev.residuo;
+        return { ...prev, residuo_catalogo_id: value, residuo: texto };
+      });
+      return;
+    }
+
+    if (name === "residuo") {
+      setForm((prev) => ({
+        ...prev,
+        residuo: value,
+        residuo_catalogo_id: "",
+      }));
+      return;
+    }
 
     if (name === "peso_tara" || name === "peso_bruto") {
       const proximo = {
@@ -876,6 +941,7 @@ export default function ControleMassa() {
       coleta_id: coletaSelecionada.id,
       empresa: coletaSelecionada.cliente || prev.empresa,
       residuo: coletaSelecionada.tipo_residuo || prev.residuo,
+      residuo_catalogo_id: coletaSelecionada.residuo_catalogo_id ?? "",
       placa: coletaSelecionada.placa || prev.placa,
       motorista: coletaSelecionada.motorista || prev.motorista,
       peso_tara:
@@ -898,6 +964,7 @@ export default function ControleMassa() {
         coleta_id: "",
         empresa: "",
         residuo: "",
+        residuo_catalogo_id: "",
         placa: "",
         motorista: "",
         peso_tara: "",
@@ -926,6 +993,7 @@ export default function ControleMassa() {
         coleta_id: "",
         empresa: m?.cliente ?? "",
         residuo: m?.tipo_residuo ? m.tipo_residuo : prev.residuo,
+        residuo_catalogo_id: "",
         placa: "",
         motorista: "",
         peso_tara: "",
@@ -1197,6 +1265,7 @@ export default function ControleMassa() {
         motorista: form.motorista,
         placa: form.placa,
         residuoFallback: form.residuo,
+        residuo_catalogo_id: form.residuo_catalogo_id.trim() || null,
       });
 
       if (!criada.ok) {
@@ -1257,12 +1326,18 @@ export default function ControleMassa() {
 
     const fluxoPosPesagem = ticketAuto.ok ? "TICKET_GERADO" : "CONTROLE_PESAGEM_LANCADO";
 
+    const tipoResGravar =
+      (form.residuo.trim() || coletaVinculo?.tipo_residuo || "—").trim() || "—";
+    const resCatGravar = form.residuo_catalogo_id.trim() || null;
+
     const { error: errorColeta } = await supabase
       .from("coletas")
       .update({
         peso_tara: pesoTaraNumero,
         peso_bruto: pesoBrutoNumero,
         peso_liquido: pesoLiquidoNumero,
+        tipo_residuo: tipoResGravar,
+        residuo_catalogo_id: resCatGravar,
         fluxo_status: fluxoPosPesagem,
         etapa_operacional: fluxoPosPesagem,
         status_processo: "EM_CONFERENCIA",
@@ -1311,7 +1386,7 @@ export default function ControleMassa() {
   }
 
   const coletasListaOrdenadas = useMemo(() => {
-    const arr = [...todasColetas];
+    const arr = [...coletasComCatalogoResiduo];
     arr.sort((a, b) => {
       const ta = a.created_at ? Date.parse(a.created_at) : 0;
       const tb = b.created_at ? Date.parse(b.created_at) : 0;
@@ -1319,7 +1394,7 @@ export default function ControleMassa() {
       return String(b.numero).localeCompare(String(a.numero), undefined, { numeric: true });
     });
     return arr;
-  }, [todasColetas]);
+  }, [coletasComCatalogoResiduo]);
 
   const coletasListaFiltradas = useMemo(() => {
     const t = normalizarTextoBusca(buscaColetasLista);
@@ -1332,6 +1407,8 @@ export default function ControleMassa() {
         c.numero,
         c.cliente,
         c.tipo_residuo,
+        c.residuo_codigo ?? "",
+        c.residuo_nome_lista ?? "",
         c.placa,
         c.motorista,
         mtrNo,
@@ -1572,7 +1649,8 @@ export default function ControleMassa() {
                     <th style={thListaColetaStyle}>Placa</th>
                     <th style={thListaColetaStyle}>Tipo cam.</th>
                     <th style={{ ...thListaColetaStyle, minWidth: "140px" }}>Cliente</th>
-                    <th style={{ ...thListaColetaStyle, minWidth: "100px" }}>Resíduo</th>
+                    <th style={{ ...thListaColetaStyle, width: "76px" }}>Cód.</th>
+                    <th style={{ ...thListaColetaStyle, minWidth: "120px" }}>Resíduo</th>
                     <th style={{ ...thListaColetaStyle, textAlign: "right" }}>Bruto</th>
                     <th style={{ ...thListaColetaStyle, textAlign: "right" }}>Tara</th>
                     <th style={{ ...thListaColetaStyle, textAlign: "right" }}>Líq.</th>
@@ -1631,12 +1709,25 @@ export default function ControleMassa() {
                         <td
                           style={{
                             ...tdListaColetaStyle,
-                            maxWidth: "130px",
+                            whiteSpace: "nowrap",
+                            fontWeight: 800,
+                            color: "#0f766e",
+                            fontSize: "10px",
+                          }}
+                          title={c.residuo_codigo || undefined}
+                        >
+                          {c.residuo_codigo || "—"}
+                        </td>
+                        <td
+                          style={{
+                            ...tdListaColetaStyle,
+                            maxWidth: "160px",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                           }}
+                          title={c.residuo_nome_lista || c.tipo_residuo || undefined}
                         >
-                          {c.tipo_residuo || "—"}
+                          {c.residuo_nome_lista || c.tipo_residuo || "—"}
                         </td>
                         <td style={{ ...tdListaColetaStyle, textAlign: "right" }}>
                           {formatarNumero(c.peso_bruto)}
@@ -2043,11 +2134,28 @@ export default function ControleMassa() {
                     style={inputStyle}
                   />
 
+                  <select
+                    name="residuo_catalogo_id"
+                    value={form.residuo_catalogo_id}
+                    onChange={handleInputChange}
+                    style={inputStyle}
+                    aria-label="Catálogo de resíduos (código)"
+                  >
+                    <option value="">Catálogo de resíduos (código)</option>
+                    {residuosCatalogo
+                      .filter((r) => r.ativo)
+                      .map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.codigo} — {r.nome}
+                        </option>
+                      ))}
+                  </select>
+
                   <input
                     name="residuo"
                     value={form.residuo}
                     onChange={handleInputChange}
-                    placeholder="Resíduo"
+                    placeholder="Texto do resíduo (livre ou preenchido pelo catálogo)"
                     style={inputStyle}
                   />
 

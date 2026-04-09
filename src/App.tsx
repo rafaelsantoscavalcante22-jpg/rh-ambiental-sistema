@@ -17,6 +17,7 @@ const FaturamentoOperacional = lazy(() => import('./pages/FaturamentoOperacional
 const Programacao = lazy(() => import('./pages/Programacao'))
 const MTR = lazy(() => import('./pages/MTR'))
 const ControleMassa = lazy(() => import('./pages/ControleMassa'))
+const Chat = lazy(() => import('./pages/Chat'))
 
 const routeSuspenseFallback = (
   <div
@@ -478,6 +479,29 @@ function App() {
                   allowedRoles={['Administrador']}
                 >
                   <Usuarios />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/chat"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[
+                    'Administrador',
+                    'Operacional',
+                    'Logística',
+                    'Balanceiro',
+                    'Diretoria',
+                    'Faturamento',
+                    'Financeiro',
+                    'Visualizador',
+                  ]}
+                >
+                  <Chat />
                 </ProtectedRoute>
               }
             />
