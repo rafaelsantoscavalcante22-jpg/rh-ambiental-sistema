@@ -8,7 +8,6 @@ import Login from './pages/Login'
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Clientes = lazy(() => import('./pages/Clientes'))
 const Financeiro = lazy(() => import('./pages/Financeiro'))
-const Rotas = lazy(() => import('./pages/Rotas'))
 const Usuarios = lazy(() => import('./pages/Usuarios'))
 const ChecklistTransporte = lazy(() => import('./pages/ChecklistTransporte'))
 const ConferenciaTransporte = lazy(() => import('./pages/ConferenciaTransporte'))
@@ -465,20 +464,6 @@ function App() {
                   allowedRoles={['Administrador', 'Financeiro', 'Faturamento', 'Visualizador']}
                 >
                   <Financeiro />
-                </ProtectedRoute>
-              }
-            />
-
-            <Route
-              path="/rotas"
-              element={
-                <ProtectedRoute
-                  session={session}
-                  usuario={usuario}
-                  carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Operacional', 'Logística', 'Visualizador']}
-                >
-                  <Rotas />
                 </ProtectedRoute>
               }
             />

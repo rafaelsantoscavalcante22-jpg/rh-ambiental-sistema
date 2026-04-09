@@ -48,11 +48,8 @@ const menuGroups: { title: string; items: MenuItem[] }[] = [
     ],
   },
   {
-    title: 'Financeiro e linha do tempo',
-    items: [
-      { label: 'Financeiro', path: '/financeiro' },
-      { label: 'Linha do tempo', path: '/rotas' },
-    ],
+    title: 'Financeiro',
+    items: [{ label: 'Financeiro', path: '/financeiro' }],
   },
   {
     title: 'Sistema',

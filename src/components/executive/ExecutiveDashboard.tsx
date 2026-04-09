@@ -30,6 +30,7 @@ import {
   ExecutivePrintReportRoot,
   type ExecutivePrintReportProps,
 } from './ExecutiveDashboardPrintReport'
+import { ExecutiveLinhaTempoModal } from './ExecutiveLinhaTempoModal'
 
 /** Paleta BI premium — teal RG refinado + neutros frios */
 const CHART_COLORS = [
@@ -215,6 +216,7 @@ export function ExecutiveDashboard() {
     })
   )
   const [relatorioPrintNonce, setRelatorioPrintNonce] = useState(0)
+  const [linhaTempoAberta, setLinhaTempoAberta] = useState(false)
 
   const carregar = useCallback(async () => {
     try {
@@ -309,6 +311,22 @@ export function ExecutiveDashboard() {
   const coletasFiltradas = useMemo(
     () => filtrarColetasNoIntervalo(rangeIni, rangeFim),
     [filtrarColetasNoIntervalo, rangeIni, rangeFim]
+  )
+
+  const coletasLinhaTempo = useMemo(
+    () =>
+      coletasFiltradas.map((c) => ({
+        id: c.id,
+        numero: String(c.numero ?? ''),
+        cliente: String(c.cliente ?? ''),
+        cidade: String(c.cidade ?? ''),
+        data_agendada: c.data_agendada,
+        fluxo_status: c.fluxo_status,
+        etapa_operacional: c.etapa_operacional,
+        mtr_id: c.mtr_id,
+        created_at: c.created_at,
+      })),
+    [coletasFiltradas]
   )
 
   const intervaloAnterior = useMemo(() => {
@@ -896,6 +914,12 @@ export function ExecutiveDashboard() {
   return (
     <MainLayout>
       {createPortal(<ExecutivePrintReportRoot {...relatorioGerencialProps} />, document.body)}
+      <ExecutiveLinhaTempoModal
+        open={linhaTempoAberta}
+        onClose={() => setLinhaTempoAberta(false)}
+        coletas={coletasLinhaTempo}
+        periodoLabel={periodoIntervaloLabel}
+      />
       <div className="page-shell exec-dash exec-dash-premium">
         <header style={execHeroOuter} className="exec-hero-premium exec-hero-board">
           <div style={execHeroInner}>
@@ -938,6 +962,30 @@ export function ExecutiveDashboard() {
                 </span>
               </div>
               <div className="exec-hero-actions__btns">
+                <button
+                  type="button"
+                  className="exec-timeline-open-btn"
+                  onClick={() => setLinhaTempoAberta(true)}
+                  title="Ver em que etapa do fluxo está cada coleta do período filtrado"
+                >
+                  <svg
+                    className="exec-timeline-open-btn__icon"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    aria-hidden
+                  >
+                    <path
+                      fill="currentColor"
+                      d="M5 5h2v3H5V5zm4 0h10v3H9V5zM5 11h2v3H5v-3zm4 0h10v3H9v-3zm-4 6h2v3H5v-3zm4 0h10v3H9v-3z"
+                      opacity="0.35"
+                    />
+                    <circle cx="6" cy="6.5" r="2.25" fill="currentColor" />
+                    <circle cx="6" cy="12.5" r="2.25" fill="currentColor" opacity="0.55" />
+                    <circle cx="6" cy="18.5" r="2.25" fill="currentColor" opacity="0.35" />
+                  </svg>
+                  Linha do tempo
+                </button>
                 <button
                   type="button"
                   className="exec-print-report-btn"
