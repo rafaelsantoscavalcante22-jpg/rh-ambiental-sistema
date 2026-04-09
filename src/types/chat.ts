@@ -4,6 +4,8 @@ export type ChatUsuarioLista = {
   email: string
   cargo: string | null
   foto_url: string | null
+  /** Presença escolhida no perfil (online | ausente | offline). */
+  presenca_status?: string | null
 }
 
 export type ChatConversaLista = {

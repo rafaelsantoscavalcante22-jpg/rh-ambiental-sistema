@@ -17,6 +17,42 @@ function ordenarParUuid(me: string, outro: string): [string, string] {
   return outro < me ? [outro, me] : [me, outro]
 }
 
+/** Mesma ordem que PostgreSQL (`uuid < uuid`), para o par bater com `chat_conversas`. */
+async function ordenarParUuidDb(me: string, outro: string): Promise<[string, string]> {
+  const { data, error } = await supabase.rpc('chat_ordered_participant_pair', {
+    p_a: me,
+    p_b: outro,
+  })
+  if (error || data == null) return ordenarParUuid(me, outro)
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row || typeof row !== 'object') return ordenarParUuid(me, outro)
+  const o = row as { participant_low?: string; participant_high?: string }
+  if (!o.participant_low || !o.participant_high) return ordenarParUuid(me, outro)
+  return [o.participant_low, o.participant_high]
+}
+
+function mensagemPrimeiraLinhaRpc(data: unknown): ChatMensagem {
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row || typeof row !== 'object') throw new Error('Resposta inválida do servidor ao enviar.')
+  return row as ChatMensagem
+}
+
+function normalizarErroChat(e: unknown): Error {
+  if (e instanceof Error && !(e as PostgrestError).code) return e
+  if (e && typeof e === 'object' && 'message' in e) {
+    const p = e as PostgrestError
+    const m = [p.message, p.details].filter(Boolean).join(' — ')
+    if (/row-level security|\b42501\b/i.test(m)) {
+      return new Error(
+        'Sem permissão para enviar. Recarregue a página ou aplique as migrações do chat no Supabase (chat_insert_mensagem).'
+      )
+    }
+    if (m) return new Error(m)
+  }
+  if (e instanceof Error) return e
+  return new Error('Falha ao enviar.')
+}
+
 export function outroParticipanteId(
   conversa: { participant_low: string; participant_high: string },
   meuId: string
@@ -43,7 +79,7 @@ export async function chatListarUsuariosAtivos(meuId: string): Promise<ChatUsuar
 
     const { data, error } = await supabase
       .from('usuarios')
-      .select('id, nome, email, cargo, foto_url')
+      .select('id, nome, email, cargo, foto_url, presenca_status')
       .eq('status', 'ativo')
       .neq('id', meuId)
       .order('nome', { ascending: true, nullsFirst: false })
@@ -82,7 +118,7 @@ export async function chatGetOrCreateDirect(outroId: string): Promise<string> {
   if (peerErr) throw peerErr
   if (!peer) throw new Error('Utilizador não encontrado ou inativo.')
 
-  const [low, high] = ordenarParUuid(me, outroId)
+  const [low, high] = await ordenarParUuidDb(me, outroId)
 
   const found = await supabase
     .from('chat_conversas')
@@ -120,46 +156,78 @@ export async function chatGetOrCreateDirect(outroId: string): Promise<string> {
 }
 
 export async function chatCarregarConversas(meuId: string): Promise<ChatConversaLista[]> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  const uid = user?.id
+  if (!uid) throw new Error('Sessão inválida.')
+
   const { data: parts, error: e1 } = await supabase
     .from('chat_participantes')
-    .select('conversa_id, last_read_at')
-    .eq('user_id', meuId)
+    .select(
+      `
+      conversa_id,
+      last_read_at,
+      chat_conversas (
+        id,
+        participant_low,
+        participant_high,
+        ultima_preview,
+        ultima_em,
+        ultima_remetente_id
+      )
+    `
+    )
+    .eq('user_id', uid)
 
   if (e1) throw e1
   const rows = parts || []
-  if (rows.length === 0) return []
 
-  const ids = rows.map((r) => r.conversa_id)
-  const lastReadMap = new Map(rows.map((r) => [r.conversa_id, r.last_read_at]))
+  type ConvNested = {
+    id: string
+    participant_low: string
+    participant_high: string
+    ultima_preview: string | null
+    ultima_em: string | null
+    ultima_remetente_id: string | null
+  }
 
-  const { data: convs, error: e2 } = await supabase
-    .from('chat_conversas')
-    .select('id, participant_low, participant_high, ultima_preview, ultima_em, ultima_remetente_id')
-    .in('id', ids)
+  const list: ChatConversaLista[] = []
+  for (const r of rows as {
+    conversa_id: string
+    last_read_at: string | null
+    chat_conversas: ConvNested | ConvNested[] | null
+  }[]) {
+    const raw = r.chat_conversas
+    const c = Array.isArray(raw) ? raw[0] : raw
+    if (!c?.id) continue
 
-  if (e2) throw e2
+    list.push({
+      id: c.id,
+      participant_low: c.participant_low,
+      participant_high: c.participant_high,
+      ultima_preview: c.ultima_preview,
+      ultima_em: c.ultima_em,
+      ultima_remetente_id: c.ultima_remetente_id,
+      last_read_at: r.last_read_at,
+      outro_id: outroParticipanteId(c, uid),
+      unread: 0,
+    })
+  }
 
   const { data: unreadRows, error: e3 } = await supabase.rpc('chat_unread_by_conversa')
   const unreadMap = new Map<string, number>()
   if (!e3 && unreadRows) {
-    for (const r of unreadRows as { conversa_id: string; unread: number }[]) {
-      unreadMap.set(r.conversa_id, Number(r.unread))
+    for (const row of unreadRows as { conversa_id: string; unread: number }[]) {
+      unreadMap.set(row.conversa_id, Number(row.unread))
     }
   } else if (e3 && !chatRpcIndisponivel(e3)) {
     throw e3
   }
 
-  const list = (convs || []).map((c) => ({
-    id: c.id,
-    participant_low: c.participant_low,
-    participant_high: c.participant_high,
-    ultima_preview: c.ultima_preview,
-    ultima_em: c.ultima_em,
-    ultima_remetente_id: c.ultima_remetente_id,
-    last_read_at: lastReadMap.get(c.id) ?? null,
-    outro_id: outroParticipanteId(c as { participant_low: string; participant_high: string }, meuId),
-    unread: unreadMap.get(c.id) ?? 0,
-  }))
+  for (const item of list) {
+    item.unread = unreadMap.get(item.id) ?? 0
+  }
 
   list.sort((a, b) => {
     const ta = a.ultima_em ? new Date(a.ultima_em).getTime() : 0
@@ -167,17 +235,26 @@ export async function chatCarregarConversas(meuId: string): Promise<ChatConversa
     return tb - ta
   })
 
+  if (uid !== meuId) console.warn('[chat] carregar conversas: JWT difere do meuId passado à função')
+
   return list
 }
 
 export async function chatMarcarLida(conversaId: string, meuId: string): Promise<void> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  const uid = user?.id
+  if (!uid) throw new Error('Sessão inválida.')
+
   const { error } = await supabase
     .from('chat_participantes')
     .update({ last_read_at: new Date().toISOString() })
     .eq('conversa_id', conversaId)
-    .eq('user_id', meuId)
+    .eq('user_id', uid)
 
   if (error) throw error
+  if (uid !== meuId) console.warn('[chat] marcar lida: JWT difere do meuId')
 }
 
 export async function chatCarregarMensagens(conversaId: string, limite = 80): Promise<ChatMensagem[]> {
@@ -200,19 +277,45 @@ export async function chatEnviarTexto(
   meuId: string,
   texto: string
 ): Promise<ChatMensagem> {
+  const trimmed = texto.trim()
+  if (!trimmed) throw new Error('Mensagem vazia.')
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  const uid = user?.id
+  if (!uid) throw new Error('Sessão inválida.')
+  if (uid !== meuId) console.warn('[chat] remetente: JWT difere do estado da UI')
+
+  const rpc = await supabase.rpc('chat_insert_mensagem', {
+    p_conversa_id: conversaId,
+    p_conteudo: trimmed,
+    p_anexo_bucket: null,
+    p_anexo_path: null,
+    p_anexo_nome: null,
+    p_anexo_mime: null,
+    p_anexo_size: null,
+  })
+  if (!rpc.error && rpc.data != null) {
+    return mensagemPrimeiraLinhaRpc(rpc.data)
+  }
+  if (rpc.error && !chatRpcIndisponivel(rpc.error)) {
+    throw normalizarErroChat(rpc.error)
+  }
+
   const { data, error } = await supabase
     .from('chat_mensagens')
     .insert({
       conversa_id: conversaId,
-      remetente_id: meuId,
-      conteudo: texto.trim(),
+      remetente_id: uid,
+      conteudo: trimmed,
     })
     .select(
       'id, conversa_id, remetente_id, conteudo, anexo_bucket, anexo_path, anexo_nome, anexo_mime, anexo_size, created_at'
     )
     .single()
 
-  if (error) throw error
+  if (error) throw normalizarErroChat(error)
   return data as ChatMensagem
 }
 
@@ -231,14 +334,39 @@ export async function chatEnviarAnexo(
   })
   if (upErr) throw upErr
 
-  const conteudo =
-    legendaOpcional && legendaOpcional.trim().length > 0 ? legendaOpcional.trim() : 'Anexo enviado'
+  const conteudoLegenda =
+    legendaOpcional && legendaOpcional.trim().length > 0 ? legendaOpcional.trim() : ''
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  const uid = user?.id
+  if (!uid) throw new Error('Sessão inválida.')
+  if (uid !== meuId) console.warn('[chat] remetente: JWT difere do estado da UI')
+
+  const rpc = await supabase.rpc('chat_insert_mensagem', {
+    p_conversa_id: conversaId,
+    p_conteudo: conteudoLegenda || null,
+    p_anexo_bucket: BUCKET,
+    p_anexo_path: path,
+    p_anexo_nome: ficheiro.name,
+    p_anexo_mime: ficheiro.type || null,
+    p_anexo_size: ficheiro.size,
+  })
+  if (!rpc.error && rpc.data != null) {
+    return mensagemPrimeiraLinhaRpc(rpc.data)
+  }
+  if (rpc.error && !chatRpcIndisponivel(rpc.error)) {
+    throw normalizarErroChat(rpc.error)
+  }
+
+  const conteudo = conteudoLegenda || 'Anexo enviado'
 
   const { data, error } = await supabase
     .from('chat_mensagens')
     .insert({
       conversa_id: conversaId,
-      remetente_id: meuId,
+      remetente_id: uid,
       conteudo,
       anexo_bucket: BUCKET,
       anexo_path: path,
@@ -251,7 +379,7 @@ export async function chatEnviarAnexo(
     )
     .single()
 
-  if (error) throw error
+  if (error) throw normalizarErroChat(error)
   return data as ChatMensagem
 }
 

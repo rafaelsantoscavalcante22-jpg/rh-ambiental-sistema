@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ChatAvatar } from './ChatAvatar'
 import { chatUrlAssinadaAnexo } from '../../lib/chat'
+import { type PresencaStatus, etiquetaPresenca } from '../../lib/presencaStatus'
 import type { ChatMensagem } from '../../types/chat'
 
 type Props = {
   meuId: string
   outroNome: string
   outroFoto: string | null
-  online: boolean
+  presencaOutro: PresencaStatus
   mensagens: ChatMensagem[]
   enviando: boolean
   onEnviarTexto: (texto: string) => Promise<void>
@@ -18,7 +19,7 @@ export function ChatThreadPanel({
   meuId,
   outroNome,
   outroFoto,
-  online,
+  presencaOutro,
   mensagens,
   enviando,
   onEnviarTexto,
@@ -52,8 +53,16 @@ export function ChatThreadPanel({
         <ChatAvatar nome={outroNome} fotoUrl={outroFoto} size={48} />
         <div className="chat-interno-thread__head-text">
           <h2 className="chat-interno-thread__title">{outroNome}</h2>
-          <p className={online ? 'chat-interno-status chat-interno-status--on' : 'chat-interno-status'}>
-            {online ? 'Online' : 'Offline'}
+          <p
+            className={
+              presencaOutro === 'online'
+                ? 'chat-interno-status chat-interno-status--on'
+                : presencaOutro === 'ausente'
+                  ? 'chat-interno-status chat-interno-status--ausente'
+                  : 'chat-interno-status chat-interno-status--offline'
+            }
+          >
+            {etiquetaPresenca(presencaOutro)}
           </p>
         </div>
       </header>

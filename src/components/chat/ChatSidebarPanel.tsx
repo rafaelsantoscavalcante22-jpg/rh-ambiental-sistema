@@ -1,6 +1,11 @@
 import { ChatAvatar } from './ChatAvatar'
 import type { ChatConversaLista, ChatUsuarioLista } from '../../types/chat'
 import { formatarHoraCurta, formatarPreviewLista } from '../../lib/chat'
+import {
+  type PresencaStatus,
+  etiquetaPresenca,
+  normalizarPresencaStatus,
+} from '../../lib/presencaStatus'
 
 type Props = {
   meuId: string
@@ -13,7 +18,6 @@ type Props = {
   /** Total carregado (após abrir «Pessoas» ou carga inicial). */
   totalUsuariosAtivos: number
   usuariosPorId: Map<string, ChatUsuarioLista>
-  onlineIds: Set<string>
   conversaSelecionadaId: string | null
   onSelectConversa: (id: string) => void
   onStartComUsuario: (userId: string) => void
@@ -30,12 +34,17 @@ export function ChatSidebarPanel({
   usuariosFiltrados,
   totalUsuariosAtivos,
   usuariosPorId,
-  onlineIds,
   conversaSelecionadaId,
   onSelectConversa,
   onStartComUsuario,
   carregandoLista,
 }: Props) {
+  function classeDotPresenca(p: PresencaStatus): string {
+    if (p === 'ausente') return 'chat-interno-dot chat-interno-dot--ausente'
+    if (p === 'offline') return 'chat-interno-dot chat-interno-dot--offline'
+    return 'chat-interno-dot chat-interno-dot--on'
+  }
+
   return (
     <aside className="chat-interno-sidebar" aria-label="Conversas e contactos">
       <div className="chat-interno-sidebar__tabs">
@@ -85,7 +94,7 @@ export function ChatSidebarPanel({
               const u = usuariosPorId.get(c.outro_id)
               const nome = u?.nome || u?.email || 'Utilizador'
               const preview = formatarPreviewLista(c.ultima_preview, c.ultima_remetente_id, meuId)
-              const on = onlineIds.has(c.outro_id)
+              const pres = normalizarPresencaStatus(u?.presenca_status)
               const active = conversaSelecionadaId === c.id
               return (
                 <button
@@ -110,8 +119,8 @@ export function ChatSidebarPanel({
                     </div>
                   </div>
                   <span
-                    className={on ? 'chat-interno-dot chat-interno-dot--on' : 'chat-interno-dot'}
-                    title={on ? 'Online' : 'Offline'}
+                    className={classeDotPresenca(pres)}
+                    title={etiquetaPresenca(pres)}
                     aria-hidden
                   />
                 </button>
@@ -128,7 +137,7 @@ export function ChatSidebarPanel({
           </div>
         ) : (
           usuariosFiltrados.map((u) => {
-            const on = onlineIds.has(u.id)
+            const pres = normalizarPresencaStatus(u.presenca_status)
             const rotulo = (u.nome || '').trim() || u.email || 'Utilizador'
             return (
               <button
@@ -146,8 +155,8 @@ export function ChatSidebarPanel({
                   <div className="chat-interno-row__email">{u.email || '—'}</div>
                 </div>
                 <span
-                  className={on ? 'chat-interno-dot chat-interno-dot--on' : 'chat-interno-dot'}
-                  title={on ? 'Online' : 'Offline'}
+                  className={classeDotPresenca(pres)}
+                  title={etiquetaPresenca(pres)}
                   aria-hidden
                 />
               </button>

@@ -8,6 +8,11 @@ import {
 } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import {
+  type PresencaStatus,
+  etiquetaPresenca,
+  normalizarPresencaStatus,
+} from '../lib/presencaStatus'
 
 type MainLayoutProps = {
   children: ReactNode
@@ -18,6 +23,7 @@ type UsuarioLogado = {
   email?: string | null
   cargo?: string | null
   foto_url?: string | null
+  presenca_status?: string | null
 }
 
 type MenuItem = { label: string; path: string }
@@ -156,6 +162,10 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const location = useLocation()
 
   const [usuario, setUsuario] = useState<UsuarioLogado | null>(null)
+  const [presenca, setPresenca] = useState<PresencaStatus>('online')
+  const [gravandoPresenca, setGravandoPresenca] = useState(false)
+  /** Só há linha em `public.usuarios` para gravar presença. */
+  const [temPerfilUsuarios, setTemPerfilUsuarios] = useState(false)
   const [logoCarregou, setLogoCarregou] = useState(true)
   const [fotoIndisponivel, setFotoIndisponivel] = useState(false)
   const [enviandoFoto, setEnviandoFoto] = useState(false)
@@ -203,23 +213,58 @@ export default function MainLayout({ children }: MainLayoutProps) {
 
       const { data } = await supabase
         .from('usuarios')
-        .select('nome, email, cargo, foto_url')
+        .select('nome, email, cargo, foto_url, presenca_status')
         .eq('id', user.id)
         .maybeSingle()
 
       if (data) {
         setUsuario(data)
+        setTemPerfilUsuarios(true)
+        const p = normalizarPresencaStatus(data.presenca_status)
+        setPresenca(p)
       } else {
+        setTemPerfilUsuarios(false)
         setUsuario({
           nome: user.email || 'Usuário',
           email: user.email || '',
           cargo: '',
         })
+        setPresenca('online')
       }
     }
 
     carregarUsuario()
   }, [])
+
+  async function handlePresencaChange(nextRaw: string) {
+    const next = normalizarPresencaStatus(nextRaw)
+    if (next === presenca) return
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+
+    const anterior = presenca
+    setPresenca(next)
+    setGravandoPresenca(true)
+
+    const { error } = await supabase
+      .from('usuarios')
+      .update({ presenca_status: next })
+      .eq('id', user.id)
+
+    setGravandoPresenca(false)
+
+    if (error) {
+      console.error(error)
+      setPresenca(anterior)
+      window.alert('Não foi possível guardar o estado de presença. Tente de novo.')
+      return
+    }
+
+    setUsuario((prev) => (prev ? { ...prev, presenca_status: next } : prev))
+  }
 
   useEffect(() => {
     setFotoIndisponivel(false)
@@ -414,7 +459,18 @@ export default function MainLayout({ children }: MainLayoutProps) {
           </div>
 
           <div className="layout-header-actions">
-            <div className="layout-pill layout-pill--success">Online</div>
+            <select
+              className={`layout-presenca-select layout-presenca-select--${presenca}`}
+              value={presenca}
+              disabled={gravandoPresenca || !temPerfilUsuarios}
+              onChange={(e) => void handlePresencaChange(e.target.value)}
+              aria-label="O seu estado de presença"
+              title={etiquetaPresenca(presenca)}
+            >
+              <option value="online">{etiquetaPresenca('online')}</option>
+              <option value="ausente">{etiquetaPresenca('ausente')}</option>
+              <option value="offline">{etiquetaPresenca('offline')}</option>
+            </select>
 
             <CabecalhoDataHora />
 
@@ -436,7 +492,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
             />
             <button
               type="button"
-              className="layout-avatar layout-avatar--interactive"
+              className={`layout-avatar layout-avatar--interactive layout-avatar--presenca-${presenca}`}
               disabled={enviandoFoto}
               title="Alterar foto de perfil"
               aria-label="Alterar foto de perfil"

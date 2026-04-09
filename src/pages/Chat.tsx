@@ -12,6 +12,7 @@ import {
   chatListarUsuariosAtivos,
   chatMarcarLida,
 } from '../lib/chat'
+import { normalizarPresencaStatus } from '../lib/presencaStatus'
 import type { ChatConversaLista, ChatMensagem, ChatUsuarioLista } from '../types/chat'
 import { ChatSidebarPanel } from '../components/chat/ChatSidebarPanel'
 import { ChatThreadPanel } from '../components/chat/ChatThreadPanel'
@@ -36,11 +37,8 @@ export default function Chat() {
   const [enviando, setEnviando] = useState(false)
   const [abrindoComPessoa, setAbrindoComPessoa] = useState(false)
 
-  const [onlineIds, setOnlineIds] = useState<Set<string>>(() => new Set())
-
   const channelThreadRef = useRef<RealtimeChannel | null>(null)
   const channelListRef = useRef<RealtimeChannel | null>(null)
-  const presenceRef = useRef<RealtimeChannel | null>(null)
   const conversaIdRef = useRef<string | null>(null)
   const meuIdRef = useRef<string | null>(null)
   const lastOpenParamRef = useRef<string | null>(null)
@@ -151,33 +149,25 @@ export default function Chat() {
   useEffect(() => {
     if (!meuId) return
 
-    const ch = supabase.channel('rg-chat-presence', {
-      config: { presence: { key: meuId } },
-    })
+    const ch = supabase
+      .channel('chat-usuarios-presenca')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'usuarios' },
+        (payload) => {
+          const row = payload.new as { id?: string; presenca_status?: string | null }
+          if (!row?.id) return
+          setUsuarios((prev) =>
+            prev.map((u) =>
+              u.id === row.id ? { ...u, presenca_status: row.presenca_status ?? u.presenca_status } : u
+            )
+          )
+        }
+      )
+      .subscribe()
 
-    ch.subscribe(async (status) => {
-      if (status === 'SUBSCRIBED') {
-        await ch.track({ at: new Date().toISOString() })
-      }
-    })
-
-    const syncOnline = () => {
-      const st = ch.presenceState()
-      const next = new Set<string>()
-      for (const key of Object.keys(st)) {
-        if (key && key !== meuId) next.add(key)
-      }
-      setOnlineIds(next)
-    }
-
-    ch.on('presence', { event: 'sync' }, syncOnline)
-    ch.on('presence', { event: 'join' }, syncOnline)
-    ch.on('presence', { event: 'leave' }, syncOnline)
-
-    presenceRef.current = ch
     return () => {
       void ch.unsubscribe()
-      presenceRef.current = null
     }
   }, [meuId])
 
@@ -306,7 +296,7 @@ export default function Chat() {
   const outroIdEfectivo = conversaNaLista?.outro_id ?? outroIdPainel ?? null
   const outroMeta = outroIdEfectivo ? usuariosPorId.get(outroIdEfectivo) : undefined
   const outroNome = outroMeta?.nome || outroMeta?.email || 'Conversa'
-  const outroOnline = outroIdEfectivo ? onlineIds.has(outroIdEfectivo) : false
+  const presencaOutro = normalizarPresencaStatus(outroMeta?.presenca_status)
   const mostrarThread = Boolean(conversaId && outroIdEfectivo)
 
   useEffect(() => {
@@ -369,7 +359,6 @@ export default function Chat() {
             usuariosFiltrados={usuariosFiltrados}
             totalUsuariosAtivos={usuarios.length}
             usuariosPorId={usuariosPorId}
-            onlineIds={onlineIds}
             conversaSelecionadaId={conversaId}
             onSelectConversa={(id) => abrirConversa(id)}
             onStartComUsuario={(id) => void iniciarComUsuario(id)}
@@ -381,7 +370,7 @@ export default function Chat() {
               meuId={meuId || ''}
               outroNome={outroNome}
               outroFoto={outroMeta?.foto_url ?? null}
-              online={outroOnline}
+              presencaOutro={presencaOutro}
               mensagens={mensagens}
               enviando={enviando}
               onEnviarTexto={handleEnviarTexto}
