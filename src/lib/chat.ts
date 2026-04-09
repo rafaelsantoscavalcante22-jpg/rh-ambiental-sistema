@@ -53,6 +53,22 @@ function normalizarErroChat(e: unknown): Error {
   return new Error('Falha ao enviar.')
 }
 
+function normalizarErroSelect(e: unknown, fallback: string): Error {
+  if (e && typeof e === 'object' && 'message' in e) {
+    const p = e as PostgrestError
+    const m = [p.message, p.details].filter(Boolean).join(' — ')
+    if (m) return new Error(m)
+  }
+  if (e instanceof Error) return e
+  return new Error(fallback)
+}
+
+function isRelationshipNotFoundError(e: unknown): boolean {
+  const msg =
+    e && typeof e === 'object' && 'message' in e ? String((e as { message?: unknown }).message ?? '') : ''
+  return /Could not find a relationship|relationship|embedded/i.test(msg)
+}
+
 export function outroParticipanteId(
   conversa: { participant_low: string; participant_high: string },
   meuId: string
@@ -162,57 +178,92 @@ export async function chatCarregarConversas(meuId: string): Promise<ChatConversa
   const uid = user?.id
   if (!uid) throw new Error('Sessão inválida.')
 
-  const { data: parts, error: e1 } = await supabase
+  let list: ChatConversaLista[] = []
+
+  const embedded = await supabase
     .from('chat_participantes')
     .select(
       `
-      conversa_id,
-      last_read_at,
-      chat_conversas (
-        id,
-        participant_low,
-        participant_high,
-        ultima_preview,
-        ultima_em,
-        ultima_remetente_id
-      )
-    `
+        conversa_id,
+        last_read_at,
+        chat_conversas (
+          id,
+          participant_low,
+          participant_high,
+          ultima_preview,
+          ultima_em,
+          ultima_remetente_id
+        )
+      `
     )
     .eq('user_id', uid)
 
-  if (e1) throw e1
-  const rows = parts || []
+  if (!embedded.error) {
+    type ConvNested = {
+      id: string
+      participant_low: string
+      participant_high: string
+      ultima_preview: string | null
+      ultima_em: string | null
+      ultima_remetente_id: string | null
+    }
 
-  type ConvNested = {
-    id: string
-    participant_low: string
-    participant_high: string
-    ultima_preview: string | null
-    ultima_em: string | null
-    ultima_remetente_id: string | null
-  }
+    const rows = embedded.data || []
+    list = []
+    for (const r of rows as {
+      conversa_id: string
+      last_read_at: string | null
+      chat_conversas: ConvNested | ConvNested[] | null
+    }[]) {
+      const raw = r.chat_conversas
+      const c = Array.isArray(raw) ? raw[0] : raw
+      if (!c?.id) continue
 
-  const list: ChatConversaLista[] = []
-  for (const r of rows as {
-    conversa_id: string
-    last_read_at: string | null
-    chat_conversas: ConvNested | ConvNested[] | null
-  }[]) {
-    const raw = r.chat_conversas
-    const c = Array.isArray(raw) ? raw[0] : raw
-    if (!c?.id) continue
+      list.push({
+        id: c.id,
+        participant_low: c.participant_low,
+        participant_high: c.participant_high,
+        ultima_preview: c.ultima_preview,
+        ultima_em: c.ultima_em,
+        ultima_remetente_id: c.ultima_remetente_id,
+        last_read_at: r.last_read_at,
+        outro_id: outroParticipanteId(c, uid),
+        unread: 0,
+      })
+    }
+  } else if (isRelationshipNotFoundError(embedded.error)) {
+    const { data: parts, error: e1 } = await supabase
+      .from('chat_participantes')
+      .select('conversa_id, last_read_at')
+      .eq('user_id', uid)
 
-    list.push({
+    if (e1) throw normalizarErroSelect(e1, 'Erro ao carregar participantes.')
+    const rows = parts || []
+    if (rows.length === 0) return []
+
+    const ids = rows.map((r) => r.conversa_id)
+    const lastReadMap = new Map(rows.map((r) => [r.conversa_id, r.last_read_at]))
+
+    const { data: convs, error: e2 } = await supabase
+      .from('chat_conversas')
+      .select('id, participant_low, participant_high, ultima_preview, ultima_em, ultima_remetente_id')
+      .in('id', ids)
+
+    if (e2) throw normalizarErroSelect(e2, 'Erro ao carregar conversas.')
+
+    list = (convs || []).map((c) => ({
       id: c.id,
       participant_low: c.participant_low,
       participant_high: c.participant_high,
       ultima_preview: c.ultima_preview,
       ultima_em: c.ultima_em,
       ultima_remetente_id: c.ultima_remetente_id,
-      last_read_at: r.last_read_at,
-      outro_id: outroParticipanteId(c, uid),
+      last_read_at: lastReadMap.get(c.id) ?? null,
+      outro_id: outroParticipanteId(c as { participant_low: string; participant_high: string }, uid),
       unread: 0,
-    })
+    }))
+  } else {
+    throw normalizarErroSelect(embedded.error, 'Erro ao carregar conversas.')
   }
 
   const { data: unreadRows, error: e3 } = await supabase.rpc('chat_unread_by_conversa')
