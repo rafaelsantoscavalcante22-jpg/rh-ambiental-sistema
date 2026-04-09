@@ -1483,17 +1483,19 @@ img {
   color: #94a3b8;
 }
 
+/* Impressão do relatório executivo: só isolar o #root quando o portal do relatório existe.
+   Sem :has(), esconderíamos o #root em TODAS as páginas (MTR, ticket, conferência → folha em branco). */
 @media print {
   @page {
     margin: 14mm;
     size: A4;
   }
 
-  body > *:not(.exec-print-report-root) {
+  body:has(.exec-print-report-root) > *:not(.exec-print-report-root) {
     display: none !important;
   }
 
-  .exec-print-report-root {
+  body:has(.exec-print-report-root) .exec-print-report-root {
     position: static !important;
     left: auto !important;
     width: auto !important;
