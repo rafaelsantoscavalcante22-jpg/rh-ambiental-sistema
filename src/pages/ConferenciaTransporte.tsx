@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+} from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import { supabase } from '../lib/supabase'
@@ -10,11 +18,17 @@ import {
   type RespostasChecklistMotorista,
 } from '../lib/checklistMotoristaItens'
 import { idsContextoFromSearchParams, resolverColetaPorContextoUrl } from '../lib/coletaContextoUrl'
-import { formatarEtapaParaUI, normalizarEtapaColeta, type EtapaFluxo } from '../lib/fluxoEtapas'
+import {
+  formatarEtapaParaUI,
+  formatarFaseFluxoOficialParaUI,
+  normalizarEtapaColeta,
+  type EtapaFluxo,
+} from '../lib/fluxoEtapas'
 import { COLETAS_DROPDOWN_MAX_ROWS } from '../lib/coletasQueryLimits'
 import { queryColetasListaResumoFluxo } from '../lib/coletasSelectSeguimento'
-import { cargoPodeMutarChecklistTransporte } from '../lib/workflowPermissions'
-import type { RespostaConferenciaTransporte } from '../lib/conferenciaTransporteChecklist'
+import { cargoPodeEditarChecklistTransporte } from '../lib/workflowPermissions'
+import { BRAND_LOGO_MARK } from '../lib/brandLogo'
+import ChecklistTransporte from '../components/ChecklistTransporte'
 
 type ColetaResumo = {
   id: string
@@ -22,10 +36,39 @@ type ColetaResumo = {
   cliente: string
   etapaFluxo: EtapaFluxo
   mtr_id: string | null
+  /** Número da MTR (carregado à parte para pesquisa e rótulo). */
+  mtr_numero: string
   programacao_id: string | null
   cliente_id: string | null
   placa: string
   motorista: string
+}
+
+function textoColetaParaBusca(c: ColetaResumo): string {
+  const fase = formatarFaseFluxoOficialParaUI(c.etapaFluxo)
+  const etapa = formatarEtapaParaUI(c.etapaFluxo)
+  return [
+    c.numero,
+    c.cliente,
+    c.mtr_numero,
+    c.placa,
+    c.motorista,
+    fase,
+    etapa,
+    c.mtr_id ?? '',
+    c.id,
+  ]
+    .join(' ')
+    .toLowerCase()
+}
+
+/** Cada palavra da pesquisa tem de aparecer em algum campo (nº, nome, MTR, placa…). */
+function coletaCorrespondePesquisa(c: ColetaResumo, raw: string): boolean {
+  const q = raw.trim().toLowerCase()
+  if (!q) return true
+  const hay = textoColetaParaBusca(c)
+  const tokens = q.split(/\s+/).filter(Boolean)
+  return tokens.every((t) => hay.includes(t))
 }
 
 function montarParamsColeta(c: ColetaResumo) {
@@ -71,14 +114,6 @@ const tdOkNaoStyle: CSSProperties = {
   background: '#fff',
 }
 
-const tdItemStyle: CSSProperties = {
-  border: '1px solid #e2e8f0',
-  padding: '8px 12px',
-  fontSize: '13px',
-  verticalAlign: 'middle',
-  background: '#fff',
-}
-
 function hojeBr() {
   const d = new Date()
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
@@ -89,48 +124,6 @@ function rotuloItemImpressao(label: string) {
   return label.replace(/EPI's/g, 'EPIs')
 }
 
-function LinhaCheck({
-  item,
-  valor,
-  onChange,
-  disabled,
-  radioGroupPrefix = 'ct',
-}: {
-  item: { id: string; label: string }
-  valor: RespostaConferenciaTransporte | null
-  onChange: (id: string, v: RespostaConferenciaTransporte | null) => void
-  disabled: boolean
-  /** Prefixo único para o grupo de rádio de cada linha. */
-  radioGroupPrefix?: string
-}) {
-  const name = `${radioGroupPrefix}-${item.id}`
-  return (
-    <tr>
-      <td style={tdOkNaoStyle}>
-        <input
-          type="radio"
-          name={name}
-          checked={valor === 'ok'}
-          disabled={disabled}
-          onChange={() => onChange(item.id, 'ok')}
-          aria-label={`${item.label} OK`}
-        />
-      </td>
-      <td style={tdOkNaoStyle}>
-        <input
-          type="radio"
-          name={name}
-          checked={valor === 'nao'}
-          disabled={disabled}
-          onChange={() => onChange(item.id, 'nao')}
-          aria-label={`${item.label} Não`}
-        />
-      </td>
-      <td style={tdItemStyle}>{item.label}</td>
-    </tr>
-  )
-}
-
 export default function ConferenciaTransporte() {
   const [searchParams, setSearchParams] = useSearchParams()
   const idsCtx = useMemo(() => idsContextoFromSearchParams(searchParams), [searchParams])
@@ -139,23 +132,45 @@ export default function ConferenciaTransporte() {
   const [carregandoColetas, setCarregandoColetas] = useState(true)
   const [cargo, setCargo] = useState<string | null>(null)
   const [erroListaColetas, setErroListaColetas] = useState('')
+  const [pesquisaColeta, setPesquisaColeta] = useState('')
+  const pickerColetaRef = useRef<HTMLDivElement | null>(null)
 
   const [checklistMotoristaId, setChecklistMotoristaId] = useState<string | null>(null)
   const [respostasMotorista, setRespostasMotorista] = useState<RespostasChecklistMotorista>(() =>
     respostasChecklistMotoristaIniciais()
   )
   const [observacoesMotorista, setObservacoesMotorista] = useState('')
+  const [assinaturaMotorista, setAssinaturaMotorista] = useState('')
+  const [assinaturaResponsavel, setAssinaturaResponsavel] = useState('')
   const [carregandoChecklistMotorista, setCarregandoChecklistMotorista] = useState(false)
   const [salvandoMotorista, setSalvandoMotorista] = useState(false)
   const [mensagemMotorista, setMensagemMotorista] = useState('')
   const [erroMotorista, setErroMotorista] = useState('')
 
-  const podeMutar = cargoPodeMutarChecklistTransporte(cargo)
+  const [secaoColetaExpandida, setSecaoColetaExpandida] = useState(true)
+  const [secaoChecklistExpandida, setSecaoChecklistExpandida] = useState(false)
+  const coletaIdAnteriorAccordionRef = useRef<string | null>(null)
+
+  const podeMutar = cargoPodeEditarChecklistTransporte(cargo)
   const coletaAtiva = useMemo(
     () => resolverColetaPorContextoUrl(coletas, idsCtx),
     [coletas, idsCtx]
   )
   const podeEditarMotorista = Boolean(coletaAtiva && podeMutar)
+
+  useEffect(() => {
+    const id = coletaAtiva?.id ?? null
+    const prev = coletaIdAnteriorAccordionRef.current
+    if (id && id !== prev) {
+      setSecaoColetaExpandida(false)
+      setSecaoChecklistExpandida(true)
+    }
+    if (!id && prev) {
+      setSecaoColetaExpandida(true)
+      setSecaoChecklistExpandida(false)
+    }
+    coletaIdAnteriorAccordionRef.current = id
+  }, [coletaAtiva?.id])
 
   const carregarColetas = useCallback(async () => {
     setCarregandoColetas(true)
@@ -172,7 +187,7 @@ export default function ConferenciaTransporte() {
       return
     }
 
-    const lista: ColetaResumo[] = ((data as Record<string, unknown>[]) || []).map((item) => {
+    const listaBase: ColetaResumo[] = ((data as Record<string, unknown>[]) || []).map((item) => {
       const etapaFluxo = normalizarEtapaColeta({
         fluxo_status: item.fluxo_status as string | null,
         etapa_operacional: item.etapa_operacional as string | null,
@@ -183,12 +198,33 @@ export default function ConferenciaTransporte() {
         cliente: String(item.cliente ?? item.nome_cliente ?? ''),
         etapaFluxo,
         mtr_id: item.mtr_id != null ? String(item.mtr_id) : null,
+        mtr_numero: '',
         programacao_id: item.programacao_id != null ? String(item.programacao_id) : null,
         cliente_id: item.cliente_id != null ? String(item.cliente_id) : null,
         placa: String(item.placa ?? ''),
         motorista: String(item.motorista_nome ?? item.motorista ?? ''),
       }
     })
+
+    const mtrIds = [...new Set(listaBase.map((c) => c.mtr_id).filter((id): id is string => Boolean(id)))]
+    const mtrNumeroPorId = new Map<string, string>()
+    const mtrChunk = 200
+    for (let i = 0; i < mtrIds.length; i += mtrChunk) {
+      const slice = mtrIds.slice(i, i + mtrChunk)
+      const { data: mrows, error: mErr } = await supabase.from('mtrs').select('id, numero').in('id', slice)
+      if (mErr) {
+        console.error(mErr)
+        continue
+      }
+      for (const m of (mrows as { id: string; numero?: string | null }[]) || []) {
+        mtrNumeroPorId.set(String(m.id), String(m.numero ?? '').trim())
+      }
+    }
+
+    const lista = listaBase.map((c) => ({
+      ...c,
+      mtr_numero: c.mtr_id ? mtrNumeroPorId.get(c.mtr_id) ?? '' : '',
+    }))
     setColetas(lista)
     setCarregandoColetas(false)
   }, [])
@@ -218,7 +254,7 @@ export default function ConferenciaTransporte() {
     setMensagemMotorista('')
     const { data, error } = await supabase
       .from('checklist_transporte')
-      .select('id, respostas, observacoes')
+      .select('id, respostas, observacoes, assinatura_motorista, assinatura_responsavel')
       .eq('coleta_id', coletaId)
       .order('updated_at', { ascending: false })
       .limit(1)
@@ -230,6 +266,8 @@ export default function ConferenciaTransporte() {
       setChecklistMotoristaId(null)
       setRespostasMotorista(respostasChecklistMotoristaIniciais())
       setObservacoesMotorista('')
+      setAssinaturaMotorista('')
+      setAssinaturaResponsavel('')
       setCarregandoChecklistMotorista(false)
       return
     }
@@ -238,10 +276,14 @@ export default function ConferenciaTransporte() {
       setChecklistMotoristaId(data.id)
       setRespostasMotorista(mesclarRespostasChecklistMotorista(data.respostas))
       setObservacoesMotorista(data.observacoes ?? '')
+      setAssinaturaMotorista(data.assinatura_motorista ?? '')
+      setAssinaturaResponsavel(data.assinatura_responsavel ?? '')
     } else {
       setChecklistMotoristaId(null)
       setRespostasMotorista(respostasChecklistMotoristaIniciais())
       setObservacoesMotorista('')
+      setAssinaturaMotorista('')
+      setAssinaturaResponsavel('')
     }
     setCarregandoChecklistMotorista(false)
   }, [])
@@ -252,6 +294,8 @@ export default function ConferenciaTransporte() {
       setChecklistMotoristaId(null)
       setRespostasMotorista(respostasChecklistMotoristaIniciais())
       setObservacoesMotorista('')
+      setAssinaturaMotorista('')
+      setAssinaturaResponsavel('')
     }
   }, [coletaAtiva, carregarChecklistMotorista])
 
@@ -262,11 +306,12 @@ export default function ConferenciaTransporte() {
     setSearchParams(p, { replace: true })
     setMensagemMotorista('')
     setErroMotorista('')
+    setPesquisaColeta('')
   }
 
-  function setRespostaMotoristaItem(id: string, v: RespostaConferenciaTransporte | null) {
+  function setRespostaMotoristaItem(id: string, checked: boolean) {
     if (!podeEditarMotorista) return
-    setRespostasMotorista((prev) => ({ ...prev, [id]: v }))
+    setRespostasMotorista((prev) => ({ ...prev, [id]: checked }))
   }
 
   function imprimirDocumentoUnificado() {
@@ -277,13 +322,10 @@ export default function ConferenciaTransporte() {
     e.preventDefault()
     if (!coletaAtiva || !podeEditarMotorista) return
 
-    const todosPreenchidos = CHECKLIST_MOTORISTA_ITENS.every((i) => {
-      const v = respostasMotorista[i.id]
-      return v === 'ok' || v === 'nao'
-    })
+    const todosPreenchidos = CHECKLIST_MOTORISTA_ITENS.every((i) => respostasMotorista[i.id] === true)
     if (!todosPreenchidos) {
       const ok = window.confirm(
-        'Ainda há itens sem marcação (OK ou NÃO) no checklist do motorista. Deseja gravar mesmo assim?'
+        'Ainda há itens do checklist por marcar. Deseja gravar mesmo assim?'
       )
       if (!ok) return
     }
@@ -303,6 +345,8 @@ export default function ConferenciaTransporte() {
         unknown
       >,
       observacoes: observacoesMotorista.trim() || null,
+      assinatura_motorista: assinaturaMotorista.trim() || null,
+      assinatura_responsavel: assinaturaResponsavel.trim() || null,
       preenchido_por: user?.id ?? null,
       updated_at: agora,
     }
@@ -324,6 +368,8 @@ export default function ConferenciaTransporte() {
           .update({
             respostas: payloadBase.respostas,
             observacoes: payloadBase.observacoes,
+            assinatura_motorista: payloadBase.assinatura_motorista,
+            assinatura_responsavel: payloadBase.assinatura_responsavel,
             preenchido_por: payloadBase.preenchido_por,
             updated_at: payloadBase.updated_at,
           })
@@ -338,6 +384,8 @@ export default function ConferenciaTransporte() {
             coleta_id: payloadBase.coleta_id,
             respostas: payloadBase.respostas,
             observacoes: payloadBase.observacoes,
+            assinatura_motorista: payloadBase.assinatura_motorista,
+            assinatura_responsavel: payloadBase.assinatura_responsavel,
             preenchido_por: payloadBase.preenchido_por,
           })
           .select('id')
@@ -362,50 +410,15 @@ export default function ConferenciaTransporte() {
     return sorted
   }, [coletas, coletaAtiva])
 
-  const motoristaItensRespondidos = useMemo(
-    () =>
-      CHECKLIST_MOTORISTA_ITENS.filter((i) => {
-        const v = respostasMotorista[i.id]
-        return v === 'ok' || v === 'nao'
-      }).length,
-    [respostasMotorista]
+  const opcoesColetaFiltradas = useMemo(
+    () => opcoesSelect.filter((c) => coletaCorrespondePesquisa(c, pesquisaColeta)),
+    [opcoesSelect, pesquisaColeta]
   )
 
-  function renderTabelaMotorista(itens: { id: string; label: string }[]) {
-    return (
-      <div className="conf-trans-table-wrap">
-        <table
-          className="conf-trans-table"
-          style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            tableLayout: 'fixed',
-            fontSize: '13px',
-          }}
-        >
-          <thead>
-            <tr>
-              <th style={thStyle}>OK</th>
-              <th style={thStyle}>NÃO</th>
-              <th style={{ ...thStyle, textAlign: 'left' }}>ITENS</th>
-            </tr>
-          </thead>
-          <tbody>
-            {itens.map((item) => (
-              <LinhaCheck
-                key={item.id}
-                item={item}
-                valor={respostasMotorista[item.id] ?? null}
-                onChange={setRespostaMotoristaItem}
-                disabled={!podeEditarMotorista}
-                radioGroupPrefix="mot"
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )
-  }
+  const motoristaItensRespondidos = useMemo(
+    () => CHECKLIST_MOTORISTA_ITENS.filter((i) => respostasMotorista[i.id] === true).length,
+    [respostasMotorista]
+  )
 
   return (
     <MainLayout>
@@ -472,6 +485,86 @@ export default function ConferenciaTransporte() {
             margin-left: auto;
             margin-right: auto;
             width: 100%;
+          }
+          .conf-trans-coleta-picker {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+          }
+          .conf-trans-coleta-search {
+            width: 100%;
+            padding: 11px 14px;
+            border-radius: 10px;
+            border: 1px solid #cbd5e1;
+            font-size: 14px;
+            box-sizing: border-box;
+            outline: none;
+          }
+          .conf-trans-coleta-search:focus {
+            border-color: ${ACCENT};
+            box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+          }
+          .conf-trans-coleta-search:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
+            background: #f1f5f9;
+          }
+          .conf-trans-coleta-list {
+            max-height: min(340px, 44vh);
+            overflow: auto;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            background: #f1f5f9;
+          }
+          .conf-trans-coleta-row {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 11px 14px;
+            font-size: 13px;
+            line-height: 1.45;
+            border: none;
+            border-bottom: 1px solid #e2e8f0;
+            background: #fff;
+            cursor: pointer;
+            color: #0f172a;
+          }
+          .conf-trans-coleta-row:last-child {
+            border-bottom: none;
+          }
+          .conf-trans-coleta-row:hover {
+            background: #ecfdf5;
+          }
+          .conf-trans-coleta-row--active {
+            background: #ccfbf1;
+            font-weight: 700;
+          }
+          .conf-trans-acc-trigger {
+            font: inherit;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            padding: 4px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            min-width: 0;
+            text-align: left;
+            border-radius: 10px;
+          }
+          .conf-trans-acc-trigger:hover {
+            background: rgba(13, 148, 136, 0.06);
+          }
+          .conf-trans-acc-trigger:focus-visible {
+            outline: 2px solid ${ACCENT};
+            outline-offset: 2px;
+          }
+          .conf-trans-acc-chevron {
+            flex-shrink: 0;
+            font-size: 11px;
+            color: #64748b;
+            transition: transform 0.2s ease;
           }
         }
         @media print {
@@ -555,7 +648,7 @@ export default function ConferenciaTransporte() {
 
       <div className="conf-trans-no-print conf-trans-screen">
         <header style={{ textAlign: 'center', marginBottom: 24 }}>
-          <img className="conf-trans-hero-logo" src="/logo-rg.png" alt="RG Ambiental" />
+          <img className="conf-trans-hero-logo" src={BRAND_LOGO_MARK} alt="RG Ambiental" />
           <h1
             style={{
               margin: 0,
@@ -568,8 +661,8 @@ export default function ConferenciaTransporte() {
             Conferência de transportes
           </h1>
           <p style={{ margin: '14px auto 0', maxWidth: 580, fontSize: '15px', color: '#64748b', lineHeight: 1.6 }}>
-            Fluxo em <strong>2 passos</strong>: escolha a coleta e marque <strong>OK</strong> ou <strong>NÃO</strong> em cada
-            item do checklist do motorista. O PDF segue o mesmo layout, centrado na página.
+            Fluxo em <strong>2 passos</strong>: escolha a coleta, marque os <strong>15 itens</strong> do checklist,
+            as <strong>assinaturas</strong> e grave. O PDF reflete o mesmo conteúdo.
           </p>
           {coletaAtiva ? (
             <div style={{ marginTop: 22 }}>
@@ -599,7 +692,7 @@ export default function ConferenciaTransporte() {
           <span className="conf-trans-step-sep" aria-hidden>
             →
           </span>
-          <span className="conf-trans-step-num">2</span> CHECK LIST — OK / NÃO
+          <span className="conf-trans-step-num">2</span> Checklist motorista (15 itens)
         </div>
 
         {erroListaColetas ? (
@@ -634,8 +727,22 @@ export default function ConferenciaTransporte() {
         ) : null}
 
         <div style={cardStyle}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 10,
+              flexWrap: 'wrap',
+              marginBottom: secaoColetaExpandida ? 14 : 8,
+            }}
+          >
+            <button
+              type="button"
+              className="conf-trans-acc-trigger"
+              aria-expanded={secaoColetaExpandida}
+              onClick={() => setSecaoColetaExpandida((v) => !v)}
+            >
               <span
                 style={{
                   fontSize: 12,
@@ -645,12 +752,22 @@ export default function ConferenciaTransporte() {
                   borderRadius: 10,
                   padding: '5px 11px',
                   lineHeight: 1,
+                  flexShrink: 0,
                 }}
               >
                 1
               </span>
-              <span style={{ fontWeight: 800, color: '#0f172a', fontSize: 17 }}>Coleta</span>
-            </div>
+              <span className="conf-trans-acc-title" style={{ fontWeight: 800, color: '#0f172a', fontSize: 17 }}>
+                Coleta
+              </span>
+              <span
+                className="conf-trans-acc-chevron"
+                style={{ transform: secaoColetaExpandida ? 'rotate(180deg)' : 'none' }}
+                aria-hidden
+              >
+                ▼
+              </span>
+            </button>
             <button
               type="button"
               onClick={() => void carregarColetas()}
@@ -663,100 +780,207 @@ export default function ConferenciaTransporte() {
                 fontSize: '13px',
                 fontWeight: 600,
                 cursor: carregandoColetas ? 'wait' : 'pointer',
+                flexShrink: 0,
               }}
             >
               {carregandoColetas ? 'A carregar…' : 'Atualizar lista'}
             </button>
           </div>
-          <select
-            value={coletaAtiva?.id ?? ''}
-            onChange={(e) => aoEscolherColeta(e.target.value)}
-            disabled={carregandoColetas}
-            style={{
-              width: '100%',
-              padding: '12px 14px',
-              borderRadius: '10px',
-              border: '1px solid #cbd5e1',
-              fontSize: '14px',
-              background: '#fff',
-            }}
-          >
-            <option value="">{carregandoColetas ? 'Carregando…' : 'Selecione a coleta'}</option>
-            {opcoesSelect.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.numero} — {c.cliente || 'Cliente'} · {formatarEtapaParaUI(c.etapaFluxo)}
-              </option>
-            ))}
-          </select>
+
+          {!secaoColetaExpandida ? (
+            <p style={{ margin: '0 0 10px', fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+              {coletaAtiva ? (
+                <>
+                  <strong>Selecionada:</strong> {coletaAtiva.numero} — {coletaAtiva.cliente || 'Cliente'} ·{' '}
+                  {coletaAtiva.mtr_numero ? `MTR ${coletaAtiva.mtr_numero}` : 'Sem MTR'}
+                </>
+              ) : (
+                <>Clique em «Coleta» para expandir e escolher uma coleta.</>
+              )}
+            </p>
+          ) : null}
+
+          {secaoColetaExpandida ? (
+          <>
+          <div ref={pickerColetaRef} className="conf-trans-coleta-picker">
+            <label
+              htmlFor="conf-trans-coleta-search"
+              style={{ fontSize: 12, fontWeight: 700, color: '#64748b', display: 'block' }}
+            >
+              Pesquisar coleta (nº, cliente, MTR, placa, motorista, etapa)
+            </label>
+            <input
+              id="conf-trans-coleta-search"
+              type="search"
+              className="conf-trans-coleta-search"
+              value={pesquisaColeta}
+              onChange={(e) => setPesquisaColeta(e.target.value)}
+              disabled={carregandoColetas}
+              placeholder="Ex.: 96999 · delta · MTR 12 · ABC1D23"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <div
+              className="conf-trans-coleta-list"
+              role="listbox"
+              aria-label="Lista de coletas"
+              aria-busy={carregandoColetas}
+            >
+              {carregandoColetas ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: '#64748b', fontSize: 13 }}>
+                  A carregar…
+                </div>
+              ) : opcoesColetaFiltradas.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: '#64748b', fontSize: 13 }}>
+                  Nenhuma coleta corresponde à pesquisa. Limpe o filtro ou tente outro termo.
+                </div>
+              ) : (
+                opcoesColetaFiltradas.map((c) => {
+                  const ativa = coletaAtiva?.id === c.id
+                  const mtrRot = c.mtr_numero ? `MTR ${c.mtr_numero}` : 'Sem MTR'
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      role="option"
+                      aria-selected={ativa}
+                      className={`conf-trans-coleta-row${ativa ? ' conf-trans-coleta-row--active' : ''}`}
+                      onClick={() => aoEscolherColeta(c.id)}
+                    >
+                      <span style={{ color: '#0f766e', fontWeight: 800 }}>{c.numero}</span>
+                      {' — '}
+                      {c.cliente || 'Cliente'}
+                      <span style={{ color: '#64748b', fontWeight: 600 }}>
+                        {' · '}
+                        {mtrRot}
+                        {' · '}
+                        {formatarFaseFluxoOficialParaUI(c.etapaFluxo)} ({formatarEtapaParaUI(c.etapaFluxo)})
+                        {(c.placa || c.motorista) && (
+                          <>
+                            {' · '}
+                            {c.placa ? <span>{c.placa}</span> : null}
+                            {c.placa && c.motorista ? ' · ' : null}
+                            {c.motorista ? <span>{c.motorista}</span> : null}
+                          </>
+                        )}
+                      </span>
+                    </button>
+                  )
+                })
+              )}
+            </div>
+            {!carregandoColetas ? (
+              <p style={{ margin: 0, fontSize: 12, color: '#94a3b8' }}>
+                {opcoesColetaFiltradas.length} de {opcoesSelect.length} coleta(s) na lista.
+                {pesquisaColeta.trim() ? (
+                  <button
+                    type="button"
+                    onClick={() => setPesquisaColeta('')}
+                    style={{
+                      marginLeft: 10,
+                      padding: '2px 8px',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      borderRadius: 6,
+                      border: '1px solid #cbd5e1',
+                      background: '#fff',
+                      cursor: 'pointer',
+                      color: '#475569',
+                    }}
+                  >
+                    Limpar pesquisa
+                  </button>
+                ) : null}
+              </p>
+            ) : null}
+          </div>
           {coletaAtiva ? (
             <p style={{ margin: '12px 0 0', fontSize: '13px', color: '#64748b' }}>
-              <strong>Etapa:</strong> {formatarEtapaParaUI(coletaAtiva.etapaFluxo)} · <strong>Placa:</strong>{' '}
+              <strong>Fase:</strong> {formatarFaseFluxoOficialParaUI(coletaAtiva.etapaFluxo)}{' '}
+              <span style={{ color: '#94a3b8' }}>({formatarEtapaParaUI(coletaAtiva.etapaFluxo)})</span> ·{' '}
+              <strong>Placa:</strong>{' '}
               {coletaAtiva.placa || '—'} · <strong>Motorista:</strong> {coletaAtiva.motorista || '—'} ·{' '}
               <Link to={`/controle-massa?${montarParamsColeta(coletaAtiva).toString()}`} style={{ fontWeight: 700 }}>
                 Controle de Massa
               </Link>
             </p>
           ) : null}
+          </>
+          ) : null}
         </div>
 
         {coletaAtiva ? (
           <form onSubmit={handleSubmitMotorista} style={cardStyle}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-              <span
-                style={{
-                  fontSize: 12,
-                  fontWeight: 800,
-                  color: '#fff',
-                  background: ACCENT,
-                  borderRadius: 10,
-                  padding: '5px 11px',
-                  lineHeight: 1,
-                }}
+            <div style={{ marginBottom: secaoChecklistExpandida ? 14 : 8 }}>
+              <button
+                type="button"
+                className="conf-trans-acc-trigger"
+                style={{ width: '100%', marginBottom: secaoChecklistExpandida ? 6 : 0 }}
+                aria-expanded={secaoChecklistExpandida}
+                onClick={() => setSecaoChecklistExpandida((v) => !v)}
               >
-                2
-              </span>
-              <div>
-                <div style={{ fontWeight: 800, color: '#0f172a', fontSize: 17 }}>
-                  CHECK LIST MOTORISTA — OK / NÃO
-                </div>
-                <p style={{ margin: '6px 0 0', fontSize: '14px', color: '#334155', lineHeight: 1.5 }}>
-                  CONFERIR ABAIXO, MARCANDO COM UM X OS ITENS VERIFICADOS. Use <strong>OK</strong> ou{' '}
-                  <strong>NÃO</strong> em cada linha. Os dados são gravados ao clicar em «Gravar».
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 800,
+                    color: '#fff',
+                    background: ACCENT,
+                    borderRadius: 10,
+                    padding: '5px 11px',
+                    lineHeight: 1,
+                    flexShrink: 0,
+                  }}
+                >
+                  2
+                </span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span
+                    className="conf-trans-acc-title"
+                    style={{ fontWeight: 800, color: '#0f172a', fontSize: 17, display: 'block' }}
+                  >
+                    Checklist motorista
+                  </span>
+                </span>
+                <span
+                  className="conf-trans-acc-chevron"
+                  style={{ transform: secaoChecklistExpandida ? 'rotate(180deg)' : 'none' }}
+                  aria-hidden
+                >
+                  ▼
+                </span>
+              </button>
+              {!secaoChecklistExpandida ? (
+                <p style={{ margin: 0, fontSize: '13px', color: '#64748b', paddingLeft: '4px' }}>
+                  Clique para expandir o checklist (15 itens, assinaturas e gravar).
                 </p>
-              </div>
+              ) : null}
             </div>
-            {carregandoChecklistMotorista ? (
-              <p style={{ color: '#64748b' }}>A carregar checklist do motorista…</p>
-            ) : (
+            {secaoChecklistExpandida ? (
+            <>
+            <p style={{ margin: '0 0 14px', fontSize: '14px', color: '#334155', lineHeight: 1.5 }}>
+              Marque cada item verificado, preencha as assinaturas e opcionalmente observações. Grave ao finalizar.
+            </p>
+            <div className="conf-trans-checklist-unico">
+              <ChecklistTransporte
+                itens={CHECKLIST_MOTORISTA_ITENS}
+                respostas={respostasMotorista}
+                onToggle={setRespostaMotoristaItem}
+                assinaturaMotorista={assinaturaMotorista}
+                assinaturaResponsavel={assinaturaResponsavel}
+                onAssinaturaMotoristaChange={(v) =>
+                  podeEditarMotorista ? setAssinaturaMotorista(v) : undefined
+                }
+                onAssinaturaResponsavelChange={(v) =>
+                  podeEditarMotorista ? setAssinaturaResponsavel(v) : undefined
+                }
+                observacoes={observacoesMotorista}
+                onObservacoesChange={(v) => (podeEditarMotorista ? setObservacoesMotorista(v) : undefined)}
+                disabled={!podeEditarMotorista}
+                loading={carregandoChecklistMotorista}
+              />
+            </div>
+            {!carregandoChecklistMotorista ? (
               <>
-                {!podeMutar ? (
-                  <p style={{ color: '#92400e', fontSize: '14px', marginBottom: '12px' }}>
-                    O seu perfil só pode consultar. Operação e logística preenchem o checklist.
-                  </p>
-                ) : null}
-                <div className="conf-trans-checklist-unico">{renderTabelaMotorista(CHECKLIST_MOTORISTA_ITENS)}</div>
-                <div style={{ marginTop: '16px' }}>
-                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', marginBottom: '6px' }}>
-                    Observações (checklist motorista)
-                  </div>
-                  <textarea
-                    value={observacoesMotorista}
-                    onChange={(e) => (podeEditarMotorista ? setObservacoesMotorista(e.target.value) : undefined)}
-                    readOnly={!podeEditarMotorista}
-                    rows={3}
-                    placeholder="Notas adicionais (opcional)"
-                    style={{
-                      width: '100%',
-                      maxWidth: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '10px',
-                      border: '1px solid #cbd5e1',
-                      fontSize: '14px',
-                      resize: 'vertical',
-                      opacity: podeEditarMotorista ? 1 : 0.85,
-                    }}
-                  />
-                </div>
                 {erroMotorista ? (
                   <p style={{ color: '#dc2626', fontSize: '14px', marginTop: '12px', textAlign: 'center' }}>
                     {erroMotorista}
@@ -794,7 +1018,9 @@ export default function ConferenciaTransporte() {
                   </button>
                 </div>
               </>
-            )}
+            ) : null}
+            </>
+            ) : null}
           </form>
         ) : null}
 
@@ -808,7 +1034,7 @@ export default function ConferenciaTransporte() {
               margin: '0 auto',
             }}
           >
-            Escolha uma coleta acima para preencher o CHECK LIST (OK / NÃO).
+            Escolha uma coleta acima para preencher o checklist do motorista.
           </div>
         ) : null}
       </div>
@@ -829,7 +1055,7 @@ export default function ConferenciaTransporte() {
             <div className="ct-print-mtr-body">
               <div style={{ marginBottom: 12, width: '100%', textAlign: 'center' }}>
                 <img
-                  src="/logo-rg.png"
+                  src={BRAND_LOGO_MARK}
                   alt=""
                   style={{
                     height: 28,
@@ -843,7 +1069,7 @@ export default function ConferenciaTransporte() {
                 RG Ambiental
               </div>
               <div style={{ textAlign: 'center', fontWeight: 800, fontSize: '13px', marginTop: '8px', color: '#0f172a' }}>
-                CHECK LIST — OK / NÃO
+                Checklist motorista
               </div>
               <div
                 style={{
@@ -859,7 +1085,7 @@ export default function ConferenciaTransporte() {
                   lineHeight: 1.45,
                 }}
               >
-                CONFERIR ABAIXO, MARCANDO COM UM X OS ITENS VERIFICADOS. Use OK ou NÃO em cada linha.
+                Marque os itens verificados. Total de 15 itens.
               </div>
               <div
                 style={{
@@ -888,7 +1114,8 @@ export default function ConferenciaTransporte() {
                     <strong>Coleta nº:</strong> {coletaAtiva.numero}
                   </div>
                   <div style={{ gridColumn: '1 / -1' }}>
-                    <strong>Etapa (fluxo):</strong> {formatarEtapaParaUI(coletaAtiva.etapaFluxo)}
+                    <strong>Fase (fluxo oficial):</strong> {formatarFaseFluxoOficialParaUI(coletaAtiva.etapaFluxo)}{' '}
+                    <span style={{ color: '#94a3b8' }}>({formatarEtapaParaUI(coletaAtiva.etapaFluxo)})</span>
                   </div>
                   <div
                     style={{
@@ -899,7 +1126,7 @@ export default function ConferenciaTransporte() {
                       color: '#475569',
                     }}
                   >
-                    Itens com OK ou NÃO:{' '}
+                    Itens verificados:{' '}
                     <strong>
                       {motoristaItensRespondidos}/{CHECKLIST_MOTORISTA_ITENS.length}
                     </strong>
@@ -931,7 +1158,7 @@ export default function ConferenciaTransporte() {
                         style={{
                           ...thStyle,
                           border: '1px solid #94a3b8',
-                          width: '52%',
+                          width: '78%',
                           fontSize: '9px',
                           textAlign: 'left',
                           paddingLeft: 10,
@@ -939,13 +1166,12 @@ export default function ConferenciaTransporte() {
                       >
                         ITENS
                       </th>
-                      <th style={{ ...thStyle, border: '1px solid #94a3b8', width: '24%', fontSize: '9px' }}>OK</th>
-                      <th style={{ ...thStyle, border: '1px solid #94a3b8', width: '24%', fontSize: '9px' }}>NÃO</th>
+                      <th style={{ ...thStyle, border: '1px solid #94a3b8', width: '22%', fontSize: '9px' }}>✓</th>
                     </tr>
                   </thead>
                   <tbody>
                     {CHECKLIST_MOTORISTA_ITENS.map((item) => {
-                      const mot = respostasMotorista[item.id] ?? null
+                      const marcado = respostasMotorista[item.id] === true
                       return (
                         <tr key={`pdf-mot-${item.id}`}>
                           <td
@@ -962,10 +1188,7 @@ export default function ConferenciaTransporte() {
                             {rotuloItemImpressao(item.label)}
                           </td>
                           <td style={{ ...tdOkNaoStyle, border: '1px solid #cbd5e1', fontSize: '9px' }}>
-                            {mot === 'ok' ? 'X' : ''}
-                          </td>
-                          <td style={{ ...tdOkNaoStyle, border: '1px solid #cbd5e1', fontSize: '9px' }}>
-                            {mot === 'nao' ? 'X' : ''}
+                            {marcado ? 'X' : ''}
                           </td>
                         </tr>
                       )
@@ -994,9 +1217,31 @@ export default function ConferenciaTransporte() {
                 ficando ciente de que danos, multas ou ausência de equipamentos poderão ser de sua responsabilidade,
                 conforme procedimento interno.
               </p>
-              <div style={{ maxWidth: 280, margin: '24px auto 0', textAlign: 'center' }}>
-                <div style={{ borderBottom: '1px solid #0f172a', minHeight: '32px' }} />
-                <div style={{ fontSize: '9px', marginTop: '6px' }}>Assinatura do motorista</div>
+              <div
+                style={{
+                  marginTop: '16px',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '16px',
+                  maxWidth: 520,
+                  marginLeft: 'auto',
+                  marginRight: 'auto',
+                  fontSize: '9px',
+                  textAlign: 'left',
+                }}
+              >
+                <div>
+                  <div style={{ marginBottom: 4 }}>
+                    <strong>Assinatura — motorista:</strong> {assinaturaMotorista.trim() || '—'}
+                  </div>
+                  <div style={{ borderBottom: '1px solid #0f172a', minHeight: '20px' }} />
+                </div>
+                <div>
+                  <div style={{ marginBottom: 4 }}>
+                    <strong>Assinatura — responsável:</strong> {assinaturaResponsavel.trim() || '—'}
+                  </div>
+                  <div style={{ borderBottom: '1px solid #0f172a', minHeight: '20px' }} />
+                </div>
               </div>
             </div>
           </div>

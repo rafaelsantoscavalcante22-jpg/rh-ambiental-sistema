@@ -5,6 +5,7 @@ import {
   ETAPA_LABEL_CURTO,
   ETAPAS_FLUXO_ORDER,
   formatarEtapaParaUI,
+  formatarFaseFluxoOficialParaUI,
   indiceEtapaFluxo,
   normalizarEtapaColeta,
   type EtapaFluxo,
@@ -310,7 +311,7 @@ export function ExecutiveLinhaTempoModal({ open, onClose, coletas, periodoLabel 
                   }
                   onClick={() => setEtapaColuna(etapa)}
                 >
-                  <span className="exec-linha-tempo-col-tab__lab">{formatarEtapaParaUI(etapa)}</span>
+                  <span className="exec-linha-tempo-col-tab__lab">{formatarFaseFluxoOficialParaUI(etapa)}</span>
                   <span className="exec-linha-tempo-col-tab__n">{items.length}</span>
                 </button>
               ))}
@@ -373,7 +374,7 @@ function ColetaTimelineCard({
   return (
     <article
       className={compact ? 'exec-linha-tempo-card exec-linha-tempo-card--compact' : 'exec-linha-tempo-card'}
-      aria-label={`Coleta ${row.numero || '—'}, ${formatarEtapaParaUI(etapa)}`}
+      aria-label={`Coleta ${row.numero || '—'}, ${formatarFaseFluxoOficialParaUI(etapa)} (${formatarEtapaParaUI(etapa)})`}
     >
       <div className="exec-linha-tempo-card__top">
         <div>
@@ -385,7 +386,9 @@ function ColetaTimelineCard({
           </div>
         </div>
         <div className="exec-linha-tempo-card__acts">
-          <span className="exec-linha-tempo-pill">{formatarEtapaParaUI(etapa)}</span>
+          <span className="exec-linha-tempo-pill" title={formatarEtapaParaUI(etapa)}>
+            {formatarFaseFluxoOficialParaUI(etapa)}
+          </span>
           <button type="button" className="exec-linha-tempo-linkbtn" onClick={onOpenMtr}>
             Abrir MTR
           </button>

@@ -291,6 +291,27 @@ export async function chatCarregarConversas(meuId: string): Promise<ChatConversa
   return list
 }
 
+/** Soma não lidas em todas as conversas (RPC `chat_unread_by_conversa`). */
+export async function chatTotalMensagensNaoLidas(): Promise<number> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return 0
+
+  const { data: rows, error } = await supabase.rpc('chat_unread_by_conversa')
+  if (error) {
+    if (chatRpcIndisponivel(error)) return 0
+    console.error('[chat] chat_unread_by_conversa', error)
+    return 0
+  }
+  if (!rows || !Array.isArray(rows)) return 0
+  let total = 0
+  for (const row of rows as { unread?: number }[]) {
+    total += Number(row.unread ?? 0)
+  }
+  return total
+}
+
 export async function chatMarcarLida(conversaId: string, meuId: string): Promise<void> {
   const {
     data: { user },
@@ -458,4 +479,109 @@ export function formatarHoraCurta(iso: string | null): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
   return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+const UUID_SUPORTE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * UUID do utilizador de suporte (Vite). Se definido, tem prioridade sobre `VITE_SUPORTE_EMAIL`.
+ * Copiar de Supabase → Authentication → Users ou da tabela `usuarios`.
+ */
+export function idSuporteTecnicoConfig(): string | null {
+  const raw = import.meta.env.VITE_SUPORTE_USER_ID
+  if (typeof raw !== 'string') return null
+  const s = raw.trim().toLowerCase()
+  if (!s || !UUID_SUPORTE_RE.test(s)) return null
+  return s
+}
+
+/** E-mail do perfil de suporte quando `VITE_SUPORTE_USER_ID` não está definido (Vite). */
+export function emailSuporteTecnicoConfig(): string {
+  const raw = import.meta.env.VITE_SUPORTE_EMAIL
+  const s = typeof raw === 'string' && raw.trim() ? raw.trim() : 'cavalcantersc07@gmail.com'
+  return s.toLowerCase()
+}
+
+/** True se esta sessão é a conta configurada como suporte (mesmo UUID ou e-mail). */
+export function deveOcultarBalaoSuporteTecnico(userId: string, email: string | null | undefined): boolean {
+  const byId = idSuporteTecnicoConfig()
+  if (byId && userId.toLowerCase() === byId) return true
+  if (byId) return false
+  const em = email?.toLowerCase()
+  if (!em) return false
+  return em === emailSuporteTecnicoConfig()
+}
+
+/**
+ * Abre (ou reutiliza) a conversa directa com o suporte e envia o texto.
+ * O destinatário tem de existir em `usuarios` com status ativo.
+ * Preferir `VITE_SUPORTE_USER_ID`; senão resolve-se pelo e-mail (`VITE_SUPORTE_EMAIL`).
+ */
+export async function chatEnviarPedidoSuporteTecnico(texto: string): Promise<{
+  conversaId: string
+  suporteUserId: string
+}> {
+  const trimmed = texto.trim()
+  if (!trimmed) throw new Error('Descreva o problema antes de enviar.')
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user?.id) throw new Error('Sessão inválida.')
+
+  const configuradoPorId = idSuporteTecnicoConfig()
+  let suporteUserId: string | undefined
+
+  if (configuradoPorId) {
+    if (user.id.toLowerCase() === configuradoPorId) {
+      throw new Error('Esta conta é o contacto de suporte; use o Chat Interno para responder aos colegas.')
+    }
+    const { data: peer, error: peerErr } = await supabase
+      .from('usuarios')
+      .select('id')
+      .eq('id', configuradoPorId)
+      .eq('status', 'ativo')
+      .maybeSingle()
+    if (peerErr) throw peerErr
+    suporteUserId = peer?.id
+    if (!suporteUserId) {
+      throw new Error(
+        'Utilizador de suporte (VITE_SUPORTE_USER_ID) não encontrado ou inactivo. Confirme o UUID no Supabase e em Usuários.'
+      )
+    }
+  } else {
+    const emailDestino = emailSuporteTecnicoConfig()
+    if (user.email && user.email.toLowerCase() === emailDestino) {
+      throw new Error('Esta conta é o contacto de suporte; use o Chat Interno para responder aos colegas.')
+    }
+
+    const { data: rows, error: qErr } = await supabase
+      .from('usuarios')
+      .select('id')
+      .eq('status', 'ativo')
+      .ilike('email', emailDestino)
+      .limit(1)
+
+    if (qErr) throw qErr
+    suporteUserId = rows?.[0]?.id as string | undefined
+    if (!suporteUserId) {
+      throw new Error(
+        'Contacto de suporte não encontrado entre utilizadores activos. Defina VITE_SUPORTE_USER_ID ou confirme o e-mail em Usuários.'
+      )
+    }
+  }
+
+  const conversaId = await chatGetOrCreateDirect(suporteUserId)
+
+  const { data: perfil } = await supabase
+    .from('usuarios')
+    .select('nome, email')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  const quem = perfil?.nome?.trim() || perfil?.email || user.email || 'Utilizador'
+  const corpo = `[Suporte técnico]\n\n${trimmed}\n\n— ${quem}`
+
+  await chatEnviarTexto(conversaId, user.id, corpo)
+  return { conversaId, suporteUserId }
 }

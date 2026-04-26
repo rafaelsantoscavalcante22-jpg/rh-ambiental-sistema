@@ -4,9 +4,12 @@ import { supabase } from '../lib/supabase'
 import {
   etapaTicketJaRegistradoNoFluxo,
   formatarEtapaParaUI,
+  formatarFaseFluxoOficialParaUI,
   type EtapaFluxo,
 } from '../lib/fluxoEtapas'
-import { cargoPodeMutarTicketOperacional } from '../lib/workflowPermissions'
+import { cargoPodeEditarTicketOperacional } from '../lib/workflowPermissions'
+import { mensagemErroSupabase as mensagemErroSupabaseBase } from '../lib/supabaseErrors'
+import { BRAND_LOGO_MARK } from '../lib/brandLogo'
 
 export type TicketColetaSnapshot = {
   id: string
@@ -24,10 +27,12 @@ export type TicketColetaSnapshot = {
   peso_liquido: number | null
 }
 
-export type TipoTicketOperacional = 'saida' | 'frete'
+export type TipoTicketOperacional = 'entrada' | 'saida' | 'frete'
 
 function normalizarTipoTicket(raw: string | null | undefined): TipoTicketOperacional {
-  return raw === 'frete' ? 'frete' : 'saida'
+  if (raw === 'frete') return 'frete'
+  if (raw === 'entrada') return 'entrada'
+  return 'saida'
 }
 
 function montarParamsColeta(c: TicketColetaSnapshot) {
@@ -39,15 +44,8 @@ function montarParamsColeta(c: TicketColetaSnapshot) {
   return p
 }
 
-/** PostgREST devolve objeto com `message`, nem sempre `instanceof Error` — evita "Erro ao salvar." genérico. */
 function mensagemErroSupabase(err: unknown): string {
-  if (err instanceof Error) return err.message
-  if (typeof err === 'object' && err !== null && 'message' in err) {
-    const o = err as { message?: string; details?: string; hint?: string; code?: string }
-    const parts = [o.message, o.details, o.hint].filter(Boolean)
-    if (parts.length) return parts.join(' — ')
-  }
-  return 'Erro desconhecido ao salvar.'
+  return mensagemErroSupabaseBase(err, 'Erro desconhecido ao salvar.')
 }
 
 const cardStyle: CSSProperties = {
@@ -120,7 +118,7 @@ export function TicketOperacionalPanel({
   const [preReqPesagem, setPreReqPesagem] = useState(false)
   const [carregandoPreReq, setCarregandoPreReq] = useState(false)
 
-  const podeMutar = cargoPodeMutarTicketOperacional(cargo)
+  const podeMutar = cargoPodeEditarTicketOperacional(cargo)
 
   const podeEnviarAprovacao = Boolean(coletaAtiva && ticketId && podeMutar)
 
@@ -457,9 +455,11 @@ export function TicketOperacionalPanel({
     ? new Date(criadoEm).toLocaleDateString('pt-BR')
     : new Date().toLocaleDateString('pt-BR')
 
-  const tituloImpressao = tipoTicket === 'frete' ? 'FRETE' : 'SAÍDA'
+  const tituloImpressao =
+    tipoTicket === 'frete' ? 'FRETE' : tipoTicket === 'entrada' ? 'ENTRADA' : 'SAÍDA'
 
   const labelTipoTicket: Record<TipoTicketOperacional, string> = {
+    entrada: 'Entrada',
     saida: 'Saída',
     frete: 'Frete',
   }
@@ -618,9 +618,8 @@ export function TicketOperacionalPanel({
                 Ticket operacional
               </h2>
               <p className="page-header__lead" style={{ margin: '8px 0 0', maxWidth: 720 }}>
-                <strong>Seguimento:</strong> após a pesagem no Controle de Massa — registo do{' '}
-                <strong>ticket interno</strong> (distinto da MTR). Depois envie para{' '}
-                <strong>aprovação da diretoria</strong>.
+                <strong>Seguimento:</strong> após a pesagem no módulo Pesagem e Ticket — registo do{' '}
+                <strong>ticket interno</strong> (distinto da MTR). Depois siga para faturamento/financeiro no menu.
               </p>
             </div>
             {coletaAtiva && ticketId ? (
@@ -692,7 +691,8 @@ export function TicketOperacionalPanel({
               </option>
               {opcoesSelect.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.numero} — {c.cliente || 'Cliente'} · {formatarEtapaParaUI(c.etapaFluxo)}
+                  {c.numero} — {c.cliente || 'Cliente'} · {formatarFaseFluxoOficialParaUI(c.etapaFluxo)} (
+                  {formatarEtapaParaUI(c.etapaFluxo)})
                 </option>
               ))}
             </select>
@@ -700,7 +700,8 @@ export function TicketOperacionalPanel({
             {coletaAtiva ? (
               <div style={{ marginTop: '16px', fontSize: '14px', color: '#475569', lineHeight: 1.6 }}>
                 <div>
-                  <strong>Etapa:</strong> {formatarEtapaParaUI(coletaAtiva.etapaFluxo)}
+                  <strong>Fase:</strong> {formatarFaseFluxoOficialParaUI(coletaAtiva.etapaFluxo)}{' '}
+                  <span style={{ color: '#94a3b8' }}>({formatarEtapaParaUI(coletaAtiva.etapaFluxo)})</span>
                 </div>
                 <div style={{ marginTop: '10px', padding: '10px 12px', borderRadius: '12px', border: '1px solid #e5e7eb', background: '#f8fafc' }}>
                   <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '6px' }}>Referência rápida</div>
@@ -739,7 +740,8 @@ export function TicketOperacionalPanel({
               {coletaAtiva.numero} · {coletaAtiva.cliente || '—'}
             </div>
             <div style={{ marginTop: '8px', fontSize: '13px', color: '#475569' }}>
-              <strong>Etapa:</strong> {formatarEtapaParaUI(coletaAtiva.etapaFluxo)}
+              <strong>Fase:</strong> {formatarFaseFluxoOficialParaUI(coletaAtiva.etapaFluxo)}{' '}
+              <span style={{ color: '#94a3b8' }}>({formatarEtapaParaUI(coletaAtiva.etapaFluxo)})</span>
               {' · '}
               <strong>Pesagem:</strong>{' '}
               {carregandoPreReq ? '…' : preReqPesagem ? 'registrada' : 'sem registo'}
@@ -768,14 +770,16 @@ export function TicketOperacionalPanel({
               </option>
               {opcoesSelect.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.numero} — {c.cliente || 'Cliente'} · {formatarEtapaParaUI(c.etapaFluxo)}
+                  {c.numero} — {c.cliente || 'Cliente'} · {formatarFaseFluxoOficialParaUI(c.etapaFluxo)} (
+                  {formatarEtapaParaUI(c.etapaFluxo)})
                 </option>
               ))}
             </select>
             {coletaAtiva ? (
               <div style={{ marginTop: '12px', fontSize: '13px', color: '#475569', lineHeight: 1.5 }}>
                 <div>
-                  <strong>Etapa:</strong> {formatarEtapaParaUI(coletaAtiva.etapaFluxo)}
+                  <strong>Fase:</strong> {formatarFaseFluxoOficialParaUI(coletaAtiva.etapaFluxo)}{' '}
+                  <span style={{ color: '#94a3b8' }}>({formatarEtapaParaUI(coletaAtiva.etapaFluxo)})</span>
                 </div>
                 <div style={{ marginTop: '6px', color: '#64748b' }}>
                   <strong>Pesagem no sistema:</strong>{' '}
@@ -922,6 +926,7 @@ export function TicketOperacionalPanel({
                         opacity: podeEditarFormulario ? 1 : 0.85,
                       }}
                     >
+                      <option value="entrada">Entrada</option>
                       <option value="saida">Saída</option>
                       <option value="frete">Frete</option>
                     </select>
@@ -1031,7 +1036,7 @@ export function TicketOperacionalPanel({
           >
             <div style={{ marginBottom: '8px', width: '100%' }}>
               <img
-                src="/logo-rg.png"
+                src={BRAND_LOGO_MARK}
                 alt=""
                 style={{
                   height: '24px',

@@ -1,32 +1,13 @@
-import { useEffect, useState } from 'react'
 import MainLayout from '../layouts/MainLayout'
-import { supabase } from '../lib/supabase'
+import { usePerfilUsuario } from '../contexts/PerfilUsuarioContext'
 import { cargoPodeVerDashboardExecutivo } from '../lib/workflowPermissions'
 import { ExecutiveDashboard } from '../components/executive/ExecutiveDashboard'
 import DashboardLegacy from './DashboardLegacy'
 
 export default function Dashboard() {
-  const [cargo, setCargo] = useState<string | null | undefined>(undefined)
+  const { usuario, carregandoUsuario } = usePerfilUsuario()
 
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) {
-        if (!cancelled) setCargo(null)
-        return
-      }
-      const { data } = await supabase.from('usuarios').select('cargo').eq('id', user.id).maybeSingle()
-      if (!cancelled) setCargo(data?.cargo ?? null)
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (cargo === undefined) {
+  if (carregandoUsuario) {
     return (
       <MainLayout>
         <div
@@ -45,6 +26,8 @@ export default function Dashboard() {
       </MainLayout>
     )
   }
+
+  const cargo = usuario?.cargo ?? null
 
   if (cargoPodeVerDashboardExecutivo(cargo)) {
     return <ExecutiveDashboard />

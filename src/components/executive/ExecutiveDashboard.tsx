@@ -18,10 +18,10 @@ import {
 } from 'recharts'
 import MainLayout from '../../layouts/MainLayout'
 import { supabase } from '../../lib/supabase'
-import { COLETAS_LIST_MAX_ROWS } from '../../lib/coletasQueryLimits'
 import { coletaVisivelListaFinanceiro, isVencidoFinanceiro } from '../../lib/financeiroColetas'
 import {
   formatarEtapaParaUI,
+  formatarFaseFluxoOficialParaUI,
   indiceEtapaFluxo,
   normalizarEtapaColeta,
   type EtapaFluxo,
@@ -93,6 +93,14 @@ function pad(n: number) {
 function hojeLocalISO(): string {
   const d = new Date()
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** Janela mínima de `created_at` para o dashboard (gráficos 12m + calendário); reduz payload vs. histórico ilimitado. */
+function dataMinimaColetasDashboardExecutivo(): string {
+  const d = new Date()
+  d.setMonth(d.getMonth() - 18)
+  d.setHours(0, 0, 0, 0)
+  return d.toISOString()
 }
 
 function inicioFimPreset(p: PresetPeriodo, customFrom: string, customTo: string): { ini: Date; fim: Date } {
@@ -222,35 +230,53 @@ export function ExecutiveDashboard() {
     try {
       setLoading(true)
       setErro('')
-      const mtrDesde = new Date()
-      mtrDesde.setDate(mtrDesde.getDate() - 540)
-      const [cRes, mRes, pRes, clRes] = await Promise.all([
+      const desdeIso = dataMinimaColetasDashboardExecutivo()
+      const [cRes, mRes, clRes] = await Promise.all([
         supabase
           .from('coletas')
           .select(
             'id, numero, cliente, cliente_id, cidade, tipo_residuo, data_agendada, etapa_operacional, fluxo_status, observacoes, liberado_financeiro, valor_coleta, status_pagamento, data_vencimento, peso_liquido, created_at, programacao_id, mtr_id'
           )
+          .gte('created_at', desdeIso)
           .order('created_at', { ascending: false })
-          .limit(COLETAS_LIST_MAX_ROWS),
+          .limit(6500),
         supabase
           .from('mtrs')
           .select('id, created_at, status')
-          .gte('created_at', mtrDesde.toISOString())
+          .gte('created_at', desdeIso)
           .order('created_at', { ascending: false })
-          .limit(5000),
-        supabase.from('programacoes').select('id, tipo_caminhao').limit(2500),
+          .limit(4000),
         supabase.from('clientes').select('id', { count: 'exact', head: true }),
       ])
 
       if (cRes.error) throw cRes.error
       if (mRes.error) throw mRes.error
 
-      setColetas((cRes.data || []) as ColetaRow[])
+      const coletasCarregadas = (cRes.data || []) as ColetaRow[]
+      setColetas(coletasCarregadas)
       setMtrs((mRes.data || []) as MtrRow[])
+
+      const progIds = [
+        ...new Set(coletasCarregadas.map((c) => c.programacao_id).filter(Boolean)),
+      ] as string[]
       const tc: Record<string, string> = {}
-      if (!pRes.error && pRes.data) {
-        for (const r of pRes.data as { id: string; tipo_caminhao: string | null }[]) {
-          tc[r.id] = (r.tipo_caminhao ?? '').trim() || '—'
+      const PROG_CHUNK = 450
+      const fatias: string[][] = []
+      for (let i = 0; i < progIds.length; i += PROG_CHUNK) {
+        fatias.push(progIds.slice(i, i + PROG_CHUNK))
+      }
+      if (fatias.length > 0) {
+        const progRespostas = await Promise.all(
+          fatias.map((sl) =>
+            supabase.from('programacoes').select('id, tipo_caminhao').in('id', sl)
+          )
+        )
+        for (const pRes of progRespostas) {
+          if (!pRes.error && pRes.data) {
+            for (const r of pRes.data as { id: string; tipo_caminhao: string | null }[]) {
+              tc[r.id] = (r.tipo_caminhao ?? '').trim() || '—'
+            }
+          }
         }
       }
       setTipoCaminhaoPorProg(tc)
@@ -607,7 +633,7 @@ export function ExecutiveDashboard() {
     const m = new Map<string, number>()
     for (const c of coletasFiltradas) {
       const et = normalizarEtapaColeta({ fluxo_status: c.fluxo_status, etapa_operacional: c.etapa_operacional })
-      const label = formatarEtapaParaUI(et)
+      const label = formatarFaseFluxoOficialParaUI(et, { statusPagamento: c.status_pagamento })
       m.set(label, (m.get(label) || 0) + 1)
     }
     return [...m.entries()]
@@ -1181,7 +1207,7 @@ export function ExecutiveDashboard() {
                 ...execKpiHeroShell,
                 gridColumn: 'span 3',
               }}
-              onClick={() => navigate('/financeiro')}
+              onClick={() => navigate('/financeiro?vencidos=1')}
               title="Financeiro — filtro «Só vencidos»"
             >
               <span style={{ ...execKpiLab, color: '#991b1b' }}>Valores em aberto vencidos</span>
@@ -1552,7 +1578,7 @@ export function ExecutiveDashboard() {
                 <button
                   type="button"
                   className={`exec-gargalo-row exec-gargalo-row--click ${kpis.vencidosQtd > 0 ? 'exec-gargalo-row--crit' : ''}`}
-                  onClick={() => navigate('/financeiro')}
+                  onClick={() => navigate('/financeiro?vencidos=1')}
                 >
                   <div>
                     <span className="exec-gargalo-row__title">Valores vencidos</span>
@@ -1736,7 +1762,7 @@ export function ExecutiveDashboard() {
                               color: '#3730a3',
                             }}
                           >
-                            {formatarEtapaParaUI(et)}
+                            {formatarFaseFluxoOficialParaUI(et, { statusPagamento: c.status_pagamento })}
                           </span>
                         </div>
                       </div>

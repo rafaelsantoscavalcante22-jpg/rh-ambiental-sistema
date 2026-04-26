@@ -13,3 +13,14 @@ export function isBenignSupabaseFetchError(
   if (/aborted/i.test(msg)) return true
   return false
 }
+
+/** PostgREST devolve objeto com `message`, nem sempre `instanceof Error`. */
+export function mensagemErroSupabase(err: unknown, fallback: string): string {
+  if (err instanceof Error) return err.message
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    const o = err as { message?: string; details?: string; hint?: string; code?: string }
+    const parts = [o.message, o.details, o.hint].filter(Boolean)
+    if (parts.length) return parts.join(' — ')
+  }
+  return fallback
+}

@@ -29,3 +29,6 @@ dist-ssr
 *.sw?
 
 .vercel
+
+# Segredos só para `supabase secrets set` local (nunca commitar)
+supabase/.secrets.edge.env

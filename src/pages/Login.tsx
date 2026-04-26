@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { supabase } from "../lib/supabase";
+import { BRAND_LOGIN_WORDMARK } from "../lib/brandLogo";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -23,7 +24,7 @@ export default function Login() {
         return;
       }
 
-      window.location.href = "/dashboard";
+      window.location.href = '/bem-vindo'
     } catch (err) {
       setErro(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -34,12 +35,12 @@ export default function Login() {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         background: "#020b2d",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: 24,
+        padding: "max(24px, env(safe-area-inset-top, 0px)) max(24px, env(safe-area-inset-right, 0px)) max(24px, env(safe-area-inset-bottom, 0px)) max(24px, env(safe-area-inset-left, 0px))",
       }}
     >
       <div
@@ -61,12 +62,13 @@ export default function Login() {
           }}
         >
           <img
-            src="/logo-rg.png"
+            src={BRAND_LOGIN_WORDMARK}
             alt="RG Ambiental"
             style={{
-              width: 185,
-              maxWidth: "100%",
+              width: "100%",
+              maxWidth: 240,
               height: "auto",
+              display: "block",
             }}
           />
         </div>

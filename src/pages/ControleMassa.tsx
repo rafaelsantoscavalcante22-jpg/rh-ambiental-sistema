@@ -18,10 +18,11 @@ import {
 import { fetchResiduosCatalogo, mapResiduosPorId, type ResiduoCatalogo } from "../lib/residuosCatalogo";
 import { supabase } from "../lib/supabase";
 import MainLayout from "../layouts/MainLayout";
-import { cargoPodeMutarControleMassa, cargoPodeMutarMtr } from "../lib/workflowPermissions";
+import { cargoPodeLancarPesagem, cargoPodeExcluirMtr } from "../lib/workflowPermissions";
 import {
   type EtapaFluxo,
   formatarEtapaParaUI,
+  formatarFaseFluxoOficialParaUI,
   normalizarEtapaColeta,
 } from "../lib/fluxoEtapas";
 
@@ -71,6 +72,8 @@ type MtrResumo = {
 type FormRegistro = {
   coleta_id: string;
   numero_ticket: string;
+  tipo_ticket: "entrada" | "saida" | "frete";
+  descricao_ticket: string;
   data: string;
   empresa: string;
   residuo: string;
@@ -86,6 +89,8 @@ type FormRegistro = {
 const formInicial: FormRegistro = {
   coleta_id: "",
   numero_ticket: "",
+  tipo_ticket: "saida",
+  descricao_ticket: "",
   data: "",
   empresa: "",
   residuo: "",
@@ -269,6 +274,39 @@ async function fetchUltimaPesagemPorColetaIds(
   return ultima;
 }
 
+/** Tipos de ticket por coleta (um ticket por coleta na base). */
+async function fetchTipoTicketPorColetaIds(coletaIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const uniq = [...new Set(coletaIds.map((id) => id.trim()).filter(Boolean))];
+  if (uniq.length === 0) return out;
+  const chunkSize = 200;
+  for (let i = 0; i < uniq.length; i += chunkSize) {
+    const chunk = uniq.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from("tickets_operacionais")
+      .select("coleta_id, tipo_ticket")
+      .in("coleta_id", chunk);
+    if (error) {
+      console.error("Erro ao buscar tipo de ticket por coleta:", error);
+      continue;
+    }
+    for (const row of (data as { coleta_id?: string; tipo_ticket?: string | null }[]) || []) {
+      const cid = row.coleta_id != null ? String(row.coleta_id) : "";
+      const tt = row.tipo_ticket != null ? String(row.tipo_ticket).trim() : "";
+      if (cid && tt && !out.has(cid)) out.set(cid, tt);
+    }
+  }
+  return out;
+}
+
+function formatarTipoTicketLista(raw: string | null | undefined): string {
+  const r = (raw ?? "").trim().toLowerCase();
+  if (r === "frete") return "Frete";
+  if (r === "entrada") return "Entrada";
+  if (r === "saida") return "Saída";
+  return "—";
+}
+
 /**
  * Cria ou atualiza o ticket operacional ligado à coleta após pesagem gravada,
  * para o painel poder imprimir de imediato.
@@ -276,6 +314,8 @@ async function fetchUltimaPesagemPorColetaIds(
 async function garantirTicketAposPesagem(params: {
   coletaId: string;
   numeroTicket: string;
+  tipoTicket: "entrada" | "saida" | "frete";
+  descricaoExtra?: string | null;
   empresa: string;
   residuo: string;
   pesoLiquido: number | null;
@@ -292,13 +332,15 @@ async function garantirTicketAposPesagem(params: {
         })
       : null;
 
-  const descricao = [
+  const descricaoBase = [
     params.empresa.trim() && `Empresa: ${params.empresa.trim()}`,
     params.residuo.trim() && `Resíduo: ${params.residuo.trim()}`,
     pliquido && `Peso líquido: ${pliquido} kg`,
   ]
     .filter(Boolean)
     .join(" · ");
+  const descExtra = (params.descricaoExtra ?? "").trim();
+  const descricao = descExtra || descricaoBase;
 
   const { data: existentes, error: errSel } = await supabase
     .from("tickets_operacionais")
@@ -319,7 +361,7 @@ async function garantirTicketAposPesagem(params: {
       .update({
         numero: params.numeroTicket.trim() || null,
         descricao: descricao || null,
-        tipo_ticket: "saida",
+        tipo_ticket: params.tipoTicket,
       })
       .eq("id", existente.id);
 
@@ -330,8 +372,8 @@ async function garantirTicketAposPesagem(params: {
   const { error } = await supabase.from("tickets_operacionais").insert({
     coleta_id: params.coletaId,
     numero: params.numeroTicket.trim() || null,
-    descricao: descricao || "Pesagem — Controle de Massa.",
-    tipo_ticket: "saida",
+    descricao: descricao || "Pesagem e Ticket.",
+    tipo_ticket: params.tipoTicket,
     created_by: user?.id ?? null,
   });
 
@@ -353,7 +395,7 @@ async function garantirTicketAposPesagem(params: {
         .update({
           numero: params.numeroTicket.trim() || null,
           descricao: descricao || null,
-          tipo_ticket: "saida",
+          tipo_ticket: params.tipoTicket,
         })
         .eq("id", retryRows[0].id);
       if (upErr) return { ok: false, message: upErr.message };
@@ -557,7 +599,10 @@ export default function ControleMassa() {
   const [mtrsLista, setMtrsLista] = useState<MtrResumo[]>([]);
   const [loadingVinculo, setLoadingVinculo] = useState(true);
   const [salvando, setSalvando] = useState(false);
-  const [secaoPesagemAberta, setSecaoPesagemAberta] = useState(false);
+  const [secaoPesagemAberta, setSecaoPesagemAberta] = useState(true);
+  const [modoTela, setModoTela] = useState<"operacao" | "auditoria">("operacao");
+  const [tabelaAberta, setTabelaAberta] = useState(false);
+  const [filtroOperacao, setFiltroOperacao] = useState<"pendentes" | "hoje" | "todas">("pendentes");
   const [buscaColetasLista, setBuscaColetasLista] = useState("");
   const [tipoCaminhaoPorProgramacao, setTipoCaminhaoPorProgramacao] = useState<Record<string, string>>(
     {}
@@ -565,6 +610,7 @@ export default function ControleMassa() {
   const [ultimaPesagemPorColeta, setUltimaPesagemPorColeta] = useState<
     Map<string, { data: string | null; hora_entrada: string | null; hora_saida: string | null }>
   >(() => new Map());
+  const [tipoTicketPorColeta, setTipoTicketPorColeta] = useState<Map<string, string>>(() => new Map());
   const [sucesso, setSucesso] = useState("");
   const [erroTela, setErroTela] = useState("");
   const [form, setForm] = useState<FormRegistro>(formInicial);
@@ -573,11 +619,57 @@ export default function ControleMassa() {
   const [mtrPickerAberto, setMtrPickerAberto] = useState(false);
   const [filtroMtr, setFiltroMtr] = useState("");
   const mtrComboRef = useRef<HTMLDivElement | null>(null);
+  const dataInputRef = useRef<HTMLInputElement | null>(null);
+  const placaInputRef = useRef<HTMLInputElement | null>(null);
+  const pesoTaraRef = useRef<HTMLInputElement | null>(null);
+  const pesoBrutoRef = useRef<HTMLInputElement | null>(null);
+  const tipoTicketRef = useRef<HTMLSelectElement | null>(null);
   const [usuarioCargo, setUsuarioCargo] = useState<string | null>(null);
   const [excluindoColetaId, setExcluindoColetaId] = useState<string | null>(null);
 
-  const podeMutarMassa = cargoPodeMutarControleMassa(usuarioCargo);
-  const podeEditarOuExcluirColeta = cargoPodeMutarMtr(usuarioCargo);
+  const podeMutarMassa = cargoPodeLancarPesagem(usuarioCargo);
+  const podeEditarOuExcluirColeta = cargoPodeExcluirMtr(usuarioCargo);
+
+  const coletaSelecionada = useMemo(() => {
+    const id = form.coleta_id.trim();
+    if (!id) return null;
+    return todasColetas.find((x) => x.id === id) ?? null;
+  }, [form.coleta_id, todasColetas]);
+
+  const mtrSelecionada = useMemo(() => {
+    const id =
+      mtrSemColetaSelecionado ||
+      (coletaSelecionada?.mtr_id != null ? String(coletaSelecionada.mtr_id) : "");
+    if (!id) return null;
+    return mtrsLista.find((m) => m.id === id) ?? null;
+  }, [mtrSemColetaSelecionado, coletaSelecionada?.mtr_id, mtrsLista]);
+
+  const estadoFluxo = useMemo(() => {
+    const id = form.coleta_id.trim();
+    const temSelecao = Boolean(id || mtrSemColetaSelecionado);
+    const temPesagem = id ? ultimaPesagemPorColeta.has(id) : false;
+    const temTicket = id ? Boolean(tipoTicketPorColeta.get(id)) : false;
+    return { temSelecao, temPesagem, temTicket, prontoImprimir: temTicket };
+  }, [form.coleta_id, mtrSemColetaSelecionado, ultimaPesagemPorColeta, tipoTicketPorColeta]);
+
+  const listaOperacao = useMemo(() => {
+    const hojeIso = new Date().toISOString().slice(0, 10);
+    // base será definido mais abaixo via `coletasListaOrdenadas`; aqui usamos `todasColetas` como fallback
+    const base = [...todasColetas].sort((a, b) => {
+      const ta = a.created_at ? Date.parse(a.created_at) : 0;
+      const tb = b.created_at ? Date.parse(b.created_at) : 0;
+      if (tb !== ta) return tb - ta;
+      return String(b.numero).localeCompare(String(a.numero), undefined, { numeric: true });
+    });
+    const pendentes = base.filter((c) => !ultimaPesagemPorColeta.has(c.id));
+    const hoje = base.filter((c) => {
+      const up = ultimaPesagemPorColeta.get(c.id);
+      return up?.data === hojeIso;
+    });
+    if (filtroOperacao === "hoje") return hoje;
+    if (filtroOperacao === "todas") return base;
+    return pendentes;
+  }, [todasColetas, ultimaPesagemPorColeta, filtroOperacao]);
 
   const temParametrosContexto = !!(
     urlColetaId ||
@@ -713,23 +805,34 @@ export default function ControleMassa() {
       const progIds = [...new Set(merged.map((c) => c.programacao_id).filter(Boolean))] as string[];
       const tipoCam: Record<string, string> = {};
       const progChunk = 200;
+      const fatiasProg: string[][] = [];
       for (let pi = 0; pi < progIds.length; pi += progChunk) {
-        const slice = progIds.slice(pi, pi + progChunk);
-        const { data: prows, error: pErr } = await supabase
-          .from("programacoes")
-          .select("id, tipo_caminhao")
-          .in("id", slice);
-        if (!pErr && prows) {
-          for (const p of prows as { id: string; tipo_caminhao?: string | null }[]) {
-            tipoCam[p.id] = (p.tipo_caminhao ?? "").trim() || "—";
+        fatiasProg.push(progIds.slice(pi, pi + progChunk));
+      }
+      if (fatiasProg.length > 0) {
+        const progRespostas = await Promise.all(
+          fatiasProg.map((slice) =>
+            supabase.from("programacoes").select("id, tipo_caminhao").in("id", slice)
+          )
+        );
+        for (const { data: prows, error: pErr } of progRespostas) {
+          if (!pErr && prows) {
+            for (const p of prows as { id: string; tipo_caminhao?: string | null }[]) {
+              tipoCam[p.id] = (p.tipo_caminhao ?? "").trim() || "—";
+            }
           }
         }
       }
 
-      const ultima = await fetchUltimaPesagemPorColetaIds(merged.map((c) => c.id));
+      const coletaIds = merged.map((c) => c.id);
+      const [ultima, tiposTicket] = await Promise.all([
+        fetchUltimaPesagemPorColetaIds(coletaIds),
+        fetchTipoTicketPorColetaIds(coletaIds),
+      ]);
 
       setTipoCaminhaoPorProgramacao(tipoCam);
       setUltimaPesagemPorColeta(ultima);
+      setTipoTicketPorColeta(tiposTicket);
       setTodasColetas(merged);
     } finally {
       setLoadingVinculo(false);
@@ -1018,6 +1121,15 @@ export default function ControleMassa() {
     setSucesso("");
   }
 
+  // Auto foco operacional: ao selecionar MTR/coleta e abrir o fluxo, foca no 1º campo.
+  useEffect(() => {
+    if (!secaoPesagemAberta) return;
+    if (!form.coleta_id && !mtrSemColetaSelecionado) return;
+    window.setTimeout(() => {
+      dataInputRef.current?.focus();
+    }, 60);
+  }, [secaoPesagemAberta, form.coleta_id, mtrSemColetaSelecionado]);
+
   function selecionarColetaParaPesagem(c: ColetaOpcao) {
     setMtrSemColetaSelecionado(null);
     setErroTela("");
@@ -1166,6 +1278,7 @@ export default function ControleMassa() {
     if (prevContextoUrlKeyRef.current === urlKey) return;
 
     prevContextoUrlKeyRef.current = urlKey;
+    setSecaoPesagemAberta(true);
     queueMicrotask(() => {
       aplicarColetaNoForm(target);
     });
@@ -1185,6 +1298,16 @@ export default function ControleMassa() {
     urlProgramacaoId,
     urlClienteId,
   ]);
+
+  function abrirFormularioPesagem() {
+    setSecaoPesagemAberta(true);
+    window.setTimeout(() => {
+      document.getElementById("massa-form-anchor")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 80);
+  }
 
   async function handleSalvarRegistro(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -1319,6 +1442,8 @@ export default function ControleMassa() {
     const ticketAuto = await garantirTicketAposPesagem({
       coletaId,
       numeroTicket: form.numero_ticket,
+      tipoTicket: form.tipo_ticket,
+      descricaoExtra: form.descricao_ticket,
       empresa: empresaFinal,
       residuo: form.residuo,
       pesoLiquido: pesoLiquidoNumero,
@@ -1397,9 +1522,10 @@ export default function ControleMassa() {
   }, [coletasComCatalogoResiduo]);
 
   const coletasListaFiltradas = useMemo(() => {
+    const base = modoTela === "operacao" ? listaOperacao : coletasListaOrdenadas;
     const t = normalizarTextoBusca(buscaColetasLista);
-    if (!t) return coletasListaOrdenadas;
-    return coletasListaOrdenadas.filter((c) => {
+    if (!t) return base;
+    return base.filter((c) => {
       const mtrNo = c.mtr_id ? mtrsLista.find((m) => m.id === c.mtr_id)?.numero ?? "" : "";
       const tc = c.programacao_id ? tipoCaminhaoPorProgramacao[c.programacao_id] ?? "" : "";
       const up = c.id ? ultimaPesagemPorColeta.get(c.id) : undefined;
@@ -1421,6 +1547,8 @@ export default function ControleMassa() {
     });
   }, [
     coletasListaOrdenadas,
+    listaOperacao,
+    modoTela,
     buscaColetasLista,
     mtrsLista,
     tipoCaminhaoPorProgramacao,
@@ -1534,11 +1662,12 @@ export default function ControleMassa() {
                 color: "#0f172a",
               }}
             >
-              Controle de Massa
+              Pesagem e Ticket
             </h1>
             <p className="page-header__lead" style={{ margin: "6px 0 0", maxWidth: "640px" }}>
-              Escolha a <strong>MTR</strong>, lance a pesagem e use o bloco abaixo para o <strong>ticket</strong>{' '}
-              (saída ou frete). Antes disto: Programação e MTR; depois: aprovação e faturamento no menu.
+              Escolha a <strong>MTR</strong>, lance a pesagem e use o bloco <strong>Ticket operacional</strong> abaixo
+              para classificar o ticket (<strong>Entrada</strong>, <strong>Saída</strong> ou <strong>Frete</strong>).
+              Antes disto: Programação e MTR; depois: aprovação e faturamento no menu.
             </p>
             {usuarioCargo ? (
               <p
@@ -1555,6 +1684,165 @@ export default function ControleMassa() {
               </p>
             ) : null}
           </div>
+
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                border: "1px solid #cbd5e1",
+                borderRadius: "12px",
+                overflow: "hidden",
+                background: "#ffffff",
+                boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setModoTela("operacao")}
+                style={{
+                  padding: "10px 12px",
+                  border: "none",
+                  background: modoTela === "operacao" ? "#0f172a" : "#ffffff",
+                  color: modoTela === "operacao" ? "#ffffff" : "#0f172a",
+                  fontWeight: 900,
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                Operação
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setModoTela("auditoria");
+                  setTabelaAberta(true);
+                }}
+                style={{
+                  padding: "10px 12px",
+                  border: "none",
+                  background: modoTela === "auditoria" ? "#0f172a" : "#ffffff",
+                  color: modoTela === "auditoria" ? "#ffffff" : "#0f172a",
+                  fontWeight: 900,
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                Auditoria
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={abrirFormularioPesagem}
+              disabled={!podeMutarMassa}
+              style={{
+                padding: "10px 14px",
+                borderRadius: "12px",
+                border: "1px solid #0f766e",
+                background: podeMutarMassa ? "#0d9488" : "#e2e8f0",
+                color: podeMutarMassa ? "#ffffff" : "#64748b",
+                fontWeight: 900,
+                fontSize: "13px",
+                cursor: podeMutarMassa ? "pointer" : "not-allowed",
+                boxShadow: podeMutarMassa ? "0 6px 16px rgba(13, 148, 136, 0.22)" : "none",
+              }}
+              title={podeMutarMassa ? "Abrir o formulário de pesagem" : "Sem permissão para lançar pesagem"}
+            >
+              + Nova pesagem
+            </button>
+          </div>
+        </div>
+
+        {/* Stepper sticky: guia rápido do fluxo */}
+        <div
+          style={{
+            position: "sticky",
+            top: 0,
+            zIndex: 40,
+            marginTop: "14px",
+            padding: "10px 12px",
+            borderRadius: "14px",
+            border: "1px solid #e2e8f0",
+            background: "rgba(255, 255, 255, 0.92)",
+            backdropFilter: "blur(8px)",
+            boxShadow: "0 10px 30px rgba(15, 23, 42, 0.06)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+            {[
+              { k: "1", t: "MTR", ok: estadoFluxo.temSelecao },
+              { k: "2", t: "Pesagem", ok: estadoFluxo.temPesagem },
+              { k: "3", t: "Ticket", ok: estadoFluxo.temTicket },
+              { k: "4", t: "Imprimir", ok: estadoFluxo.prontoImprimir },
+            ].map((s) => (
+              <div
+                key={s.k}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "8px 10px",
+                  borderRadius: "999px",
+                  border: "1px solid",
+                  borderColor: s.ok ? "#bbf7d0" : "#e2e8f0",
+                  background: s.ok ? "#f0fdf4" : "#ffffff",
+                  color: s.ok ? "#065f46" : "#0f172a",
+                  fontWeight: 900,
+                  fontSize: "12px",
+                }}
+              >
+                <span
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: 999,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: s.ok ? "#16a34a" : "#e2e8f0",
+                    color: s.ok ? "#ffffff" : "#64748b",
+                    fontSize: "11px",
+                    fontWeight: 900,
+                  }}
+                >
+                  {s.ok ? "✓" : s.k}
+                </span>
+                {s.t}
+              </div>
+            ))}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              gap: "10px",
+              alignItems: "center",
+              flexWrap: "wrap",
+              minWidth: 220,
+              justifyContent: "flex-end",
+            }}
+          >
+            <div style={{ fontSize: "12px", color: "#475569", fontWeight: 700 }}>
+              {coletaSelecionada ? (
+                <>
+                  Coleta <strong style={{ color: "#0f172a" }}>{coletaSelecionada.numero}</strong> ·{" "}
+                  {(coletaSelecionada.cliente || "—").slice(0, 36)}
+                </>
+              ) : mtrSelecionada ? (
+                <>
+                  MTR <strong style={{ color: "#0f172a" }}>{mtrSelecionada.numero}</strong> ·{" "}
+                  {(mtrSelecionada.cliente || "—").slice(0, 36)}
+                </>
+              ) : (
+                "Selecione uma MTR para começar"
+              )}
+            </div>
+          </div>
         </div>
 
         <div
@@ -1564,53 +1852,138 @@ export default function ControleMassa() {
             borderRadius: "18px",
             overflow: "hidden",
             boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+            order: modoTela === "operacao" ? 2 : 1,
           }}
         >
-          <div style={{ padding: "14px 18px 12px", borderBottom: "1px solid #e5e7eb" }}>
-            <h2
-              style={{
-                margin: 0,
-                fontSize: "17px",
-                fontWeight: 800,
-                color: "#0f172a",
-              }}
-            >
-              Todas as coletas
-            </h2>
-            <p
-              style={{
-                margin: "6px 0 10px",
-                fontSize: "12px",
-                color: "#64748b",
-                lineHeight: 1.45,
-              }}
-            >
-              Lista completa do sistema ({coletasListaOrdenadas.length} coletas). Datas e horas vêm do
-              último registo de pesagem quando existir. Clique numa linha para carregar na pesagem.
-            </p>
-            <input
-              value={buscaColetasLista}
-              onChange={(e) => setBuscaColetasLista(e.target.value)}
-              placeholder="Filtrar por coleta, cliente, MTR, placa, etapa…"
-              style={{
-                width: "100%",
-                maxWidth: "440px",
-                height: "36px",
-                borderRadius: "10px",
-                border: "1px solid #d1d5db",
-                padding: "0 12px",
-                fontSize: "13px",
-                outline: "none",
-              }}
-            />
-          </div>
-          <div
+          <button
+            type="button"
+            onClick={() => setTabelaAberta((v) => !v)}
             style={{
-              overflowX: "auto",
-              maxHeight: "min(52vh, 520px)",
-              overflowY: "auto",
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+              padding: "14px 18px",
+              border: "none",
+              borderBottom: tabelaAberta ? "1px solid #e5e7eb" : "none",
+              background: "#ffffff",
+              cursor: "pointer",
+              textAlign: "left",
             }}
           >
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: "17px", fontWeight: 900, color: "#0f172a" }}>
+                {modoTela === "operacao" ? "Lista de coletas (apoio)" : "Todas as coletas — auditoria"}
+              </div>
+              <div style={{ marginTop: 4, fontSize: "12px", color: "#64748b", fontWeight: 600, lineHeight: 1.45 }}>
+                {modoTela === "operacao"
+                  ? "Opcional: abra para escolher uma linha ou confirmar dados. O trabalho principal é o formulário acima."
+                  : "Vista completa com colunas técnicas e ações de edição/exclusão."}
+              </div>
+            </div>
+            <span style={{ flexShrink: 0, fontSize: "12px", color: "#64748b" }} aria-hidden>
+              {tabelaAberta ? "▲" : "▼"}
+            </span>
+          </button>
+
+          {tabelaAberta ? (
+            <>
+              <div style={{ padding: "12px 18px", borderBottom: "1px solid #e5e7eb", background: "#ffffff" }}>
+                {modoTela === "operacao" ? (
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+                    {[
+                      { id: "pendentes" as const, label: "Pendentes" },
+                      { id: "hoje" as const, label: "Hoje" },
+                      { id: "todas" as const, label: "Todas" },
+                    ].map((b) => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => setFiltroOperacao(b.id)}
+                        style={{
+                          height: "34px",
+                          padding: "0 12px",
+                          borderRadius: "999px",
+                          border: "1px solid",
+                          borderColor: filtroOperacao === b.id ? "#0f766e" : "#cbd5e1",
+                          background: filtroOperacao === b.id ? "#0d9488" : "#ffffff",
+                          color: filtroOperacao === b.id ? "#ffffff" : "#0f172a",
+                          fontWeight: 900,
+                          fontSize: "12px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+
+                    <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 800 }}>
+                      {filtroOperacao === "pendentes"
+                        ? `Pendentes: ${listaOperacao.length}`
+                        : filtroOperacao === "hoje"
+                          ? `Hoje: ${listaOperacao.length}`
+                          : `Total: ${listaOperacao.length}`}
+                    </span>
+                  </div>
+                ) : null}
+
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+                  <input
+                    value={buscaColetasLista}
+                    onChange={(e) => setBuscaColetasLista(e.target.value)}
+                    placeholder={
+                      modoTela === "operacao"
+                        ? "Filtrar por coleta, cliente, MTR, placa…"
+                        : "Filtrar por coleta, cliente, MTR, placa, etapa…"
+                    }
+                    style={{
+                      width: "100%",
+                      maxWidth: "440px",
+                      height: "36px",
+                      borderRadius: "10px",
+                      border: "1px solid #d1d5db",
+                      padding: "0 12px",
+                      fontSize: "13px",
+                      outline: "none",
+                    }}
+                  />
+                  {buscaColetasLista.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => setBuscaColetasLista("")}
+                      style={{
+                        height: "36px",
+                        padding: "0 12px",
+                        borderRadius: "10px",
+                        border: "1px solid #cbd5e1",
+                        background: "#ffffff",
+                        fontWeight: 800,
+                        fontSize: "12px",
+                        cursor: "pointer",
+                        color: "#0f172a",
+                      }}
+                    >
+                      Limpar filtro
+                    </button>
+                  ) : null}
+                  <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 700 }}>
+                    Mostrando{" "}
+                    <strong style={{ color: "#0f172a" }}>
+                      {coletasListaFiltradas.length}
+                    </strong>{" "}
+                    de {coletasListaOrdenadas.length}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  overflowX: "auto",
+                  maxHeight: modoTela === "operacao" ? "min(38vh, 380px)" : "min(52vh, 520px)",
+                  overflowY: "auto",
+                }}
+              >
             {loadingVinculo ? (
               <div
                 style={{
@@ -1644,17 +2017,30 @@ export default function ControleMassa() {
                     <th style={thListaColetaStyle}>Coleta</th>
                     <th style={thListaColetaStyle}>MTR</th>
                     <th style={thListaColetaStyle}>Data</th>
-                    <th style={thListaColetaStyle}>Entrada</th>
-                    <th style={thListaColetaStyle}>Saída</th>
+                    {modoTela === "auditoria" ? (
+                      <>
+                        <th style={thListaColetaStyle}>Hora entrada</th>
+                        <th style={thListaColetaStyle}>Hora saída</th>
+                        <th style={thListaColetaStyle}>Tipo ticket</th>
+                      </>
+                    ) : null}
                     <th style={thListaColetaStyle}>Placa</th>
-                    <th style={thListaColetaStyle}>Tipo cam.</th>
+                    {modoTela === "auditoria" ? (
+                      <th style={thListaColetaStyle}>Tipo cam.</th>
+                    ) : null}
                     <th style={{ ...thListaColetaStyle, minWidth: "140px" }}>Cliente</th>
-                    <th style={{ ...thListaColetaStyle, width: "76px" }}>Cód.</th>
+                    {modoTela === "auditoria" ? (
+                      <th style={{ ...thListaColetaStyle, width: "76px" }}>Cód.</th>
+                    ) : null}
                     <th style={{ ...thListaColetaStyle, minWidth: "120px" }}>Resíduo</th>
-                    <th style={{ ...thListaColetaStyle, textAlign: "right" }}>Bruto</th>
-                    <th style={{ ...thListaColetaStyle, textAlign: "right" }}>Tara</th>
+                    {modoTela === "auditoria" ? (
+                      <>
+                        <th style={{ ...thListaColetaStyle, textAlign: "right" }}>Bruto</th>
+                        <th style={{ ...thListaColetaStyle, textAlign: "right" }}>Tara</th>
+                      </>
+                    ) : null}
                     <th style={{ ...thListaColetaStyle, textAlign: "right" }}>Líq.</th>
-                    <th style={thListaColetaStyle}>Etapa</th>
+                    {modoTela === "auditoria" ? <th style={thListaColetaStyle}>Etapa</th> : null}
                     <th style={{ ...thListaColetaStyle, whiteSpace: "nowrap" }}>Ações</th>
                   </tr>
                 </thead>
@@ -1665,15 +2051,22 @@ export default function ControleMassa() {
                       : "—";
                     const up = ultimaPesagemPorColeta.get(c.id);
                     const dataP = up?.data ? formatarDataIsoCurta(up.data) : "—";
-                    const tc = c.programacao_id
-                      ? tipoCaminhaoPorProgramacao[c.programacao_id] ?? "—"
-                      : "—";
                     return (
                       <tr
                         key={c.id}
                         style={{
                           borderBottom: "1px solid #f1f5f9",
                           cursor: podeMutarMassa ? "pointer" : "default",
+                          background: form.coleta_id && form.coleta_id === c.id ? "#ecfeff" : "#ffffff",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!podeMutarMassa) return;
+                          if (form.coleta_id && form.coleta_id === c.id) return;
+                          e.currentTarget.style.background = "#f8fafc";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background =
+                            form.coleta_id && form.coleta_id === c.id ? "#ecfeff" : "#ffffff";
                         }}
                         onClick={() => {
                           if (!podeMutarMassa) return;
@@ -1688,14 +2081,39 @@ export default function ControleMassa() {
                         <td style={tdListaColetaStyle}>{c.numero}</td>
                         <td style={tdListaColetaStyle}>{mtrNo}</td>
                         <td style={tdListaColetaStyle}>{dataP}</td>
-                        <td style={tdListaColetaStyle}>
-                          {formatarHoraRelogio(up?.hora_entrada)}
-                        </td>
-                        <td style={tdListaColetaStyle}>
-                          {formatarHoraRelogio(up?.hora_saida)}
-                        </td>
+                        {modoTela === "auditoria" ? (
+                          <>
+                            <td style={tdListaColetaStyle}>
+                              {formatarHoraRelogio(up?.hora_entrada)}
+                            </td>
+                            <td style={tdListaColetaStyle}>
+                              {formatarHoraRelogio(up?.hora_saida)}
+                            </td>
+                            <td
+                              style={{
+                                ...tdListaColetaStyle,
+                                fontWeight: 700,
+                                color: tipoTicketPorColeta.get(c.id) ? "#0f766e" : "#94a3b8",
+                                whiteSpace: "nowrap",
+                              }}
+                              title={
+                                tipoTicketPorColeta.get(c.id)
+                                  ? `Ticket operacional: ${formatarTipoTicketLista(tipoTicketPorColeta.get(c.id))}`
+                                  : "Sem ticket operacional — use o bloco abaixo após a pesagem"
+                              }
+                            >
+                              {formatarTipoTicketLista(tipoTicketPorColeta.get(c.id))}
+                            </td>
+                          </>
+                        ) : null}
                         <td style={tdListaColetaStyle}>{c.placa || "—"}</td>
-                        <td style={tdListaColetaStyle}>{tc}</td>
+                        {modoTela === "auditoria" ? (
+                          <td style={tdListaColetaStyle}>
+                            {c.programacao_id
+                              ? tipoCaminhaoPorProgramacao[c.programacao_id] ?? "—"
+                              : "—"}
+                          </td>
+                        ) : null}
                         <td
                           style={{
                             ...tdListaColetaStyle,
@@ -1706,18 +2124,20 @@ export default function ControleMassa() {
                         >
                           {c.cliente || "—"}
                         </td>
-                        <td
-                          style={{
-                            ...tdListaColetaStyle,
-                            whiteSpace: "nowrap",
-                            fontWeight: 800,
-                            color: "#0f766e",
-                            fontSize: "10px",
-                          }}
-                          title={c.residuo_codigo || undefined}
-                        >
-                          {c.residuo_codigo || "—"}
-                        </td>
+                        {modoTela === "auditoria" ? (
+                          <td
+                            style={{
+                              ...tdListaColetaStyle,
+                              whiteSpace: "nowrap",
+                              fontWeight: 800,
+                              color: "#0f766e",
+                              fontSize: "10px",
+                            }}
+                            title={c.residuo_codigo || undefined}
+                          >
+                            {c.residuo_codigo || "—"}
+                          </td>
+                        ) : null}
                         <td
                           style={{
                             ...tdListaColetaStyle,
@@ -1729,18 +2149,32 @@ export default function ControleMassa() {
                         >
                           {c.residuo_nome_lista || c.tipo_residuo || "—"}
                         </td>
-                        <td style={{ ...tdListaColetaStyle, textAlign: "right" }}>
-                          {formatarNumero(c.peso_bruto)}
-                        </td>
-                        <td style={{ ...tdListaColetaStyle, textAlign: "right" }}>
-                          {formatarNumero(c.peso_tara)}
-                        </td>
+                        {modoTela === "auditoria" ? (
+                          <>
+                            <td style={{ ...tdListaColetaStyle, textAlign: "right" }}>
+                              {formatarNumero(c.peso_bruto)}
+                            </td>
+                            <td style={{ ...tdListaColetaStyle, textAlign: "right" }}>
+                              {formatarNumero(c.peso_tara)}
+                            </td>
+                          </>
+                        ) : null}
                         <td style={{ ...tdListaColetaStyle, textAlign: "right" }}>
                           {formatarNumero(c.peso_liquido)}
                         </td>
-                        <td style={tdListaColetaStyle}>
-                          {formatarEtapaParaUI(c.etapaFluxo)}
-                        </td>
+                        {modoTela === "auditoria" ? (
+                          <td style={tdListaColetaStyle}>
+                            <div style={{ fontWeight: 700, fontSize: "12px", color: "#0f766e" }}>
+                              {formatarFaseFluxoOficialParaUI(c.etapaFluxo)}
+                            </div>
+                            <div
+                              style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}
+                              title={formatarEtapaParaUI(c.etapaFluxo)}
+                            >
+                              {formatarEtapaParaUI(c.etapaFluxo)}
+                            </div>
+                          </td>
+                        ) : null}
                         <td
                           style={{ ...tdListaColetaStyle, whiteSpace: "nowrap" }}
                           onClick={(e) => e.stopPropagation()}
@@ -1761,51 +2195,57 @@ export default function ControleMassa() {
                               title="Abrir no lançamento de pesagem"
                               style={botaoAcaoColetaListaStyle}
                             >
-                              Acessar
+                              {modoTela === "operacao" ? "Abrir" : "Acessar"}
                             </button>
-                            <button
-                              type="button"
-                              className="coleta-acao-btn"
-                              onClick={() =>
-                                navigate(`/mtr?${montarParamsFluxo(c).toString()}`)
-                              }
-                              disabled={!podeEditarOuExcluirColeta}
-                              title={
-                                podeEditarOuExcluirColeta
-                                  ? "Editar na página MTR"
-                                  : "Apenas operacional ou administrador"
-                              }
-                              style={{
-                                ...botaoAcaoColetaListaStyle,
-                                ...(!podeEditarOuExcluirColeta ? botaoAcaoColetaListaDisabledStyle : {}),
-                              }}
-                            >
-                              Editar
-                            </button>
-                            <button
-                              type="button"
-                              className="coleta-acao-btn"
-                              onClick={() => void excluirColetaDaLista(c)}
-                              disabled={
-                                !podeEditarOuExcluirColeta || excluindoColetaId === c.id
-                              }
-                              title={
-                                podeEditarOuExcluirColeta
-                                  ? "Excluir esta coleta"
-                                  : "Apenas operacional ou administrador"
-                              }
-                              style={{
-                                ...botaoAcaoColetaListaStyle,
-                                background: "#fef2f2",
-                                color: "#b91c1c",
-                                borderColor: "#fecaca",
-                                ...(!podeEditarOuExcluirColeta || excluindoColetaId === c.id
-                                  ? botaoAcaoColetaListaDisabledStyle
-                                  : {}),
-                              }}
-                            >
-                              {excluindoColetaId === c.id ? "…" : "Excluir"}
-                            </button>
+                            {modoTela === "auditoria" ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="coleta-acao-btn"
+                                  onClick={() =>
+                                    navigate(`/mtr?${montarParamsFluxo(c).toString()}`)
+                                  }
+                                  disabled={!podeEditarOuExcluirColeta}
+                                  title={
+                                    podeEditarOuExcluirColeta
+                                      ? "Editar na página MTR"
+                                      : "Apenas operacional ou administrador"
+                                  }
+                                  style={{
+                                    ...botaoAcaoColetaListaStyle,
+                                    ...(!podeEditarOuExcluirColeta
+                                      ? botaoAcaoColetaListaDisabledStyle
+                                      : {}),
+                                  }}
+                                >
+                                  Editar
+                                </button>
+                                <button
+                                  type="button"
+                                  className="coleta-acao-btn"
+                                  onClick={() => void excluirColetaDaLista(c)}
+                                  disabled={
+                                    !podeEditarOuExcluirColeta || excluindoColetaId === c.id
+                                  }
+                                  title={
+                                    podeEditarOuExcluirColeta
+                                      ? "Excluir esta coleta"
+                                      : "Apenas operacional ou administrador"
+                                  }
+                                  style={{
+                                    ...botaoAcaoColetaListaStyle,
+                                    background: "#fef2f2",
+                                    color: "#b91c1c",
+                                    borderColor: "#fecaca",
+                                    ...(!podeEditarOuExcluirColeta || excluindoColetaId === c.id
+                                      ? botaoAcaoColetaListaDisabledStyle
+                                      : {}),
+                                  }}
+                                >
+                                  {excluindoColetaId === c.id ? "…" : "Excluir"}
+                                </button>
+                              </>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -1826,7 +2266,9 @@ export default function ControleMassa() {
                 Nenhuma coleta com este filtro.
               </div>
             ) : null}
-          </div>
+              </div>
+            </>
+          ) : null}
         </div>
 
         <div
@@ -1837,6 +2279,7 @@ export default function ControleMassa() {
             borderRadius: "18px",
             overflow: "hidden",
             boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+            order: modoTela === "operacao" ? 1 : 2,
           }}
         >
           <button
@@ -1865,11 +2308,24 @@ export default function ControleMassa() {
                 }}
               >
                 Lançar pesagem
+                {modoTela === "operacao" ? (
+                  <span
+                    style={{
+                      marginLeft: "10px",
+                      fontSize: "11px",
+                      fontWeight: 800,
+                      color: "#0f766e",
+                      verticalAlign: "middle",
+                    }}
+                  >
+                    passo principal
+                  </span>
+                ) : null}
               </div>
               <p style={{ margin: "6px 0 0", fontSize: "13px", color: "#64748b", lineHeight: 1.45 }}>
                 {secaoPesagemAberta
-                  ? "Ao salvar, o ticket é gerado automaticamente — imprima na secção logo abaixo."
-                  : "Clique para abrir o formulário (MTR, ticket e pesos). Fica fechado para poupar espaço no ecrã."}
+                  ? "Ao salvar, o ticket é gerado automaticamente — use «Imprimir ticket» em seguida."
+                  : "Abra para MTR, pesos e ticket. Pode fechar este bloco para ver mais da lista em Auditoria."}
               </p>
             </div>
             <span style={{ flexShrink: 0, fontSize: "12px", color: "#64748b" }} aria-hidden>
@@ -2082,226 +2538,417 @@ export default function ControleMassa() {
                 ) : null}
               </div>
 
-              <div>
-                <div
-                  style={{
-                    fontSize: "14px",
-                    fontWeight: 700,
-                    color: "#0f172a",
-                    marginBottom: "10px",
-                  }}
-                >
-                  2. Ticket e pesagem
+              {/* CARD 2 — PESAGEM (principal) */}
+              <div
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "16px",
+                  padding: "16px",
+                  background: "#ffffff",
+                  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontWeight: 900, color: "#0f172a", fontSize: "14px" }}>2. Pesagem</div>
+                    <div style={{ marginTop: 4, fontSize: "12px", color: "#64748b", fontWeight: 600 }}>
+                      Preencha os campos essenciais. O peso líquido é calculado automaticamente.
+                    </div>
+                  </div>
                 </div>
 
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                    gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
                     gap: "12px",
-                    marginBottom: "12px",
+                    marginTop: "14px",
                   }}
                 >
-                  <input
-                    name="numero_ticket"
-                    value={form.numero_ticket}
-                    onChange={handleInputChange}
-                    placeholder="N.º ticket"
-                    style={inputStyle}
-                  />
+                  <div style={{ gridColumn: "span 3" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Data</label>
+                    <input
+                      ref={dataInputRef}
+                      type="date"
+                      name="data"
+                      value={form.data}
+                      onChange={handleInputChange}
+                      style={{ ...inputStyle, height: "44px", fontSize: "14px" }}
+                    />
+                  </div>
 
-                  <input
-                    type="date"
-                    name="data"
-                    value={form.data}
-                    onChange={handleInputChange}
-                    style={inputStyle}
-                  />
-                </div>
+                  <div style={{ gridColumn: "span 3" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Placa</label>
+                    <input
+                      ref={placaInputRef}
+                      name="placa"
+                      value={form.placa}
+                      onChange={handleInputChange}
+                      placeholder="ABC-1234"
+                      style={{ ...inputStyle, height: "44px", fontSize: "14px" }}
+                    />
+                  </div>
 
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                    gap: "12px",
-                  }}
-                >
-                  <input
-                    name="empresa"
-                    value={form.empresa}
-                    onChange={handleInputChange}
-                    placeholder="Empresa"
-                    style={inputStyle}
-                  />
+                  <div style={{ gridColumn: "span 6" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Tipo veículo</label>
+                    <input
+                      value={
+                        form.coleta_id.trim()
+                          ? tipoCaminhaoPorProgramacao[
+                              (todasColetas.find((x) => x.id === form.coleta_id.trim())?.programacao_id ?? "") as string
+                            ] ?? "—"
+                          : "—"
+                      }
+                      readOnly
+                      style={{ ...inputStyle, height: "44px", fontSize: "14px", background: "#f8fafc" }}
+                      placeholder="—"
+                    />
+                  </div>
 
-                  <select
-                    name="residuo_catalogo_id"
-                    value={form.residuo_catalogo_id}
-                    onChange={handleInputChange}
-                    style={inputStyle}
-                    aria-label="Catálogo de resíduos (código)"
-                  >
-                    <option value="">Catálogo de resíduos (código)</option>
-                    {residuosCatalogo
-                      .filter((r) => r.ativo)
-                      .map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.codigo} — {r.nome}
-                        </option>
-                      ))}
-                  </select>
+                  <div style={{ gridColumn: "span 4" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Motorista</label>
+                    <input
+                      name="motorista"
+                      value={form.motorista}
+                      onChange={handleInputChange}
+                      placeholder="Motorista"
+                      style={{ ...inputStyle, height: "44px", fontSize: "14px" }}
+                    />
+                  </div>
 
-                  <input
-                    name="residuo"
-                    value={form.residuo}
-                    onChange={handleInputChange}
-                    placeholder="Texto do resíduo (livre ou preenchido pelo catálogo)"
-                    style={inputStyle}
-                  />
+                  <div style={{ gridColumn: "span 4" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Empresa</label>
+                    <input
+                      name="empresa"
+                      value={form.empresa}
+                      onChange={handleInputChange}
+                      placeholder="Empresa"
+                      style={{ ...inputStyle, height: "44px", fontSize: "14px" }}
+                    />
+                  </div>
 
-                  <input
-                    name="placa"
-                    value={form.placa}
-                    onChange={handleInputChange}
-                    placeholder="Placa"
-                    style={inputStyle}
-                  />
+                  <div style={{ gridColumn: "span 4" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Resíduo (catálogo)</label>
+                    <select
+                      name="residuo_catalogo_id"
+                      value={form.residuo_catalogo_id}
+                      onChange={handleInputChange}
+                      style={{ ...inputStyle, height: "44px", fontSize: "14px" }}
+                      aria-label="Catálogo de resíduos (código)"
+                    >
+                      <option value="">Selecione (opcional)</option>
+                      {residuosCatalogo
+                        .filter((r) => r.ativo)
+                        .map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.codigo} — {r.nome}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
 
-                  <input
-                    name="motorista"
-                    value={form.motorista}
-                    onChange={handleInputChange}
-                    placeholder="Motorista"
-                    style={inputStyle}
-                  />
-                </div>
+                  <div style={{ gridColumn: "span 12" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Resíduo (texto)</label>
+                    <input
+                      name="residuo"
+                      value={form.residuo}
+                      onChange={handleInputChange}
+                      placeholder="Texto do resíduo (livre ou preenchido pelo catálogo)"
+                      style={{ ...inputStyle, height: "44px", fontSize: "14px" }}
+                    />
+                  </div>
 
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                    gap: "12px",
-                    marginTop: "12px",
-                  }}
-                >
-                  <input
-                    name="peso_tara"
-                    value={form.peso_tara}
-                    onChange={handleInputChange}
-                    placeholder="Peso tara"
-                    style={inputStyle}
-                  />
+                  <div style={{ gridColumn: "span 4" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Peso tara (kg)</label>
+                    <input
+                      ref={pesoTaraRef}
+                      name="peso_tara"
+                      inputMode="decimal"
+                      value={form.peso_tara}
+                      onChange={handleInputChange}
+                      placeholder="Ex.: 320"
+                      style={{ ...inputStyle, height: "46px", fontSize: "15px", fontWeight: 800 }}
+                    />
+                  </div>
 
-                  <input
-                    name="peso_bruto"
-                    value={form.peso_bruto}
-                    onChange={handleInputChange}
-                    placeholder="Peso bruto"
-                    style={inputStyle}
-                  />
+                  <div style={{ gridColumn: "span 4" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Peso bruto (kg)</label>
+                    <input
+                      ref={pesoBrutoRef}
+                      name="peso_bruto"
+                      inputMode="decimal"
+                      value={form.peso_bruto}
+                      onChange={handleInputChange}
+                      placeholder="Ex.: 2540"
+                      style={{ ...inputStyle, height: "46px", fontSize: "15px", fontWeight: 800 }}
+                    />
+                  </div>
 
-                  <input
-                    name="peso_liquido"
-                    value={form.peso_liquido}
-                    readOnly
-                    placeholder="Peso líquido calculado"
-                    style={{ ...inputStyle, background: "#f8fafc" }}
-                  />
+                  <div style={{ gridColumn: "span 4" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>
+                      Peso líquido (auto)
+                    </label>
+                    <input
+                      name="peso_liquido"
+                      value={form.peso_liquido}
+                      readOnly
+                      placeholder="—"
+                      style={{
+                        ...inputStyle,
+                        height: "46px",
+                        fontSize: "15px",
+                        fontWeight: 900,
+                        background: "#f8fafc",
+                        borderColor: "#cbd5e1",
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
 
+              {/* CARD 3 — GERAÇÃO DE TICKET */}
               <div
                 style={{
-                  display: "flex",
-                  gap: "10px",
-                  alignItems: "center",
-                  marginTop: "8px",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "16px",
+                  padding: "16px",
+                  background: "#ffffff",
+                  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
                 }}
               >
-                <button
-                  type="submit"
-                  disabled={salvando || !podeMutarMassa}
-                  title={
-                    !podeMutarMassa
-                      ? "Apenas balanceiro ou administrador pode salvar."
-                      : undefined
-                  }
-                  style={{
-                    background: "#2563eb",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "10px",
-                    height: "42px",
-                    padding: "0 18px",
-                    fontWeight: 700,
-                    cursor:
-                      salvando || !podeMutarMassa ? "not-allowed" : "pointer",
-                    opacity: salvando || !podeMutarMassa ? 0.55 : 1,
-                  }}
-                >
-                  {salvando ? "Salvando..." : "Salvar registro"}
-                </button>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontWeight: 900, color: "#0f172a", fontSize: "14px" }}>3. Ticket</div>
+                    <div style={{ marginTop: 4, fontSize: "12px", color: "#64748b", fontWeight: 600 }}>
+                      Defina o tipo e o número. A descrição pode ser automática ou manual.
+                    </div>
+                  </div>
+                </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    limparFormularioPesagem();
-                  }}
+                <div
                   style={{
-                    background: "#e5e7eb",
-                    color: "#111827",
-                    border: "none",
-                    borderRadius: "10px",
-                    height: "42px",
-                    padding: "0 18px",
-                    fontWeight: 700,
-                    cursor: "pointer",
+                    display: "grid",
+                    gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
+                    gap: "12px",
+                    marginTop: "14px",
+                    alignItems: "start",
                   }}
                 >
-                  Limpar formulário
-                </button>
+                  <div style={{ gridColumn: "span 4" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Tipo de ticket</label>
+                    <select
+                      ref={tipoTicketRef}
+                      name="tipo_ticket"
+                      value={form.tipo_ticket}
+                      onChange={handleInputChange}
+                      style={{ ...inputStyle, height: "44px", fontSize: "14px" }}
+                    >
+                      <option value="saida">Saída</option>
+                      <option value="entrada">Entrada</option>
+                      <option value="frete">Frete</option>
+                    </select>
+                  </div>
+
+                  <div style={{ gridColumn: "span 4" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Número</label>
+                    <input
+                      name="numero_ticket"
+                      value={form.numero_ticket}
+                      onChange={handleInputChange}
+                      placeholder="N.º ticket"
+                      style={{ ...inputStyle, height: "44px", fontSize: "14px" }}
+                    />
+                  </div>
+
+                  <div style={{ gridColumn: "span 4" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Prévia</label>
+                    <div
+                      style={{
+                        border: "1px dashed #cbd5e1",
+                        borderRadius: "12px",
+                        padding: "10px 12px",
+                        background: "#f8fafc",
+                        fontSize: "12px",
+                        color: "#0f172a",
+                        lineHeight: 1.4,
+                        fontWeight: 700,
+                      }}
+                    >
+                      <div style={{ fontWeight: 900, marginBottom: 4 }}>Ticket {formatarTipoTicketLista(form.tipo_ticket)}</div>
+                      <div style={{ color: "#475569", fontWeight: 700 }}>
+                        Nº: <span style={{ color: "#0f172a" }}>{form.numero_ticket.trim() || "—"}</span>
+                      </div>
+                      <div style={{ color: "#475569", fontWeight: 700 }}>
+                        Líq.: <span style={{ color: "#0f172a" }}>{form.peso_liquido.trim() || "—"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ gridColumn: "span 12" }} className="field">
+                    <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>
+                      Descrição (opcional)
+                    </label>
+                    <textarea
+                      name="descricao_ticket"
+                      value={form.descricao_ticket}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, descricao_ticket: e.target.value }))
+                      }
+                      rows={2}
+                      placeholder="Se vazio, o sistema monta uma descrição automática (empresa, resíduo, peso)."
+                      style={{
+                        width: "100%",
+                        borderRadius: "12px",
+                        border: "1px solid #d1d5db",
+                        padding: "10px 12px",
+                        fontSize: "13px",
+                        outline: "none",
+                        resize: "vertical",
+                        lineHeight: 1.45,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* CARD 4 — AÇÃO FINAL */}
+              <div
+                style={{
+                  border: "1px solid #bbf7d0",
+                  background: "linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%)",
+                  borderRadius: "16px",
+                  padding: "16px",
+                  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: "14px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ minWidth: 260 }}>
+                  <div style={{ fontWeight: 900, color: "#065f46" }}>4. Finalizar</div>
+                  <div style={{ marginTop: 4, fontSize: "12px", color: "#047857", fontWeight: 700 }}>
+                    {form.coleta_id.trim()
+                      ? "Ticket pronto para impressão após salvar."
+                      : "Selecione uma MTR/coleta e registre a pesagem para gerar o ticket."}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      document.getElementById("ticket-operacional-anchor")?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                      });
+                    }}
+                    disabled={!form.coleta_id.trim()}
+                    style={{
+                      height: "44px",
+                      padding: "0 18px",
+                      borderRadius: "12px",
+                      border: "1px solid #16a34a",
+                      background: form.coleta_id.trim() ? "#16a34a" : "#dcfce7",
+                      color: form.coleta_id.trim() ? "#ffffff" : "#166534",
+                      fontWeight: 900,
+                      cursor: form.coleta_id.trim() ? "pointer" : "not-allowed",
+                      boxShadow: form.coleta_id.trim() ? "0 10px 24px rgba(22, 163, 74, 0.18)" : "none",
+                    }}
+                  >
+                    Imprimir Ticket
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={salvando || !podeMutarMassa}
+                    title={!podeMutarMassa ? "Apenas balanceiro ou administrador pode salvar." : undefined}
+                    style={{
+                      height: "44px",
+                      padding: "0 18px",
+                      borderRadius: "12px",
+                      border: "1px solid #0f766e",
+                      background: podeMutarMassa ? "#0d9488" : "#e2e8f0",
+                      color: podeMutarMassa ? "#ffffff" : "#64748b",
+                      fontWeight: 900,
+                      cursor: salvando || !podeMutarMassa ? "not-allowed" : "pointer",
+                      opacity: salvando || !podeMutarMassa ? 0.7 : 1,
+                    }}
+                  >
+                    {salvando ? "Salvando…" : "Salvar e continuar"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      limparFormularioPesagem();
+                    }}
+                    style={{
+                      height: "44px",
+                      padding: "0 16px",
+                      borderRadius: "12px",
+                      border: "1px solid #cbd5e1",
+                      background: "#ffffff",
+                      color: "#0f172a",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Limpar
+                  </button>
+                </div>
               </div>
             </form>
 
             <div
+              id="ticket-operacional-anchor"
               style={{
-                marginTop: "8px",
+                marginTop: "10px",
                 borderTop: "1px solid #e5e7eb",
-                padding: "22px 20px 24px",
+                padding: "18px 20px 20px",
                 background: "linear-gradient(180deg, #fafbfc 0%, #ffffff 100%)",
               }}
             >
-              <TicketOperacionalPanel
-                variant="embedded"
-                coletaAtiva={coletaTicketSnapshot}
-                cargo={usuarioCargo}
-                coletasOpcoes={coletasTicketOpcoes}
-                carregandoColetas={loadingVinculo}
-                ocultarSeletorColeta={Boolean(form.coleta_id.trim())}
-                onTrocarColeta={(id) => {
-                  void (async () => {
-                    if (!id) {
-                      setMtrSemColetaSelecionado(null);
-                      setForm((prev) => ({ ...prev, coleta_id: "" }));
-                      return;
-                    }
-                    let c = todasColetas.find((x) => x.id === id);
-                    if (!c) {
-                      const extra = await buscarColetasPorIds([id]);
-                      c = extra[0];
-                      if (c) {
-                        setTodasColetas((prev) =>
-                          prev.some((x) => x.id === c!.id) ? prev : [...prev, c!]
-                        );
-                      }
-                    }
-                    if (c) aplicarColetaNoForm(c);
-                  })();
-                }}
-                onEtapaColetaAlterada={() => {
-                  void fetchMtrsEColetas();
-                }}
-              />
+              <details style={{ borderRadius: "14px" }}>
+                <summary style={{ cursor: "pointer", fontWeight: 900, color: "#0f172a", fontSize: "14px" }}>
+                  Impressão e ajustes avançados do ticket{" "}
+                  <span style={{ color: "#64748b", fontWeight: 800 }}>(opcional)</span>
+                </summary>
+                <div style={{ marginTop: "12px" }}>
+                  <TicketOperacionalPanel
+                    variant="embedded"
+                    coletaAtiva={coletaTicketSnapshot}
+                    cargo={usuarioCargo}
+                    coletasOpcoes={coletasTicketOpcoes}
+                    carregandoColetas={loadingVinculo}
+                    ocultarSeletorColeta={Boolean(form.coleta_id.trim())}
+                    onTrocarColeta={(id) => {
+                      void (async () => {
+                        if (!id) {
+                          setMtrSemColetaSelecionado(null);
+                          setForm((prev) => ({ ...prev, coleta_id: "" }));
+                          return;
+                        }
+                        let c = todasColetas.find((x) => x.id === id);
+                        if (!c) {
+                          const extra = await buscarColetasPorIds([id]);
+                          c = extra[0];
+                          if (c) {
+                            setTodasColetas((prev) =>
+                              prev.some((x) => x.id === c!.id) ? prev : [...prev, c!]
+                            );
+                          }
+                        }
+                        if (c) aplicarColetaNoForm(c);
+                      })();
+                    }}
+                    onEtapaColetaAlterada={() => {
+                      void fetchMtrsEColetas();
+                    }}
+                  />
+                </div>
+              </details>
             </div>
             </>
           ) : null}

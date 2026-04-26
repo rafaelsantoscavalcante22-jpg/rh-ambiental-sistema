@@ -9,6 +9,7 @@ import {
 } from '../lib/edgeFunctionErrors'
 import { supabase } from '../lib/supabase'
 import { cargoEhAdministrador } from '../lib/workflowPermissions'
+import { ROTAS_SISTEMA, emailPodeDefinirPaginasPorUsuario } from '../lib/paginasSistema'
 
 type Usuario = {
   id: string
@@ -17,6 +18,7 @@ type Usuario = {
   cargo: string
   status: string
   created_at: string | null
+  paginas_permitidas?: string[] | null
 }
 
 type FormState = {
@@ -101,9 +103,17 @@ export default function Usuarios() {
   const [paginaUsuarios, setPaginaUsuarios] = useState(0)
   const [itensPorPagina, setItensPorPagina] = useState(DEFAULT_PAGE_SIZE)
 
+  const [meuEmail, setMeuEmail] = useState<string | null>(null)
+  const [modalPaginasUsuario, setModalPaginasUsuario] = useState<Usuario | null>(null)
+  const [modoPaginas, setModoPaginas] = useState<'cargo' | 'lista'>('cargo')
+  const [rotasMarcadas, setRotasMarcadas] = useState<Set<string>>(() => new Set())
+  const [salvandoPaginas, setSalvandoPaginas] = useState(false)
+
   const souAdministrador = cargoEhAdministrador(meuCargo)
   /** Rota já restrita a admin; enquanto o cargo carrega, permite a UI (Edge Function valida de novo). */
   const podeGerenciar = meuCargo === null || souAdministrador
+
+  const podeDefinirPaginas = emailPodeDefinirPaginasPorUsuario(meuEmail)
 
   const totalUsuarios = useMemo(() => usuarios.length, [usuarios])
 
@@ -149,7 +159,7 @@ export default function Usuarios() {
 
       const { data, error } = await supabase
         .from('usuarios')
-        .select('id, nome, email, cargo, status, created_at')
+        .select('id, nome, email, cargo, status, created_at, paginas_permitidas')
         .order('created_at', { ascending: false })
 
       if (error) {
@@ -175,13 +185,75 @@ export default function Usuarios() {
       } = await supabase.auth.getUser()
       if (!user) {
         setMeuCargo(null)
+        setMeuEmail(null)
         return
       }
+      setMeuEmail((user.email || '').trim().toLowerCase() || null)
       const { data } = await supabase.from('usuarios').select('cargo').eq('id', user.id).maybeSingle()
       setMeuCargo(data?.cargo ?? null)
     }
     void carregarMeuCargo()
   }, [])
+
+  function abrirModalPaginas(usuario: Usuario) {
+    setErro('')
+    setSucesso('')
+    setModalPaginasUsuario(usuario)
+    const pp = usuario.paginas_permitidas
+    if (pp && pp.length > 0) {
+      setModoPaginas('lista')
+      setRotasMarcadas(new Set(pp))
+    } else {
+      setModoPaginas('cargo')
+      setRotasMarcadas(new Set())
+    }
+  }
+
+  function fecharModalPaginas() {
+    setModalPaginasUsuario(null)
+    setSalvandoPaginas(false)
+  }
+
+  function toggleRotaMarcada(path: string) {
+    setRotasMarcadas((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+
+  async function salvarPaginasUsuario() {
+    if (!modalPaginasUsuario || !podeDefinirPaginas) return
+    setErro('')
+    setSucesso('')
+    let paginas: string[] | null = null
+    if (modoPaginas === 'lista') {
+      paginas = Array.from(rotasMarcadas)
+      if (paginas.length === 0) {
+        setErro('Seleccione pelo menos uma página ou escolha «Apenas cargo».')
+        return
+      }
+    }
+
+    setSalvandoPaginas(true)
+    try {
+      const sessao = await obterSessaoParaEdgeFunctions(supabase)
+      const { data, error } = await supabase.functions.invoke('admin-set-user-pages', {
+        body: { userId: modalPaginasUsuario.id, paginas },
+        headers: headersJwtSessao(sessao),
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(String(data.error))
+      setSucesso(data?.message || 'Permissões de páginas guardadas.')
+      fecharModalPaginas()
+      await carregarUsuarios()
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : 'Erro ao guardar páginas.')
+    } finally {
+      setSalvandoPaginas(false)
+    }
+  }
 
   async function criarUsuario(e: FormEvent) {
     e.preventDefault()
@@ -420,6 +492,13 @@ export default function Usuarios() {
           <p className="page-header__lead" style={{ margin: '6px 0 0' }}>
             Quem acessa o sistema e com qual perfil (cargo). Criar, editar e excluir é permitido apenas
             para o cargo <strong>Administrador</strong>.
+            {podeDefinirPaginas ? (
+              <>
+                {' '}
+                Contas autorizadas podem <strong>restringir o acesso por páginas</strong> por utilizador
+                (lista abaixo «Páginas»).
+              </>
+            ) : null}
           </p>
         </div>
 
@@ -665,15 +744,16 @@ export default function Usuarios() {
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '960px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '1040px' }}>
               <thead>
                 <tr style={{ backgroundColor: '#f8fafc' }}>
                   <th style={thStyle}>Nome</th>
                   <th style={thStyle}>E-mail</th>
                   <th style={thStyle}>Cargo</th>
                   <th style={thStyle}>Status</th>
+                  <th style={thStyle}>Páginas</th>
                   <th style={thStyle}>Criado em</th>
-                  {podeGerenciar ? <th style={{ ...thStyle, width: '200px' }}>Ações</th> : null}
+                  {podeGerenciar ? <th style={{ ...thStyle, width: '260px' }}>Ações</th> : null}
                 </tr>
               </thead>
 
@@ -684,6 +764,16 @@ export default function Usuarios() {
                     <td style={tdStyle}>{usuario.email}</td>
                     <td style={tdStyle}>{usuario.cargo}</td>
                     <td style={tdStyle}>{normalizarStatus(usuario.status)}</td>
+                    <td style={{ ...tdStyle, fontSize: '13px', color: '#475569' }}>
+                      {usuario.paginas_permitidas && usuario.paginas_permitidas.length > 0 ? (
+                        <span title={usuario.paginas_permitidas.join(', ')}>
+                          {usuario.paginas_permitidas.length} rota
+                          {usuario.paginas_permitidas.length === 1 ? '' : 's'}
+                        </span>
+                      ) : (
+                        <span title="Só regras do cargo">Cargo</span>
+                      )}
+                    </td>
                     <td style={tdStyle}>{formatarData(usuario.created_at)}</td>
                     {podeGerenciar ? (
                       <td style={tdStyle}>
@@ -696,6 +786,17 @@ export default function Usuarios() {
                           >
                             Editar
                           </button>
+                          {podeDefinirPaginas ? (
+                            <button
+                              type="button"
+                              onClick={() => abrirModalPaginas(usuario)}
+                              style={actionPaginasStyle}
+                              disabled={!!excluindoId || loadingEdicao || salvandoPaginas}
+                              title="Definir quais páginas do sistema este utilizador pode abrir"
+                            >
+                              Páginas
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => void excluirUsuario(usuario)}
@@ -874,6 +975,110 @@ export default function Usuarios() {
           </form>
         </div>
       ) : null}
+
+      {modalPaginasUsuario && podeDefinirPaginas ? (
+        <div
+          style={modalPaginasBackdropStyle}
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) fecharModalPaginas()
+          }}
+        >
+          <div style={modalPaginasPanelStyle} role="dialog" aria-labelledby="modal-paginas-titulo">
+            <h2 id="modal-paginas-titulo" style={{ margin: '0 0 8px', fontSize: '18px', fontWeight: 800 }}>
+              Páginas permitidas
+            </h2>
+            <p style={{ margin: '0 0 16px', fontSize: '14px', color: '#64748b' }}>
+              <strong>{modalPaginasUsuario.nome}</strong> ({modalPaginasUsuario.email})
+            </p>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="modoPaginas"
+                  checked={modoPaginas === 'cargo'}
+                  onChange={() => setModoPaginas('cargo')}
+                />
+                <span>
+                  <strong>Apenas cargo</strong> — sem lista extra; vale a regra normal do perfil nas rotas.
+                </span>
+              </label>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '10px',
+                  cursor: 'pointer',
+                  marginTop: '10px',
+                }}
+              >
+                <input
+                  type="radio"
+                  name="modoPaginas"
+                  checked={modoPaginas === 'lista'}
+                  onChange={() => setModoPaginas('lista')}
+                />
+                <span>
+                  <strong>Lista de páginas</strong> — o utilizador só abre as rotas marcadas (além de estar
+                  ativo e com cargo permitido na rota).
+                </span>
+              </label>
+            </div>
+
+            {modoPaginas === 'lista' ? (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+                  gap: '8px',
+                  maxHeight: 'min(52vh, 420px)',
+                  overflowY: 'auto',
+                  padding: '12px',
+                  background: '#f8fafc',
+                  borderRadius: '10px',
+                  border: '1px solid #e2e8f0',
+                }}
+              >
+                {ROTAS_SISTEMA.map((r) => (
+                  <label
+                    key={r.path}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={rotasMarcadas.has(r.path)}
+                      onChange={() => toggleRotaMarcada(r.path)}
+                    />
+                    <span style={{ fontWeight: 600, color: '#0f172a' }}>{r.label}</span>
+                    <span style={{ color: '#94a3b8', fontSize: '12px' }}>{r.path}</span>
+                  </label>
+                ))}
+              </div>
+            ) : null}
+
+            <div style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => void salvarPaginasUsuario()}
+                disabled={salvandoPaginas}
+                style={successButtonStyle}
+              >
+                {salvandoPaginas ? 'A guardar…' : 'Guardar'}
+              </button>
+              <button type="button" onClick={fecharModalPaginas} disabled={salvandoPaginas} style={secondaryButtonStyle}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       </div>
     </MainLayout>
   )
@@ -979,4 +1184,36 @@ const actionDeleteStyle: CSSProperties = {
   cursor: 'pointer',
   fontWeight: 700,
   fontSize: '13px',
+}
+
+const actionPaginasStyle: CSSProperties = {
+  backgroundColor: '#f0fdf4',
+  color: '#166534',
+  border: '1px solid #bbf7d0',
+  padding: '8px 12px',
+  borderRadius: '8px',
+  cursor: 'pointer',
+  fontWeight: 700,
+  fontSize: '13px',
+}
+
+const modalPaginasBackdropStyle: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(15, 23, 42, 0.45)',
+  zIndex: 10040,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '20px',
+}
+
+const modalPaginasPanelStyle: CSSProperties = {
+  background: '#fff',
+  borderRadius: '14px',
+  padding: '22px',
+  maxWidth: '720px',
+  width: '100%',
+  boxShadow: '0 24px 60px rgba(0,0,0,0.2)',
+  border: '1px solid #e2e8f0',
 }

@@ -6,12 +6,13 @@ import { supabase } from '../lib/supabase'
 import {
   etapaAprovacaoJaRegistradaNoFluxo,
   formatarEtapaParaUI,
+  formatarFaseFluxoOficialParaUI,
   normalizarEtapaColeta,
   type EtapaFluxo,
 } from '../lib/fluxoEtapas'
 import { COLETAS_DROPDOWN_MAX_ROWS } from '../lib/coletasQueryLimits'
 import { queryColetasListaResumoFluxo } from '../lib/coletasSelectSeguimento'
-import { cargoPodeMutarAprovacaoDiretoria } from '../lib/workflowPermissions'
+import { cargoPodeDecidirAprovacaoDiretoria } from '../lib/workflowPermissions'
 
 type ColetaResumo = {
   id: string
@@ -86,7 +87,7 @@ export default function AprovacaoDiretoria() {
   const [preReq, setPreReq] = useState<{ ticket: boolean }>({ ticket: false })
   const [carregandoPreReq, setCarregandoPreReq] = useState(false)
 
-  const podeMutar = cargoPodeMutarAprovacaoDiretoria(cargo)
+  const podeMutar = cargoPodeDecidirAprovacaoDiretoria(cargo)
 
   const coletaAtiva = useMemo(
     () => resolverColetaPorContextoUrl(coletas, idsCtx),
@@ -347,7 +348,8 @@ export default function AprovacaoDiretoria() {
             </option>
             {opcoesSelect.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.numero} — {c.cliente || 'Cliente'} · {formatarEtapaParaUI(c.etapaFluxo)}
+                {c.numero} — {c.cliente || 'Cliente'} · {formatarFaseFluxoOficialParaUI(c.etapaFluxo)} (
+                {formatarEtapaParaUI(c.etapaFluxo)})
               </option>
             ))}
           </select>
@@ -381,7 +383,8 @@ export default function AprovacaoDiretoria() {
                       border: '1px solid #6ee7b7',
                     }}
                   >
-                    {formatarEtapaParaUI(coletaAtiva.etapaFluxo)}
+                    {formatarFaseFluxoOficialParaUI(coletaAtiva.etapaFluxo)} (
+                    {formatarEtapaParaUI(coletaAtiva.etapaFluxo)})
                   </span>
                 </div>
                 <div style={ticketPillStyle}>

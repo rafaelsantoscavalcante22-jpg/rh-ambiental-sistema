@@ -1,3 +1,8 @@
+/**
+ * Fluxo legado por valor de `etapa_operacional` em dados antigos.
+ * Para **novo código**, preferir `src/lib/fluxoEtapas.ts`:
+ * `normalizarEtapaColeta`, `formatarEtapaParaUI`, `formatarFaseFluxoOficialParaUI`.
+ */
 export type EtapaOperacional =
   | 'SOLICITACAO_CLIENTE'
   | 'PROGRAMACAO_WHATSAPP'

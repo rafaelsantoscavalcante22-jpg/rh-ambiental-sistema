@@ -4,11 +4,13 @@ import MainLayout from '../layouts/MainLayout'
 import { supabase } from '../lib/supabase'
 import {
   formatarEtapaParaUI,
+  formatarFaseFluxoOficialParaUI,
   indiceEtapaFluxo,
   normalizarEtapaColeta,
 } from '../lib/fluxoEtapas'
 import { isBenignSupabaseFetchError } from '../lib/supabaseErrors'
-import { cargoPodeMutarMtr } from '../lib/workflowPermissions'
+import { cargoPodeEditarMtr } from '../lib/workflowPermissions'
+import { BRAND_LOGO_MARK } from '../lib/brandLogo'
 
 type MTRStatus = 'Rascunho' | 'Emitido' | 'Cancelado'
 
@@ -274,7 +276,9 @@ function etiquetaEtapaColeta(c: Coleta | null | undefined) {
     fluxo_status: c.fluxo_status,
     etapa_operacional: c.etapa_operacional,
   })
-  return formatarEtapaParaUI(e)
+  const macro = formatarFaseFluxoOficialParaUI(e)
+  const det = formatarEtapaParaUI(e)
+  return det === macro ? macro : `${macro} (${det})`
 }
 
 function classeEtapaColeta(c: Coleta | null | undefined) {
@@ -374,7 +378,7 @@ export default function MTR() {
   const [form, setForm] = useState<MTRFormState>(emptyForm)
   const [usuarioCargo, setUsuarioCargo] = useState<string | null>(null)
 
-  const podeMutarMtr = cargoPodeMutarMtr(usuarioCargo)
+  const podeMutarMtr = cargoPodeEditarMtr(usuarioCargo)
 
   const loadDataGenRef = useRef(0)
   const programacaoChangeGenRef = useRef(0)
@@ -772,6 +776,50 @@ export default function MTR() {
     }
   }
 
+  async function updateColetasStatusAfterMTR(programacaoId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('coletas')
+        .select('id, fluxo_status, etapa_operacional')
+        .eq('programacao_id', programacaoId)
+        .limit(50)
+
+      if (error) throw error
+
+      const rows = (data || []) as Array<{
+        id: string
+        fluxo_status?: string | null
+        etapa_operacional?: string | null
+      }>
+
+      if (rows.length === 0) return
+
+      const alvo = 'MTR_PREENCHIDA'
+      const alvoI = indiceEtapaFluxo(alvo)
+
+      for (const r of rows) {
+        const e = normalizarEtapaColeta({
+          fluxo_status: r.fluxo_status,
+          etapa_operacional: r.etapa_operacional,
+        })
+        if (indiceEtapaFluxo(e) >= alvoI) continue
+
+        const { error: uErr } = await supabase
+          .from('coletas')
+          .update({
+            fluxo_status: alvo,
+            etapa_operacional: alvo,
+            status_processo: 'MTR',
+            liberado_financeiro: false,
+          })
+          .eq('id', r.id)
+        if (uErr) console.warn('update coletas after MTR', uErr.message)
+      }
+    } catch (e) {
+      console.warn('updateColetasStatusAfterMTR', e)
+    }
+  }
+
   async function handleSave(e: FormEvent) {
     e.preventDefault()
 
@@ -905,6 +953,7 @@ export default function MTR() {
     }
 
     await updateProgramacaoStatusAfterMTR(form.programacao_id)
+    await updateColetasStatusAfterMTR(form.programacao_id)
 
     setSaving(false)
     alert(editingId ? 'MTR atualizada com sucesso.' : 'MTR criada com sucesso.')
@@ -2632,7 +2681,7 @@ export default function MTR() {
                             <div className="mtr-excel">
                               <div className="mtr-excel__header">
                                 <div className="mtr-excel__logo">
-                                  <img src="/logo-rg.png" alt="RG Ambiental" />
+                                  <img src={BRAND_LOGO_MARK} alt="RG Ambiental" />
                                 </div>
                                 <div className="mtr-excel__title">
                                   <div className="mtr-excel__title-main">MTR - MANIFESTO PARA TRANSPORTE DE RESÍDUOS</div>
@@ -3040,8 +3089,37 @@ export default function MTR() {
 
                     <div className="field field-full">
                       <label>Campos do modelo MTR (completo)</label>
-                      <details style={{ marginTop: 6 }}>
-                        <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
+                      <div
+                        className="field-info-box"
+                        style={{
+                          marginTop: 8,
+                          border: '1px solid #f59e0b',
+                          background: '#fffbeb',
+                          color: '#92400e',
+                          fontWeight: 800,
+                        }}
+                      >
+                        Atenção: estes campos são usados na impressão do MTR. Preencha antes de finalizar.
+                      </div>
+
+                      <details
+                        open
+                        style={{
+                          marginTop: 10,
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          padding: '10px 12px',
+                          background: '#ffffff',
+                        }}
+                      >
+                        <summary
+                          style={{
+                            cursor: 'pointer',
+                            fontWeight: 900,
+                            color: '#0f172a',
+                            listStyle: 'none',
+                          }}
+                        >
                           Preencher campos do layout (Gerador / Resíduo / Transportador / Destinatário)
                         </summary>
                         <div className="field-info-box" style={{ marginTop: 10 }}>

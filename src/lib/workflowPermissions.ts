@@ -19,6 +19,12 @@ export function cargoEhVisualizador(cargo: string | null | undefined): boolean {
   return normalizarTextoCargo(cargo).includes('visualizador')
 }
 
+export function cargoEhDiretoria(cargo: string | null | undefined): boolean {
+  const c = normalizarTextoCargo(cargo)
+  if (!c) return false
+  return c.includes('diretoria') || c.includes('diretor')
+}
+
 /**
  * Painel executivo (home tipo BI) — Diretoria e Administrador.
  * Outros perfis mantêm o dashboard operacional padrão.
@@ -27,7 +33,7 @@ export function cargoPodeVerDashboardExecutivo(cargo: string | null | undefined)
   const c = normalizarTextoCargo(cargo)
   if (!c) return false
   if (cargoEhAdministrador(cargo)) return true
-  return c.includes('diretoria') || c.includes('diretor')
+  return cargoEhDiretoria(cargo)
 }
 
 /** Programação: criação de agenda e vínculo ao fluxo — Operacional + Admin. */
@@ -91,7 +97,26 @@ export function cargoPodeMutarAprovacaoDiretoria(cargo: string | null | undefine
   const c = normalizarTextoCargo(cargo)
   if (!c) return false
   if (cargoEhAdministrador(cargo)) return true
-  return c.includes('diretoria')
+  return cargoEhDiretoria(cargo)
+}
+
+/**
+ * Comprovante de descarte — documentação pós-pesagem (operacional / pesagem / faturamento).
+ */
+export function cargoPodeMutarComprovanteDescarte(cargo: string | null | undefined): boolean {
+  if (cargoEhVisualizador(cargo)) return false
+  const c = normalizarTextoCargo(cargo)
+  if (!c) return true
+  if (cargoEhAdministrador(cargo)) return true
+  return (
+    c.includes('operacional') ||
+    c.includes('logistica') ||
+    c.includes('balanceiro') ||
+    c.includes('pesagem') ||
+    c.includes('faturamento') ||
+    c.includes('financeiro') ||
+    cargoEhDiretoria(cargo)
+  )
 }
 
 /** Registo de faturamento (camada antes do financeiro). */
@@ -103,8 +128,13 @@ export function cargoPodeMutarFaturamentoFluxo(cargo: string | null | undefined)
   return (
     c.includes('faturamento') ||
     c.includes('financeiro') ||
-    c.includes('diretoria')
+    cargoEhDiretoria(cargo)
   )
+}
+
+/** Alterar valor da conta após faturamento (travado) — só Administrador. */
+export function cargoPodeAlterarValorContaTravada(cargo: string | null | undefined): boolean {
+  return cargoEhAdministrador(cargo)
 }
 
 /** Cobrança / pagamento na tela Financeiro — Financeiro + Admin. */
@@ -116,3 +146,27 @@ export function cargoPodeMutarFinanceiro(cargo: string | null | undefined): bool
   if (c.includes('operacional')) return false
   return c === 'financeiro' || (c.includes('financeiro') && !c.includes('operacional'))
 }
+
+// ---------------------------------------------------------------------------
+// Fase 5 — permissões por ação (wrappers sem espalhar regra pela UI)
+// ---------------------------------------------------------------------------
+
+export const cargoPodeCriarProgramacao = cargoPodeMutarProgramacao
+export const cargoPodeEditarProgramacao = cargoPodeMutarProgramacao
+export const cargoPodeExcluirProgramacao = cargoPodeMutarProgramacao
+
+export const cargoPodeCriarMtr = cargoPodeMutarMtr
+export const cargoPodeEditarMtr = cargoPodeMutarMtr
+export const cargoPodeExcluirMtr = cargoPodeMutarMtr
+
+export const cargoPodeLancarPesagem = cargoPodeMutarControleMassa
+
+export const cargoPodeEmitirFaturamento = cargoPodeMutarFaturamentoFluxo
+export const cargoPodeCancelarFaturamento = cargoPodeMutarFaturamentoFluxo
+
+export const cargoPodeEditarCobranca = cargoPodeMutarFinanceiro
+export const cargoPodeMarcarPagamento = cargoPodeMutarFinanceiro
+
+export const cargoPodeEditarChecklistTransporte = cargoPodeMutarChecklistTransporte
+export const cargoPodeEditarTicketOperacional = cargoPodeMutarTicketOperacional
+export const cargoPodeDecidirAprovacaoDiretoria = cargoPodeMutarAprovacaoDiretoria

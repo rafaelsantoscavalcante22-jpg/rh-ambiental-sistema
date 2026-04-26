@@ -1,9 +1,13 @@
 /**
  * Apaga todos os dados de teste / operacionais do sistema.
- * Mantém: clientes, usuarios (tabela public.usuarios) e contas em auth (não alteradas).
+ * Mantém: clientes, motoristas, caminhões, usuarios (public.usuarios) e contas em auth (não alteradas).
  *
- * Remove: programações (e coleta_id), controle_massa, checklist_transporte, tickets_operacionais,
- * conferencia_operacional, aprovacoes_diretoria, faturamento_registros, coletas, mtrs.
+ * Remove: programações (e coleta_id), controle_massa, checklist_transporte, conferencia_transporte,
+ * tickets_operacionais, conferencia_operacional, aprovacoes_diretoria, faturamento_registros,
+ * financeiro_documentos, nf_envios_log, financeiro_auditoria, coletas, mtrs.
+ *
+ * Preserva cadastros de preço: public.faturamento_precos_regras (regras por cliente).
+ * Ao apagar coletas, contas_receber e contas_receber_baixas são removidas em CASCADE (FK).
  *
  * Uso:
  *   npx tsx scripts/reset-coletas-operacao.ts --yes
@@ -87,7 +91,9 @@ async function main() {
 
   const supabase = createClient(url, key)
 
-  console.log('A apagar dados de teste (mantém clientes e usuários)…\n')
+  console.log(
+    'A apagar dados de teste (mantém clientes, motoristas, caminhões e utilizadores)…\n'
+  )
 
   const { error: errNull } = await supabase
     .from('programacoes')
@@ -100,10 +106,14 @@ async function main() {
   const tabelasFluxoColeta = [
     'controle_massa',
     'checklist_transporte',
+    'conferencia_transporte',
     'tickets_operacionais',
     'conferencia_operacional',
     'aprovacoes_diretoria',
     'faturamento_registros',
+    'financeiro_documentos',
+    'nf_envios_log',
+    'financeiro_auditoria',
   ] as const
 
   for (const t of tabelasFluxoColeta) {
@@ -118,7 +128,9 @@ async function main() {
   await deleteAllRows(supabase, 'mtrs')
   await deleteAllRows(supabase, 'programacoes')
 
-  console.log('\nConcluído. Clientes e utilizadores (tabela usuarios) foram preservados.\n')
+  console.log(
+    '\nConcluído. Clientes, motoristas, caminhões e utilizadores (tabela usuarios) foram preservados.\n'
+  )
 }
 
 main().catch((e) => {

@@ -60,6 +60,10 @@ export const ETAPA_LABEL_CURTO: Record<EtapaFluxo, string> = {
   FINALIZADO: 'Finalizado',
 }
 
+/**
+ * Quando `fluxo_status` e `etapa_operacional` divergem (ex.: trigger ou import legado),
+ * usa-se a etapa **mais avançada** na ordem canónica — alinhado à operação real (Controle de Massa / aprovação).
+ */
 export function normalizarEtapaColeta(row: {
   fluxo_status?: string | null
   etapa_operacional?: string | null
@@ -77,7 +81,12 @@ export function normalizarEtapaColeta(row: {
     return null
   }
 
-  return tentar(a) ?? tentar(b) ?? 'PROGRAMACAO_CRIADA'
+  const ea = tentar(a)
+  const eb = tentar(b)
+  if (ea != null && eb != null) {
+    return indiceEtapaFluxo(ea) >= indiceEtapaFluxo(eb) ? ea : eb
+  }
+  return ea ?? eb ?? 'PROGRAMACAO_CRIADA'
 }
 
 export function indiceEtapaFluxo(etapa: EtapaFluxo): number {
@@ -158,4 +167,84 @@ export function etapaFaturamentoJaRegistradoNoFluxo(etapa: EtapaFluxo): boolean 
 
 export function formatarEtapaParaUI(etapa: EtapaFluxo): string {
   return ETAPA_LABEL_CURTO[etapa] ?? etapa
+}
+
+// ---------------------------------------------------------------------------
+// Fase 1 — macro-etapas oficiais (uma língua para todo o sistema na UI)
+// Mapeia as etapas técnicas (BD) para fases de negócio; não altera valores gravados.
+// ---------------------------------------------------------------------------
+
+export const FASES_FLUXO_OFICIAL_ORDER = [
+  'PROGRAMADA',
+  'MTR_EMITIDA',
+  'EM_OPERACAO',
+  'PESAGEM_LANCADA',
+  'PRONTA_PARA_FATURAR',
+  'FATURADA',
+  'FINANCEIRO_PENDENTE',
+  'PAGA',
+  'FINALIZADA',
+] as const
+
+export type FaseFluxoOficial = (typeof FASES_FLUXO_OFICIAL_ORDER)[number]
+
+/** Rótulos únicos para listagens, filtros e relatórios (alinhado ao fluxo real RG). */
+export const FASE_FLUXO_OFICIAL_LABEL: Record<FaseFluxoOficial, string> = {
+  PROGRAMADA: 'Programada',
+  MTR_EMITIDA: 'MTR emitida',
+  EM_OPERACAO: 'Em operação',
+  PESAGEM_LANCADA: 'Pesagem lançada',
+  PRONTA_PARA_FATURAR: 'Pronta para faturar',
+  FATURADA: 'Faturada',
+  FINANCEIRO_PENDENTE: 'Financeiro pendente',
+  PAGA: 'Paga',
+  FINALIZADA: 'Finalizada',
+}
+
+export type ResolverFaseFluxoExtras = {
+  /** `coletas.status_pagamento` quando disponível (ex.: vista financeiro). */
+  statusPagamento?: string | null
+}
+
+/**
+ * Resolve a fase oficial a partir da etapa canónica + pagamento.
+ * Ordem de decisão: finalizada → paga → pendente financeiro → faturada → … → programada.
+ */
+export function resolverFaseFluxoOficial(
+  etapa: EtapaFluxo,
+  extras?: ResolverFaseFluxoExtras
+): FaseFluxoOficial {
+  const i = indiceEtapaFluxo(etapa)
+  const sp = (extras?.statusPagamento ?? '').trim()
+
+  if (i >= indiceEtapaFluxo('FINALIZADO')) return 'FINALIZADA'
+  if (sp === 'Pago' && i >= indiceEtapaFluxo('ENVIADO_FINANCEIRO')) return 'PAGA'
+  if (i >= indiceEtapaFluxo('ENVIADO_FINANCEIRO')) return 'FINANCEIRO_PENDENTE'
+  if (i >= indiceEtapaFluxo('FATURADO')) return 'FATURADA'
+  if (i >= indiceEtapaFluxo('TICKET_GERADO')) return 'PRONTA_PARA_FATURAR'
+  if (i >= indiceEtapaFluxo('CONTROLE_PESAGEM_LANCADO')) return 'PESAGEM_LANCADA'
+  if (i > indiceEtapaFluxo('MTR_ENTREGUE_LOGISTICA')) return 'EM_OPERACAO'
+  if (i > indiceEtapaFluxo('QUADRO_ATUALIZADO')) return 'MTR_EMITIDA'
+  return 'PROGRAMADA'
+}
+
+export function formatarFaseFluxoOficialParaUI(
+  etapa: EtapaFluxo,
+  extras?: ResolverFaseFluxoExtras
+): string {
+  const f = resolverFaseFluxoOficial(etapa, extras)
+  return FASE_FLUXO_OFICIAL_LABEL[f]
+}
+
+/**
+ * Texto composto para tooltips / exportações: fase oficial + detalhe técnico.
+ */
+export function formatarEtapaFluxoUnificado(etapa: EtapaFluxo, extras?: ResolverFaseFluxoExtras): string {
+  const macro = formatarFaseFluxoOficialParaUI(etapa, extras)
+  const det = formatarEtapaParaUI(etapa)
+  return det === macro ? macro : `${macro} — ${det}`
+}
+
+export function indiceFaseFluxoOficial(f: FaseFluxoOficial): number {
+  return FASES_FLUXO_OFICIAL_ORDER.indexOf(f)
 }

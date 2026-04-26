@@ -21,6 +21,10 @@ type Cliente = {
   cidade: string | null;
   estado: string | null;
 
+  endereco_coleta: string | null;
+  endereco_faturamento: string | null;
+  email_nf: string | null;
+
   responsavel_nome: string | null;
   telefone: string | null;
   email: string | null;
@@ -55,6 +59,10 @@ type FormCliente = {
   cidade: string;
   estado: string;
 
+  endereco_coleta: string;
+  endereco_faturamento: string;
+  email_nf: string;
+
   responsavel_nome: string;
   telefone: string;
   email: string;
@@ -85,6 +93,10 @@ const formInicial: FormCliente = {
   bairro: "",
   cidade: "",
   estado: "",
+
+  endereco_coleta: "",
+  endereco_faturamento: "",
+  email_nf: "",
 
   responsavel_nome: "",
   telefone: "",
@@ -168,7 +180,7 @@ function montarResiduosDoCliente(cliente: Cliente): ResiduoForm[] {
 }
 
 const CLIENTES_SELECT =
-  "id, nome, razao_social, cnpj, status, cep, rua, numero, complemento, bairro, cidade, estado, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade";
+  "id, nome, razao_social, cnpj, status, cep, rua, numero, complemento, bairro, cidade, estado, endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade";
 
 export default function Clientes() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -196,7 +208,7 @@ export default function Clientes() {
 
     if (term) {
       const s = sanitizeIlikePattern(term);
-      const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%`;
+      const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
       countQ = countQ.or(orFilter);
       dataQ = dataQ.or(orFilter);
     }
@@ -235,7 +247,7 @@ export default function Clientes() {
   }, [buscaDebounced, pageSize]);
 
   function handleInputChange(
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) {
     const { name, value } = e.target;
 
@@ -313,6 +325,10 @@ export default function Clientes() {
       cidade: cliente.cidade || "",
       estado: cliente.estado || "",
 
+      endereco_coleta: cliente.endereco_coleta || "",
+      endereco_faturamento: cliente.endereco_faturamento || "",
+      email_nf: cliente.email_nf || "",
+
       responsavel_nome: cliente.responsavel_nome || "",
       telefone: cliente.telefone || "",
       email: cliente.email || "",
@@ -369,6 +385,9 @@ export default function Clientes() {
       bairro: limparOuNull(form.bairro),
       cidade: limparOuNull(form.cidade),
       estado: limparOuNull(form.estado),
+      endereco_coleta: limparOuNull(form.endereco_coleta),
+      endereco_faturamento: limparOuNull(form.endereco_faturamento),
+      email_nf: limparOuNull(form.email_nf),
       responsavel_nome: limparOuNull(form.responsavel_nome),
       telefone: limparOuNull(form.telefone),
       email: limparOuNull(form.email),
@@ -451,6 +470,8 @@ export default function Clientes() {
   const totalPaginas =
     totalCount != null && totalCount > 0 ? Math.max(1, Math.ceil(totalCount / pageSize)) : 1;
 
+  const totalExibidoKpi = totalCount != null ? totalCount : clientes.length;
+
   useEffect(() => {
     if (page <= totalPaginas) return;
     const id = window.setTimeout(() => setPage(totalPaginas), 0);
@@ -530,7 +551,7 @@ export default function Clientes() {
                   color: "#0f172a",
                 }}
               >
-                {clientes.length}
+                {totalExibidoKpi}
               </div>
             </div>
 
@@ -735,6 +756,46 @@ export default function Clientes() {
                     marginBottom: "12px",
                   }}
                 >
+                  Coleta e faturamento
+                </div>
+                <p style={{ margin: "0 0 12px", fontSize: "13px", color: "#64748b", lineHeight: 1.45 }}>
+                  Endereços em texto livre para operação e faturamento (complementam o endereço estruturado acima).
+                </p>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "12px",
+                  }}
+                >
+                  <textarea
+                    name="endereco_coleta"
+                    value={form.endereco_coleta}
+                    onChange={handleInputChange}
+                    placeholder="Endereço de coleta (completo)"
+                    rows={4}
+                    style={textareaStyle}
+                  />
+                  <textarea
+                    name="endereco_faturamento"
+                    value={form.endereco_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="Endereço de faturamento (completo)"
+                    rows={4}
+                    style={textareaStyle}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 800,
+                    color: "#334155",
+                    marginBottom: "12px",
+                  }}
+                >
                   Responsável
                 </div>
 
@@ -766,6 +827,16 @@ export default function Clientes() {
                     value={form.email}
                     onChange={handleInputChange}
                     placeholder="E-mail"
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div style={{ marginTop: "12px" }}>
+                  <input
+                    name="email_nf"
+                    value={form.email_nf}
+                    onChange={handleInputChange}
+                    placeholder="E-mail para envio de NF (notas fiscais)"
                     style={inputStyle}
                   />
                 </div>
@@ -1087,6 +1158,7 @@ export default function Clientes() {
                     <th style={thStyle}>Razão social</th>
                     <th style={thStyle}>CNPJ</th>
                     <th style={thStyle}>Cidade</th>
+                    <th style={thStyle}>E-mail NF</th>
                     <th style={thStyle}>Resíduo</th>
                     <th style={thStyle}>Classe</th>
                     <th style={thStyle}>Licença válida até</th>
@@ -1107,6 +1179,17 @@ export default function Clientes() {
                       <td style={tdStyle}>{cliente.razao_social}</td>
                       <td style={tdStyle}>{cliente.cnpj}</td>
                       <td style={tdStyle}>{cliente.cidade || "-"}</td>
+                      <td
+                        style={{
+                          ...tdStyle,
+                          maxWidth: "200px",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                        title={cliente.email_nf || undefined}
+                      >
+                        {cliente.email_nf || "-"}
+                      </td>
                       <td style={tdStyle}>{cliente.tipo_residuo || "-"}</td>
                       <td style={tdStyle}>{cliente.classificacao || "-"}</td>
                       <td style={tdStyle}>{formatarData(cliente.validade)}</td>
@@ -1158,7 +1241,7 @@ export default function Clientes() {
                   {clientes.length === 0 && (
                     <tr>
                       <td
-                        colSpan={9}
+                        colSpan={10}
                         style={{
                           textAlign: "center",
                           padding: "28px 12px",
@@ -1268,6 +1351,15 @@ const inputStyle: React.CSSProperties = {
   fontSize: "14px",
   color: "#0f172a",
   boxSizing: "border-box",
+};
+
+const textareaStyle: React.CSSProperties = {
+  ...inputStyle,
+  height: "auto",
+  minHeight: "96px",
+  padding: "10px 12px",
+  resize: "vertical",
+  lineHeight: 1.45,
 };
 
 const thStyle: React.CSSProperties = {

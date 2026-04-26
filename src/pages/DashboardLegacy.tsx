@@ -21,6 +21,7 @@ import {
   normalizarEtapaColeta,
   type EtapaFluxo,
 } from '../lib/fluxoEtapas'
+import { classificarPendenciasPorSetor, type PendenciaSetorKey } from '../lib/pendenciasSetor'
 
 /** Paleta Tableau 10 (tons profissionais, boa distinção em relatórios) */
 const TABLEAU10 = [
@@ -48,6 +49,9 @@ type DashboardRow = {
   id: string
   numero: string
   cliente: string
+  cliente_id: string | null
+  programacao_id: string | null
+  mtr_id: string | null
   cidade: string
   tipo_residuo: string
   data_agendada: string
@@ -65,11 +69,14 @@ type DashboardItem = {
   id: string
   numero: string
   cliente: string
+  clienteId: string
   cidade: string
   tipoResiduo: string
   dataAgendada: string
   etapaCodigo: EtapaFluxo
   etapaOperacional: string
+  programacaoId: string
+  mtrId: string
   liberadoFinanceiro: boolean
   valorColeta: string
   statusPagamento: string
@@ -130,11 +137,14 @@ function mapRow(row: DashboardRow): DashboardItem {
     id: row.id,
     numero: row.numero,
     cliente: row.cliente,
+    clienteId: row.cliente_id ?? '',
     cidade: row.cidade,
     tipoResiduo: row.tipo_residuo,
     dataAgendada: row.data_agendada,
     etapaCodigo: etapa,
     etapaOperacional: formatarEtapaParaUI(etapa),
+    programacaoId: row.programacao_id ?? '',
+    mtrId: row.mtr_id ?? '',
     liberadoFinanceiro: row.liberado_financeiro ?? false,
     valorColeta: row.valor_coleta !== null ? String(row.valor_coleta) : '',
     statusPagamento: row.status_pagamento || '',
@@ -149,12 +159,13 @@ export default function DashboardLegacy() {
   const [itens, setItens] = useState<DashboardItem[]>([])
   const [erro, setErro] = useState('')
   const [loading, setLoading] = useState(false)
+  const [tabPendencias, setTabPendencias] = useState<PendenciaSetorKey>('faturamento')
 
   const carregarDashboard = useCallback(async () => {
     const { data, error } = await supabase
       .from('coletas')
       .select(
-        'id, numero, cliente, cidade, tipo_residuo, data_agendada, etapa_operacional, fluxo_status, liberado_financeiro, valor_coleta, status_pagamento, data_vencimento, peso_liquido, created_at'
+        'id, numero, cliente, cliente_id, programacao_id, mtr_id, cidade, tipo_residuo, data_agendada, etapa_operacional, fluxo_status, liberado_financeiro, valor_coleta, status_pagamento, data_vencimento, peso_liquido, created_at'
       )
       .order('created_at', { ascending: false })
       .limit(COLETAS_LIST_MAX_ROWS)
@@ -232,6 +243,37 @@ export default function DashboardLegacy() {
       })
       .slice(0, 8)
   }, [itens])
+
+  function montarParams(item: DashboardItem) {
+    const p = new URLSearchParams()
+    if (item.id) p.set('coleta', item.id)
+    if (item.mtrId) p.set('mtr', item.mtrId)
+    if (item.programacaoId) p.set('programacao', item.programacaoId)
+    if (item.clienteId) p.set('cliente', item.clienteId)
+    return p
+  }
+
+  const pendencias = useMemo(() => {
+    return classificarPendenciasPorSetor(
+      itens.map((i) => ({
+        id: i.id,
+        numero: i.numero,
+        cliente: i.cliente,
+        clienteId: i.clienteId,
+        programacaoId: i.programacaoId,
+        mtrId: i.mtrId,
+        etapaCodigo: i.etapaCodigo,
+        dataAgendada: i.dataAgendada,
+        createdAt: i.createdAt,
+        pesoLiquido: i.pesoLiquido,
+        liberadoFinanceiro: i.liberadoFinanceiro,
+        statusPagamento: i.statusPagamento,
+        dataVencimento: i.dataVencimento,
+      }))
+    )
+  }, [itens])
+
+  const pendenciasAtuais = pendencias[tabPendencias].slice(0, 10)
 
   const seriePorDataAgendada = useMemo(() => {
     const dias = 30
@@ -417,6 +459,146 @@ export default function DashboardLegacy() {
         <div style={{ color: '#9a3412', lineHeight: 1.45, fontSize: '14px' }}>
           <strong>{totalSemValor}</strong> sem valor · <strong>{totalSemVencimento}</strong> sem
           vencimento · <strong>{totalVencidas}</strong> vencidas.
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '20px' }}>
+        <h2
+          style={{
+            margin: '0 0 2px',
+            fontSize: '15px',
+            color: '#334155',
+            fontWeight: 700,
+            letterSpacing: '0.02em',
+            textTransform: 'uppercase',
+          }}
+        >
+          Pendências por setor
+        </h2>
+        <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#64748b', lineHeight: 1.45 }}>
+          Filas operacionais orientadas por ação · baseadas na etapa canónica do fluxo.
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '10px', marginBottom: '12px' }}>
+          {(
+            [
+              ['operacional', 'Operacional'],
+              ['logistica', 'Logística'],
+              ['massa', 'Controle de massa'],
+              ['faturamento', 'Faturamento'],
+              ['financeiro', 'Financeiro'],
+            ] as Array<[PendenciaSetorKey, string]>
+          ).map(([k, label]) => {
+            const ativo = tabPendencias === k
+            const qtd = pendencias[k].length
+            return (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setTabPendencias(k)}
+                style={{
+                  textAlign: 'left',
+                  background: ativo ? '#0f172a' : '#ffffff',
+                  color: ativo ? '#ffffff' : '#0f172a',
+                  border: ativo ? '1px solid #0f172a' : '1px solid #e5e7eb',
+                  borderRadius: 14,
+                  padding: '12px 12px',
+                  cursor: 'pointer',
+                  boxShadow: ativo ? '0 6px 18px rgba(15, 23, 42, 0.14)' : '0 1px 2px rgba(15, 23, 42, 0.04)',
+                  minWidth: 0,
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 800, opacity: ativo ? 0.95 : 0.7 }}>{label}</div>
+                <div style={{ fontSize: 22, fontWeight: 900, marginTop: 6 }}>{qtd}</div>
+              </button>
+            )
+          })}
+        </div>
+
+        <div style={{ ...vizCardShellStyle, padding: '14px 14px' }}>
+          {pendenciasAtuais.length === 0 ? (
+            <div style={vizEmptyStyle}>Nenhuma pendência neste setor com os dados atuais.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {pendenciasAtuais.map((p) => {
+                const q = montarParams(p as unknown as DashboardItem).toString()
+                const destino =
+                  p.destino === 'financeiro'
+                    ? `/financeiro?${q}`
+                    : p.destino === 'controle-massa'
+                      ? `/controle-massa?${q}`
+                      : p.destino === 'faturamento'
+                        ? `/faturamento?${q}`
+                        : p.destino === 'mtr'
+                          ? `/mtr?${q}`
+                          : `/programacao?${q}`
+                const badgeBg = p.highlight === 'critico' ? '#fee2e2' : p.highlight === 'atencao' ? '#ffedd5' : '#f1f5f9'
+                const badgeFg = p.highlight === 'critico' ? '#991b1b' : p.highlight === 'atencao' ? '#9a3412' : '#475569'
+                return (
+                  <div
+                    key={`${p.setor}-${p.id}`}
+                    style={{
+                      border: '1px solid #e5e7eb',
+                      borderRadius: 14,
+                      padding: '12px 12px',
+                      display: 'flex',
+                      gap: 12,
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      background: '#ffffff',
+                    }}
+                  >
+                    <div style={{ minWidth: 220 }}>
+                      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ fontWeight: 900, color: '#0f172a' }}>Coleta {p.numero}</div>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '3px 10px',
+                            borderRadius: 999,
+                            fontSize: 11,
+                            fontWeight: 800,
+                            background: badgeBg,
+                            color: badgeFg,
+                            border: '1px solid rgba(15, 23, 42, 0.08)',
+                          }}
+                        >
+                          {p.titulo}
+                        </span>
+                      </div>
+                      <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: '#334155' }}>{p.cliente}</div>
+                      {p.detalhe ? (
+                        <div style={{ marginTop: 4, fontSize: 12, color: '#64748b', lineHeight: 1.35 }}>{p.detalhe}</div>
+                      ) : null}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <div style={{ fontSize: 12, color: '#64748b', fontWeight: 700 }}>
+                        {p.etapaCodigo ? formatarEtapaParaUI(p.etapaCodigo) : '—'}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => navigate(destino)}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: 10,
+                          border: '1px solid #cbd5e1',
+                          background: '#0f172a',
+                          color: '#fff',
+                          fontWeight: 800,
+                          fontSize: 12,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Abrir
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -783,9 +965,14 @@ export default function DashboardLegacy() {
                       <button
                         type="button"
                         onClick={() =>
-                          navigate(
-                            `/financeiro?coleta=${encodeURIComponent(item.id)}`
-                          )
+                          navigate(`/financeiro?${(() => {
+                            const p = new URLSearchParams()
+                            p.set('coleta', item.id)
+                            if (item.mtrId) p.set('mtr', item.mtrId)
+                            if (item.programacaoId) p.set('programacao', item.programacaoId)
+                            if (item.clienteId) p.set('cliente', item.clienteId)
+                            return p.toString()
+                          })()}`)
                         }
                         style={{
                           marginLeft: 'auto',

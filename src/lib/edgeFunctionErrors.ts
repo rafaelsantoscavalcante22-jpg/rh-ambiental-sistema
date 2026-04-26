@@ -9,6 +9,7 @@ const DICA_DEPLOY = `Se o projeto usa Edge Functions, publique-as no Supabase (n
 npx supabase functions deploy admin-create-user
 npx supabase functions deploy admin-update-user
 npx supabase functions deploy admin-delete-user
+npx supabase functions deploy send-nf-email
 
 Confira também se VITE_SUPABASE_URL no .env aponta para o mesmo projeto do dashboard.`
 
@@ -56,7 +57,7 @@ export function headersJwtSessao(session: Session): { Authorization: string } {
  */
 export async function formatarErroEdgeFunction(
   error: unknown,
-  contexto: 'criar' | 'editar' | 'excluir' | 'carregar'
+  contexto: 'criar' | 'editar' | 'excluir' | 'carregar' | 'enviar_nf'
 ): Promise<string> {
   if (error instanceof FunctionsHttpError) {
     try {
@@ -109,5 +110,9 @@ export async function formatarErroEdgeFunction(
     return msg
   }
 
-  return `Erro desconhecido ao ${contexto} usuário.`
+  const verbo =
+    contexto === 'enviar_nf'
+      ? 'enviar e-mail de NF'
+      : `${contexto} usuário`
+  return `Erro desconhecido ao ${verbo}.`
 }

@@ -1,0 +1,234 @@
+-- Fase 9 — Pagamento parcial (baixas), trava de valor pós-faturamento, auditoria, relatório base.
+-- Aplicar no SQL Editor ou: npm run db:apply:sql -- supabase/migrations/20260427120000_fase9_parcelas_auditoria.sql
+
+ALTER TABLE public.contas_receber
+  ADD COLUMN IF NOT EXISTS valor_pago numeric NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS valor_travado boolean NOT NULL DEFAULT false;
+
+ALTER TABLE public.contas_receber
+  DROP CONSTRAINT IF EXISTS contas_receber_valor_pago_chk;
+
+ALTER TABLE public.contas_receber
+  ADD CONSTRAINT contas_receber_valor_pago_chk
+  CHECK (valor_pago >= 0 AND valor_pago <= valor);
+
+COMMENT ON COLUMN public.contas_receber.valor_pago IS 'Total já recebido (somatório das baixas ou ajuste manual alinhado ao status).';
+COMMENT ON COLUMN public.contas_receber.valor_travado IS 'Se true, o valor da fatura só pode ser alterado por administrador (emitido pelo faturamento).';
+
+UPDATE public.contas_receber
+SET valor_pago = valor
+WHERE status_pagamento = 'Pago' AND valor_pago = 0 AND valor > 0;
+
+UPDATE public.contas_receber
+SET valor_travado = true
+WHERE faturamento_registro_id IS NOT NULL;
+
+UPDATE public.contas_receber
+SET status_pagamento = 'Parcial'
+WHERE valor_pago > 0 AND valor_pago < valor AND status_pagamento NOT IN ('Pago', 'Cancelado');
+
+CREATE TABLE IF NOT EXISTS public.contas_receber_baixas (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  conta_receber_id uuid NOT NULL REFERENCES public.contas_receber (id) ON DELETE CASCADE,
+  valor numeric NOT NULL CHECK (valor > 0),
+  data_baixa date NOT NULL DEFAULT (CURRENT_DATE),
+  observacao text,
+  created_by uuid REFERENCES auth.users (id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_contas_receber_baixas_conta ON public.contas_receber_baixas (conta_receber_id);
+CREATE INDEX IF NOT EXISTS idx_contas_receber_baixas_data ON public.contas_receber_baixas (data_baixa DESC);
+
+COMMENT ON TABLE public.contas_receber_baixas IS 'Histórico de recebimentos parciais (baixas) sobre contas_receber.';
+
+CREATE TABLE IF NOT EXISTS public.financeiro_auditoria (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  entidade text NOT NULL,
+  entidade_id uuid NOT NULL,
+  usuario_id uuid REFERENCES auth.users (id) ON DELETE SET NULL,
+  acao text NOT NULL,
+  detalhe jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_financeiro_auditoria_entidade ON public.financeiro_auditoria (entidade, entidade_id);
+CREATE INDEX IF NOT EXISTS idx_financeiro_auditoria_created ON public.financeiro_auditoria (created_at DESC);
+
+COMMENT ON TABLE public.financeiro_auditoria IS 'Trilha de alterações sensíveis no financeiro (contas a receber, baixas).';
+
+ALTER TABLE public.contas_receber_baixas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.financeiro_auditoria ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "contas_receber_baixas_select_authenticated" ON public.contas_receber_baixas;
+CREATE POLICY "contas_receber_baixas_select_authenticated"
+  ON public.contas_receber_baixas FOR SELECT TO authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS "contas_receber_baixas_mutate_financeiro" ON public.contas_receber_baixas;
+CREATE POLICY "contas_receber_baixas_mutate_financeiro"
+  ON public.contas_receber_baixas FOR ALL TO authenticated
+  USING (
+    NOT public.rg_is_visualizador()
+    AND (
+      public.rg_is_admin()
+      OR public.rg_cargo_vazio_compat()
+      OR public.rg_cargo_like('financeiro')
+      OR public.rg_cargo_like('faturamento')
+      OR public.rg_is_diretoria()
+    )
+  )
+  WITH CHECK (
+    public.rg_is_admin()
+    OR public.rg_cargo_vazio_compat()
+    OR public.rg_cargo_like('financeiro')
+    OR public.rg_cargo_like('faturamento')
+    OR public.rg_is_diretoria()
+  );
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.contas_receber_baixas TO authenticated;
+
+DROP POLICY IF EXISTS "financeiro_auditoria_select_authenticated" ON public.financeiro_auditoria;
+CREATE POLICY "financeiro_auditoria_select_authenticated"
+  ON public.financeiro_auditoria FOR SELECT TO authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS "financeiro_auditoria_insert_financeiro" ON public.financeiro_auditoria;
+CREATE POLICY "financeiro_auditoria_insert_financeiro"
+  ON public.financeiro_auditoria FOR INSERT TO authenticated
+  WITH CHECK (
+    NOT public.rg_is_visualizador()
+    AND (
+      public.rg_is_admin()
+      OR public.rg_cargo_vazio_compat()
+      OR public.rg_cargo_like('financeiro')
+      OR public.rg_cargo_like('faturamento')
+      OR public.rg_is_diretoria()
+    )
+  );
+
+GRANT SELECT, INSERT ON public.financeiro_auditoria TO authenticated;
+
+CREATE OR REPLACE VIEW public.vw_faturamento_resumo
+WITH (security_invoker = true) AS
+SELECT
+  c.id AS coleta_id,
+  c.numero,
+  c.numero_coleta,
+  c.cliente_id,
+  COALESCE(cl.nome, c.cliente) AS cliente_nome,
+  cl.razao_social AS cliente_razao_social,
+  c.data_agendada,
+  COALESCE(p.data_programada, c.data_agendada) AS data_programacao,
+  c.data_coleta AS data_execucao,
+  c.programacao_id,
+  p.numero AS programacao_numero,
+  p.observacoes AS programacao_observacoes,
+  c.mtr_id,
+  m.numero AS mtr_numero,
+  m.observacoes AS mtr_observacoes,
+  COALESCE(
+    NULLIF(btrim(c.ticket_numero), ''),
+    ltk.ticket_numero
+  ) AS ticket_comprovante,
+  c.peso_tara,
+  c.peso_bruto,
+  c.peso_liquido,
+  COALESCE(c.motorista_nome, c.motorista) AS motorista,
+  c.placa,
+  c.valor_coleta,
+  c.status_pagamento,
+  c.data_vencimento,
+  COALESCE(c.numero_nf, lfr.referencia_nf) AS referencia_nf,
+  c.numero_nf AS numero_nf_coleta,
+  lfr.referencia_nf AS faturamento_referencia_nf,
+  lfr.status AS faturamento_registro_status,
+  lfr.valor AS faturamento_registro_valor,
+  c.confirmacao_recebimento,
+  c.fluxo_status,
+  c.etapa_operacional,
+  c.status_processo,
+  c.liberado_financeiro,
+  c.observacoes AS coleta_observacoes,
+  c.tipo_residuo,
+  c.cidade,
+  c.created_at,
+  la.decisao AS ultima_aprovacao_decisao,
+  la.observacoes AS ultima_aprovacao_obs,
+  la.decidido_em AS ultima_aprovacao_em,
+  lco.documentos_ok AS conferencia_documentos_ok,
+  lco.observacoes AS conferencia_operacional_obs,
+  lco.conferido_em AS conferencia_em,
+  lcr.nf_enviada_em AS conta_receber_nf_enviada_em,
+  lcr.nf_envio_observacao AS conta_receber_nf_envio_obs,
+  lcr.valor_pago AS conta_receber_valor_pago,
+  lcr.valor_travado AS conta_receber_valor_travado,
+  CASE
+    WHEN c.mtr_id IS NOT NULL
+      AND c.peso_liquido IS NOT NULL
+      AND c.peso_liquido > 0
+      AND (
+        (c.ticket_numero IS NOT NULL AND btrim(c.ticket_numero) <> '')
+        OR (ltk.ticket_numero IS NOT NULL AND btrim(ltk.ticket_numero) <> '')
+      )
+      AND la.decisao = 'aprovado'
+      AND c.valor_coleta IS NOT NULL
+      AND c.valor_coleta > 0
+    THEN 'PRONTO_PARA_FATURAR'::text
+    ELSE 'PENDENTE'::text
+  END AS status_conferencia,
+  trim(both ', ' FROM concat_ws(', ',
+    CASE WHEN c.mtr_id IS NULL THEN 'sem MTR' END,
+    CASE WHEN c.peso_liquido IS NULL OR c.peso_liquido <= 0 THEN 'sem peso líquido' END,
+    CASE
+      WHEN (c.ticket_numero IS NULL OR btrim(c.ticket_numero) = '')
+        AND (ltk.ticket_numero IS NULL OR btrim(ltk.ticket_numero) = '')
+      THEN 'sem ticket'
+    END,
+    CASE WHEN la.decisao IS DISTINCT FROM 'aprovado' THEN 'sem aprovação' END,
+    CASE WHEN c.valor_coleta IS NULL OR c.valor_coleta <= 0 THEN 'sem valor' END
+  )) AS pendencias_resumo,
+  c.status_pagamento AS status_faturamento
+FROM public.coletas c
+LEFT JOIN public.clientes cl ON cl.id = c.cliente_id
+LEFT JOIN public.programacoes p ON p.id = c.programacao_id
+LEFT JOIN public.mtrs m ON m.id = c.mtr_id
+LEFT JOIN LATERAL (
+  SELECT t.numero AS ticket_numero
+  FROM public.tickets_operacionais t
+  WHERE t.coleta_id = c.id
+  ORDER BY t.created_at DESC NULLS LAST, t.id DESC
+  LIMIT 1
+) ltk ON true
+LEFT JOIN LATERAL (
+  SELECT ad.decisao, ad.observacoes, ad.decidido_em
+  FROM public.aprovacoes_diretoria ad
+  WHERE ad.coleta_id = c.id
+  ORDER BY ad.decidido_em DESC NULLS LAST, ad.id DESC
+  LIMIT 1
+) la ON true
+LEFT JOIN LATERAL (
+  SELECT fr.status, fr.referencia_nf, fr.valor
+  FROM public.faturamento_registros fr
+  WHERE fr.coleta_id = c.id
+  ORDER BY fr.updated_at DESC NULLS LAST, fr.id DESC
+  LIMIT 1
+) lfr ON true
+LEFT JOIN LATERAL (
+  SELECT co.documentos_ok, co.observacoes, co.conferido_em
+  FROM public.conferencia_operacional co
+  WHERE co.coleta_id = c.id
+  ORDER BY co.conferido_em DESC NULLS LAST, co.id DESC
+  LIMIT 1
+) lco ON true
+LEFT JOIN LATERAL (
+  SELECT cr.nf_enviada_em, cr.nf_envio_observacao, cr.valor_pago, cr.valor_travado
+  FROM public.contas_receber cr
+  WHERE cr.referencia_coleta_id = c.id
+  LIMIT 1
+) lcr ON true;
+
+COMMENT ON VIEW public.vw_faturamento_resumo IS
+  'Consolidação para conferência / faturamento / financeiro; inclui snapshot de contas_receber (NF, parcelas, trava).';
+
+GRANT SELECT ON public.vw_faturamento_resumo TO authenticated;

@@ -2,21 +2,33 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
+import { usuarioPodeAcessarRota } from './lib/paginasSistema'
+import { ChatFloatProvider } from './contexts/ChatFloatContext'
+import { PerfilUsuarioProvider, type UsuarioPerfilApp } from './contexts/PerfilUsuarioContext'
+import { PwaPremiumShell } from './components/pwa/PwaPremiumShell'
 
 import Login from './pages/Login'
 
+const BemVindoNexus = lazy(() => import('./pages/BemVindoNexus'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Clientes = lazy(() => import('./pages/Clientes'))
+const Motoristas = lazy(() => import('./pages/Motoristas'))
+const Caminhoes = lazy(() => import('./pages/Caminhoes'))
 const Financeiro = lazy(() => import('./pages/Financeiro'))
+const FinanceiroContasReceber = lazy(() => import('./pages/FinanceiroContasReceber'))
+const EnvioNF = lazy(() => import('./pages/EnvioNF'))
 const Usuarios = lazy(() => import('./pages/Usuarios'))
 const ChecklistTransporte = lazy(() => import('./pages/ChecklistTransporte'))
 const ConferenciaTransporte = lazy(() => import('./pages/ConferenciaTransporte'))
 const TicketOperacional = lazy(() => import('./pages/TicketOperacional'))
 const AprovacaoDiretoria = lazy(() => import('./pages/AprovacaoDiretoria'))
 const FaturamentoOperacional = lazy(() => import('./pages/FaturamentoOperacional'))
+const FaturamentoRegrasPreco = lazy(() => import('./pages/FaturamentoRegrasPreco'))
 const Programacao = lazy(() => import('./pages/Programacao'))
 const MTR = lazy(() => import('./pages/MTR'))
 const ControleMassa = lazy(() => import('./pages/ControleMassa'))
+const ComprovantesDescarte = lazy(() => import('./pages/ComprovantesDescarte'))
+const ComprovanteDescarteForm = lazy(() => import('./pages/ComprovanteDescarteForm'))
 const Chat = lazy(() => import('./pages/Chat'))
 
 const routeSuspenseFallback = (
@@ -36,20 +48,13 @@ const routeSuspenseFallback = (
   </div>
 )
 
-type UsuarioPerfil = {
-  id: string
-  nome: string
-  email: string
-  cargo: string
-  status: string
-  foto_url?: string | null
-}
-
 type ProtectedRouteProps = {
   session: Session | null
-  usuario: UsuarioPerfil | null
+  usuario: UsuarioPerfilApp | null
   carregandoUsuario: boolean
   allowedRoles: string[]
+  /** Só sessão + perfil ativo; não valida cargo (página inicial Nexus para todos). */
+  apenasAutenticado?: boolean
   children: React.ReactNode
 }
 
@@ -58,8 +63,11 @@ function ProtectedRoute({
   usuario,
   carregandoUsuario,
   allowedRoles,
+  apenasAutenticado,
   children,
 }: ProtectedRouteProps) {
+  const location = useLocation()
+
   if (!session) {
     return <Navigate to="/" replace />
   }
@@ -91,8 +99,12 @@ function ProtectedRoute({
     return <Navigate to="/" replace />
   }
 
-  if (!allowedRoles.includes(usuario.cargo)) {
-    return <Navigate to="/dashboard" replace />
+  if (!apenasAutenticado && !allowedRoles.includes(usuario.cargo)) {
+    return <Navigate to="/bem-vindo" replace />
+  }
+
+  if (!usuarioPodeAcessarRota(usuario, location.pathname)) {
+    return <Navigate to="/bem-vindo" replace />
   }
 
   return <>{children}</>
@@ -127,7 +139,7 @@ const ROLES_SEGUIMENTO_COLETA = [
 
 function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
-  const [usuario, setUsuario] = useState<UsuarioPerfil | null>(null)
+  const [usuario, setUsuario] = useState<UsuarioPerfilApp | null>(null)
   const [carregandoUsuario, setCarregandoUsuario] = useState(true)
 
   useEffect(() => {
@@ -176,7 +188,7 @@ function App() {
 
       const { data, error } = await supabase
         .from('usuarios')
-        .select('id, nome, email, cargo, status, foto_url')
+        .select('id, nome, email, cargo, status, foto_url, paginas_permitidas')
         .eq('id', user.id)
         .maybeSingle()
 
@@ -220,7 +232,10 @@ function App() {
   }
 
   return (
-    <BrowserRouter>
+    <PerfilUsuarioProvider value={{ usuario, carregandoUsuario }}>
+      <BrowserRouter>
+        <PwaPremiumShell />
+        <ChatFloatProvider>
       <Suspense fallback={routeSuspenseFallback}>
       <Routes>
         {!session ? (
@@ -230,7 +245,22 @@ function App() {
           </>
         ) : (
           <>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/" element={<Navigate to="/bem-vindo" replace />} />
+
+            <Route
+              path="/bem-vindo"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[]}
+                  apenasAutenticado
+                >
+                  <BemVindoNexus />
+                </ProtectedRoute>
+              }
+            />
 
             <Route
               path="/dashboard"
@@ -274,6 +304,52 @@ function App() {
                   ]}
                 >
                   <Clientes />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/motoristas"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[
+                    'Administrador',
+                    'Operacional',
+                    'Logística',
+                    'Balanceiro',
+                    'Diretoria',
+                    'Faturamento',
+                    'Financeiro',
+                    'Visualizador',
+                  ]}
+                >
+                  <Motoristas />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/caminhoes"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[
+                    'Administrador',
+                    'Operacional',
+                    'Logística',
+                    'Balanceiro',
+                    'Diretoria',
+                    'Faturamento',
+                    'Financeiro',
+                    'Visualizador',
+                  ]}
+                >
+                  <Caminhoes />
                 </ProtectedRoute>
               }
             />
@@ -372,6 +448,62 @@ function App() {
             />
 
             <Route
+              path="/comprovantes-descarte"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                >
+                  <ComprovantesDescarte />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/comprovantes-descarte/novo"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                >
+                  <ComprovanteDescarteForm />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/comprovantes-descarte/:id/editar"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                >
+                  <ComprovanteDescarteForm />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/comprovantes-descarte/:id"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                >
+                  <ComprovanteDescarteForm />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
               path="/checklist-transporte"
               element={
                 <ProtectedRoute
@@ -456,6 +588,20 @@ function App() {
             />
 
             <Route
+              path="/faturamento/regras-preco"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                >
+                  <FaturamentoRegrasPreco />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
               path="/financeiro"
               element={
                 <ProtectedRoute
@@ -465,6 +611,34 @@ function App() {
                   allowedRoles={['Administrador', 'Financeiro', 'Faturamento', 'Visualizador']}
                 >
                   <Financeiro />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/financeiro/contas-receber"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={['Administrador', 'Financeiro', 'Faturamento', 'Visualizador']}
+                >
+                  <FinanceiroContasReceber />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/envio-nf"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={['Administrador', 'Financeiro', 'Faturamento', 'Visualizador']}
+                >
+                  <EnvioNF />
                 </ProtectedRoute>
               }
             />
@@ -506,12 +680,14 @@ function App() {
               }
             />
 
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<Navigate to="/bem-vindo" replace />} />
           </>
         )}
       </Routes>
       </Suspense>
+      </ChatFloatProvider>
     </BrowserRouter>
+    </PerfilUsuarioProvider>
   )
 }
 

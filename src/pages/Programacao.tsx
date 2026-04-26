@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { createPortal } from 'react-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import { overlayAreaPrincipal } from '../lib/layoutOverlay'
 import { chunkArray } from '../lib/chunkArray'
 import { supabase } from '../lib/supabase'
-import { cargoPodeMutarProgramacao } from '../lib/workflowPermissions'
+import { cargoPodeEditarProgramacao } from '../lib/workflowPermissions'
+import { BRAND_LOGO_MARK } from '../lib/brandLogo'
 
 type ClienteOption = {
   id: string
@@ -167,6 +169,125 @@ function getMonthInputValue(date = new Date()) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   return `${year}-${month}`
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+/** Data local no formato YYYY-MM-DD (sem UTC). */
+function todayIsoLocal() {
+  const t = new Date()
+  return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`
+}
+
+function parseIsoLocalDate(iso: string): Date | null {
+  const [y, m, d] = iso.split('-').map(Number)
+  if (!y || !m || !d) return null
+  return new Date(y, m - 1, d)
+}
+
+/** Semana de segunda a domingo, ancorada em qualquer dia da semana. */
+function weekRangeMondayFirst(anchorIso: string): { start: string; end: string } {
+  const d = parseIsoLocalDate(anchorIso)
+  if (!d) return { start: anchorIso, end: anchorIso }
+  const mondayOffset = (d.getDay() + 6) % 7
+  const start = new Date(d)
+  start.setDate(d.getDate() - mondayOffset)
+  const end = new Date(start)
+  end.setDate(start.getDate() + 6)
+  return {
+    start: `${start.getFullYear()}-${pad2(start.getMonth() + 1)}-${pad2(start.getDate())}`,
+    end: `${end.getFullYear()}-${pad2(end.getMonth() + 1)}-${pad2(end.getDate())}`,
+  }
+}
+
+function monthRangeIso(yyyyMm: string): { start: string; end: string } {
+  const [y, m] = yyyyMm.split('-').map(Number)
+  if (!y || !m) return { start: '', end: '' }
+  const last = new Date(y, m, 0).getDate()
+  return {
+    start: `${y}-${pad2(m)}-01`,
+    end: `${y}-${pad2(m)}-${pad2(last)}`,
+  }
+}
+
+type RelatorioFiltro = 'dia' | 'semana' | 'mes'
+
+type ProgramacaoRelatorioPrintProps = {
+  tituloPeriodo: string
+  filtroLabel: string
+  periodoIniFmt: string
+  periodoFimFmt: string
+  geradoEm: string
+  grupos: Array<[string, ProgramacaoItem[]]>
+  total: number
+}
+
+function ProgramacaoRelatorioPrintRoot(p: ProgramacaoRelatorioPrintProps) {
+  return (
+    <div className="programacao-relatorio-print-root">
+      <header className="programacao-relatorio-print__header">
+        <img
+          className="programacao-relatorio-print__logo"
+          src={BRAND_LOGO_MARK}
+          alt="RG Ambiental"
+          decoding="async"
+        />
+        <h1 className="programacao-relatorio-print__title">Relatório de programações</h1>
+        <p className="programacao-relatorio-print__meta">
+          Filtro: {p.filtroLabel}
+          <br />
+          Período: {p.periodoIniFmt} — {p.periodoFimFmt}
+          <br />
+          <span className="programacao-relatorio-print__meta-cap">{p.tituloPeriodo}</span>
+          <br />
+          Emitido em {p.geradoEm} · {p.total} programação(ões)
+        </p>
+      </header>
+
+      {p.grupos.length === 0 ? (
+        <p className="programacao-relatorio-print__empty">Nenhuma programação no período selecionado.</p>
+      ) : (
+        <table className="programacao-relatorio-print__table">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Prog.</th>
+              <th>Cliente</th>
+              <th>Status</th>
+              <th>Caminhão</th>
+              <th>Serviço</th>
+              <th>MTR</th>
+              <th>Coleta</th>
+              <th>Obs.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {p.grupos.flatMap(([data, itens]) =>
+              itens.map((item) => (
+                <tr key={item.id}>
+                  <td>{formatDate(data)}</td>
+                  <td>{item.numero || '—'}</td>
+                  <td>{item.clienteNome}</td>
+                  <td>{STATUS_LABELS[item.statusProgramacao]}</td>
+                  <td>{item.tipoCaminhao || '—'}</td>
+                  <td>{item.tipoServico || '—'}</td>
+                  <td>{item.mtrId ? 'Sim' : 'Não'}</td>
+                  <td>{item.coletaId ? 'Sim' : 'Não'}</td>
+                  <td>{truncarTexto(item.observacoes || '', 80)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      )}
+
+      <p className="programacao-relatorio-print__footer">
+        Documento gerado pelo sistema — use &quot;Salvar como PDF&quot; na impressão do navegador, se desejar.
+      </p>
+    </div>
+  )
 }
 
 /** Linhas preview no calendário; contador no topo = total do dia (sem duplicar “+N mais”). */
@@ -357,6 +478,7 @@ function resolverProgramacaoContexto(
 }
 
 export default function Programacao() {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const urlProgramacaoId = searchParams.get('programacao')
@@ -380,8 +502,13 @@ export default function Programacao() {
   const [contextoDestaqueId, setContextoDestaqueId] = useState<string | null>(null)
   const [usuarioCargo, setUsuarioCargo] = useState<string | null>(null)
   const [diaPainelCalendario, setDiaPainelCalendario] = useState<string | null>(null)
+  const [relatorioAberto, setRelatorioAberto] = useState(false)
+  const [relatorioFiltro, setRelatorioFiltro] = useState<RelatorioFiltro>('dia')
+  const [relatorioDiaRef, setRelatorioDiaRef] = useState(() => todayIsoLocal())
+  const [relatorioMesRef, setRelatorioMesRef] = useState(() => getMonthInputValue())
+  const [relatorioPrintTick, setRelatorioPrintTick] = useState({ n: 0, em: '' })
 
-  const podeMutarProgramacao = cargoPodeMutarProgramacao(usuarioCargo)
+  const podeMutarProgramacao = cargoPodeEditarProgramacao(usuarioCargo)
 
   const itemContextoResolvido = useMemo(
     () =>
@@ -402,6 +529,31 @@ export default function Programacao() {
     setContextoDestaqueId(null)
     prevContextoUrlKeyRef.current = ''
     prevScrollKeyRef.current = ''
+  }
+
+  function montarParamsFluxo(item: ProgramacaoItem) {
+    const p = new URLSearchParams()
+    if (item.id) p.set('programacao', item.id)
+    if (item.coletaId) p.set('coleta', item.coletaId)
+    if (item.mtrId) p.set('mtr', item.mtrId)
+    if (item.clienteId) p.set('cliente', item.clienteId)
+    return p
+  }
+
+  function irMtr(item: ProgramacaoItem) {
+    navigate(`/mtr?${montarParamsFluxo(item).toString()}`)
+  }
+
+  function irControleMassa(item: ProgramacaoItem) {
+    navigate(`/controle-massa?${montarParamsFluxo(item).toString()}`)
+  }
+
+  function irFaturamento(item: ProgramacaoItem) {
+    navigate(`/faturamento?${montarParamsFluxo(item).toString()}`)
+  }
+
+  function irFinanceiro(item: ProgramacaoItem) {
+    navigate(`/financeiro?${montarParamsFluxo(item).toString()}`)
   }
 
   async function carregarDados() {
@@ -857,6 +1009,81 @@ export default function Programacao() {
       )
   }, [diaPainelCalendario, programacoes])
 
+  const relatorioRange = useMemo(() => {
+    if (relatorioFiltro === 'dia') {
+      return { ini: relatorioDiaRef, fim: relatorioDiaRef }
+    }
+    if (relatorioFiltro === 'semana') {
+      const w = weekRangeMondayFirst(relatorioDiaRef)
+      return { ini: w.start, fim: w.end }
+    }
+    const m = monthRangeIso(relatorioMesRef)
+    return { ini: m.start, fim: m.end }
+  }, [relatorioFiltro, relatorioDiaRef, relatorioMesRef])
+
+  const relatorioTituloPeriodo = useMemo(() => {
+    if (relatorioFiltro === 'dia') {
+      return formatDiaPainelTitulo(relatorioDiaRef)
+    }
+    if (relatorioFiltro === 'semana') {
+      const w = weekRangeMondayFirst(relatorioDiaRef)
+      return `${formatDate(w.start)} a ${formatDate(w.end)}`
+    }
+    return formatMonthLabel(relatorioMesRef)
+  }, [relatorioFiltro, relatorioDiaRef, relatorioMesRef])
+
+  const agendaRelatorioAgrupada = useMemo(() => {
+    const { ini, fim } = relatorioRange
+    if (!ini || !fim) return []
+
+    const filtradas = programacoes.filter(
+      (item) => item.dataProgramada && item.dataProgramada >= ini && item.dataProgramada <= fim
+    )
+
+    const grupos = new Map<string, ProgramacaoItem[]>()
+    for (const item of filtradas) {
+      const d = item.dataProgramada
+      if (!grupos.has(d)) grupos.set(d, [])
+      grupos.get(d)?.push(item)
+    }
+
+    return Array.from(grupos.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([data, itens]) => [
+        data,
+        itens.sort((a, b) =>
+          String(a.numero || '').localeCompare(String(b.numero || ''), undefined, { numeric: true })
+        ),
+      ] as [string, ProgramacaoItem[]])
+  }, [programacoes, relatorioRange])
+
+  const relatorioPrintDocumentProps = useMemo((): ProgramacaoRelatorioPrintProps => {
+    const filtroLabel =
+      relatorioFiltro === 'dia' ? 'Dia' : relatorioFiltro === 'semana' ? 'Semana' : 'Mês'
+    return {
+      tituloPeriodo: relatorioTituloPeriodo,
+      filtroLabel,
+      periodoIniFmt: formatDate(relatorioRange.ini),
+      periodoFimFmt: formatDate(relatorioRange.fim),
+      geradoEm: relatorioPrintTick.em || '—',
+      grupos: agendaRelatorioAgrupada,
+      total: agendaRelatorioAgrupada.reduce((n, [, it]) => n + it.length, 0),
+    }
+  }, [
+    relatorioTituloPeriodo,
+    relatorioFiltro,
+    relatorioRange.ini,
+    relatorioRange.fim,
+    agendaRelatorioAgrupada,
+    relatorioPrintTick.em,
+  ])
+
+  useEffect(() => {
+    if (relatorioPrintTick.n === 0) return
+    const t = window.setTimeout(() => window.print(), 150)
+    return () => window.clearTimeout(t)
+  }, [relatorioPrintTick.n])
+
   useEffect(() => {
     if (!diaPainelCalendario) return
     const onKey = (e: KeyboardEvent) => {
@@ -877,6 +1104,15 @@ export default function Programacao() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [formEdicaoModal])
+
+  useEffect(() => {
+    if (!relatorioAberto) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setRelatorioAberto(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [relatorioAberto])
 
   useEffect(() => {
     if (!contextoDestaqueId || loading) return
@@ -1025,21 +1261,45 @@ export default function Programacao() {
   return (
     <MainLayout>
       <div className="page-shell">
-      <div style={{ marginBottom: '20px' }}>
-        <h1 style={{ margin: 0, fontSize: '26px', color: '#0f172a', fontWeight: 800 }}>
-          Programação
-        </h1>
-        <p className="page-header__lead" style={{ margin: '6px 0 0' }}>
-          <strong>Fluxo:</strong> Programação → MTR → Controle de Massa (pesagem). Monte o calendário e
-          cadastre visitas; o status no calendário acompanha automaticamente MTR e coleta (não é editável
-          aqui).
-        </p>
-        {usuarioCargo ? (
-          <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: '12px', fontWeight: 600 }}>
-            Perfil: <span style={{ color: '#0f172a' }}>{usuarioCargo}</span>
-            {!podeMutarProgramacao ? ' · somente consulta' : ' · pode criar e editar'}
+      <div
+        style={{
+          marginBottom: '20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: '16px',
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ flex: '1', minWidth: 'min(100%, 260px)' }}>
+          <h1 style={{ margin: 0, fontSize: '26px', color: '#0f172a', fontWeight: 800 }}>
+            Programação
+          </h1>
+          <p className="page-header__lead" style={{ margin: '6px 0 0' }}>
+            <strong>Fluxo:</strong> Programação → MTR → Controle de Massa (pesagem). Monte o calendário e
+            cadastre visitas; o status no calendário acompanha automaticamente MTR e coleta (não é editável
+            aqui).
           </p>
-        ) : null}
+          {usuarioCargo ? (
+            <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: '12px', fontWeight: 600 }}>
+              Perfil: <span style={{ color: '#0f172a' }}>{usuarioCargo}</span>
+              {!podeMutarProgramacao ? ' · somente consulta' : ' · pode criar e editar'}
+            </p>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          style={programacaoRelatorioHeaderBtnStyle}
+          onClick={() => {
+            setRelatorioDiaRef(todayIsoLocal())
+            setRelatorioMesRef(mesSelecionado)
+            setRelatorioFiltro('dia')
+            setRelatorioAberto(true)
+          }}
+          aria-label="Abrir relatório de programações"
+        >
+          Relatório
+        </button>
       </div>
 
       <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
@@ -1087,6 +1347,42 @@ export default function Programacao() {
               </span>
             )}
           </div>
+
+          {itemContextoResolvido ? (
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              {itemContextoResolvido.mtrId ? (
+                <button type="button" style={botaoSecundarioStyle} onClick={() => irMtr(itemContextoResolvido)}>
+                  MTR
+                </button>
+              ) : null}
+              {itemContextoResolvido.coletaId ? (
+                <>
+                  <button
+                    type="button"
+                    style={botaoSecundarioStyle}
+                    onClick={() => irControleMassa(itemContextoResolvido)}
+                  >
+                    Controle de Massa
+                  </button>
+                  <button
+                    type="button"
+                    style={botaoSecundarioStyle}
+                    onClick={() => irFaturamento(itemContextoResolvido)}
+                  >
+                    Faturamento
+                  </button>
+                  <button
+                    type="button"
+                    style={botaoSecundarioStyle}
+                    onClick={() => irFinanceiro(itemContextoResolvido)}
+                  >
+                    Financeiro
+                  </button>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+
           <button type="button" style={botaoLimparContextoStyle} onClick={limparContextoUrl}>
             Limpar contexto
           </button>
@@ -1449,6 +1745,36 @@ export default function Programacao() {
                             ) : null}
 
                             <div style={acoesRowCompactStyle}>
+                              {item.mtrId ? (
+                                <button
+                                  type="button"
+                                  style={botaoSecundarioStyle}
+                                  onClick={() => irMtr(item)}
+                                  title="Abrir MTR desta programação"
+                                >
+                                  MTR
+                                </button>
+                              ) : null}
+                              {item.coletaId ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    style={botaoSecundarioStyle}
+                                    onClick={() => irControleMassa(item)}
+                                    title="Abrir Controle de Massa desta coleta"
+                                  >
+                                    Massa
+                                  </button>
+                                  <button
+                                    type="button"
+                                    style={botaoSecundarioStyle}
+                                    onClick={() => irFaturamento(item)}
+                                    title="Abrir Faturamento desta coleta"
+                                  >
+                                    Faturar
+                                  </button>
+                                </>
+                              ) : null}
                               <button
                                 type="button"
                                 style={{
@@ -1641,6 +1967,56 @@ export default function Programacao() {
                       </div>
 
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {item.mtrId ? (
+                          <button
+                            type="button"
+                            style={botaoSecundarioStyle}
+                            onClick={() => {
+                              irMtr(item)
+                              setDiaPainelCalendario(null)
+                            }}
+                            title="Abrir MTR desta programação"
+                          >
+                            MTR
+                          </button>
+                        ) : null}
+                        {item.coletaId ? (
+                          <>
+                            <button
+                              type="button"
+                              style={botaoSecundarioStyle}
+                              onClick={() => {
+                                irControleMassa(item)
+                                setDiaPainelCalendario(null)
+                              }}
+                              title="Abrir Controle de Massa desta coleta"
+                            >
+                              Massa
+                            </button>
+                            <button
+                              type="button"
+                              style={botaoSecundarioStyle}
+                              onClick={() => {
+                                irFaturamento(item)
+                                setDiaPainelCalendario(null)
+                              }}
+                              title="Abrir Faturamento desta coleta"
+                            >
+                              Faturar
+                            </button>
+                            <button
+                              type="button"
+                              style={botaoSecundarioStyle}
+                              onClick={() => {
+                                irFinanceiro(item)
+                                setDiaPainelCalendario(null)
+                              }}
+                              title="Abrir Financeiro desta coleta"
+                            >
+                              Financeiro
+                            </button>
+                          </>
+                        ) : null}
                         <button
                           type="button"
                           style={{
@@ -1671,6 +2047,261 @@ export default function Programacao() {
                 })}
               </div>
             )}
+          </div>
+        </div>
+      ) : null}
+
+      {createPortal(<ProgramacaoRelatorioPrintRoot {...relatorioPrintDocumentProps} />, document.body)}
+
+      {relatorioAberto ? (
+        <div
+          style={relatorioModalOverlayStyle}
+          onClick={() => setRelatorioAberto(false)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="programacao-relatorio-titulo"
+            style={relatorioModalBoxStyle}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: '12px',
+                marginBottom: '14px',
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <h2 id="programacao-relatorio-titulo" style={{ ...cardTituloStyle, marginBottom: '6px' }}>
+                  Relatório de programações
+                </h2>
+                <p style={{ ...cardDescricaoStyle, margin: 0 }}>
+                  <span style={{ textTransform: 'capitalize' }}>{relatorioTituloPeriodo}</span>
+                  {loading ? ' · carregando…' : null}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRelatorioAberto(false)}
+                style={calendarPainelFecharStyle}
+                aria-label="Fechar"
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '16px' }}>
+              <div style={relatorioSegmentWrapStyle}>
+                {(
+                  [
+                    ['dia', 'Dia'],
+                    ['semana', 'Semana'],
+                    ['mes', 'Mês'],
+                  ] as const
+                ).map(([valor, label]) => (
+                  <button
+                    key={valor}
+                    type="button"
+                    style={{
+                      ...relatorioSegmentBtnStyle,
+                      ...(relatorioFiltro === valor ? relatorioSegmentBtnAtivoStyle : {}),
+                    }}
+                    onClick={() => setRelatorioFiltro(valor)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {relatorioFiltro === 'mes' ? (
+                <div>
+                  <label style={labelStyle}>Mês</label>
+                  <input
+                    type="month"
+                    value={relatorioMesRef}
+                    onChange={(e) => setRelatorioMesRef(e.target.value)}
+                    style={{ ...inputStyle, maxWidth: '240px' }}
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label style={labelStyle}>
+                    {relatorioFiltro === 'dia' ? 'Data' : 'Dia na semana (qualquer dia)'}
+                  </label>
+                  <input
+                    type="date"
+                    value={relatorioDiaRef}
+                    onChange={(e) => setRelatorioDiaRef(e.target.value)}
+                    style={{ ...inputStyle, maxWidth: '240px' }}
+                  />
+                </div>
+              )}
+
+              <div style={relatorioResumoBarStyle}>
+                <span style={{ fontWeight: 800, color: '#0f172a' }}>
+                  {agendaRelatorioAgrupada.reduce((n, [, it]) => n + it.length, 0)} programação(ões)
+                </span>
+                <span style={{ color: '#64748b', fontWeight: 600, fontSize: '13px' }}>
+                  Período: {formatDate(relatorioRange.ini)} — {formatDate(relatorioRange.fim)}
+                </span>
+              </div>
+            </div>
+
+            {agendaRelatorioAgrupada.length === 0 ? (
+              <div style={{ ...estadoVazioStyle, padding: '20px' }}>
+                Nenhuma programação neste período.
+                {relatorioRange.ini.slice(0, 4) !== mesSelecionado.slice(0, 4) ? (
+                  <div style={{ marginTop: '10px', fontSize: '13px', color: '#94a3b8' }}>
+                    Dica: os dados desta tela são carregados para o ano do seletor &quot;Calendário do
+                    mês&quot; acima. Ajuste esse mês (ou clique em Atualizar) se estiver consultando outro
+                    ano.
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '14px',
+                  maxHeight: 'min(62vh, 480px)',
+                  overflowY: 'auto',
+                  paddingRight: '4px',
+                }}
+              >
+                {agendaRelatorioAgrupada.map(([data, itens]) => (
+                  <div key={data} style={grupoAgendaStyle}>
+                    <div style={grupoAgendaHeaderStyle}>
+                      <div style={grupoAgendaDataStyle}>{formatDate(data)}</div>
+                      <div style={grupoAgendaCountStyle}>{itens.length} programação(ões)</div>
+                    </div>
+                    <div style={grupoAgendaItensWrapStyle}>
+                      {itens.map((item) => {
+                        const statusStyle = getStatusStyle(item.statusProgramacao)
+                        return (
+                          <div
+                            key={item.id}
+                            style={{
+                              ...itemAgendaStyle,
+                              borderLeft: `3px solid ${statusStyle.color}`,
+                            }}
+                          >
+                            <div style={itemAgendaMainRowStyle}>
+                              <div style={agendaAvatarStyle} aria-hidden title={item.clienteNome}>
+                                {iniciaisNomeCliente(item.clienteNome)}
+                              </div>
+                              <div style={itemAgendaTituloBlocoStyle}>
+                                <div style={itemNumeroStyle}>Programação {item.numero || '—'}</div>
+                                <div style={itemClienteStyle}>{item.clienteNome}</div>
+                              </div>
+                              <span
+                                style={{
+                                  ...statusBadgeStyle,
+                                  backgroundColor: statusStyle.backgroundColor,
+                                  color: statusStyle.color,
+                                  flexShrink: 0,
+                                  alignSelf: 'flex-start',
+                                }}
+                              >
+                                {STATUS_LABELS[item.statusProgramacao]}
+                              </span>
+                            </div>
+                            <div style={itemAgendaMetaStripStyle}>
+                              <span>
+                                <span style={itemMetaKeyStyle}>Caminhão</span> {item.tipoCaminhao || '—'}
+                              </span>
+                              <span style={itemMetaSepStyle} aria-hidden>
+                                ·
+                              </span>
+                              <span>
+                                <span style={itemMetaKeyStyle}>Serviço</span> {item.tipoServico || '—'}
+                              </span>
+                            </div>
+                            <div style={acoesRowCompactStyle}>
+                              {item.mtrId ? (
+                                <button
+                                  type="button"
+                                  style={botaoSecundarioStyle}
+                                  onClick={() => {
+                                    irMtr(item)
+                                    setRelatorioAberto(false)
+                                  }}
+                                >
+                                  MTR
+                                </button>
+                              ) : null}
+                              {item.coletaId ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    style={botaoSecundarioStyle}
+                                    onClick={() => {
+                                      irControleMassa(item)
+                                      setRelatorioAberto(false)
+                                    }}
+                                  >
+                                    Massa
+                                  </button>
+                                  <button
+                                    type="button"
+                                    style={botaoSecundarioStyle}
+                                    onClick={() => {
+                                      irFaturamento(item)
+                                      setRelatorioAberto(false)
+                                    }}
+                                  >
+                                    Faturar
+                                  </button>
+                                </>
+                              ) : null}
+                              <button
+                                type="button"
+                                style={{
+                                  ...botaoEditarListaCompactStyle,
+                                  opacity: podeMutarProgramacao ? 1 : 0.5,
+                                  cursor: podeMutarProgramacao ? 'pointer' : 'not-allowed',
+                                }}
+                                onClick={() => {
+                                  editarProgramacao(item)
+                                  setRelatorioAberto(false)
+                                }}
+                                disabled={!podeMutarProgramacao}
+                              >
+                                Editar
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={relatorioModalAcoesStyle}>
+              <button type="button" style={botaoSecundarioStyle} onClick={() => setRelatorioAberto(false)}>
+                Fechar
+              </button>
+              <button
+                type="button"
+                style={botaoPrimarioStyle}
+                onClick={() =>
+                  setRelatorioPrintTick((prev) => ({
+                    n: prev.n + 1,
+                    em: new Date().toLocaleString('pt-BR'),
+                  }))
+                }
+                title="Abre a impressão do navegador — escolha &quot;Salvar como PDF&quot; se disponível"
+              >
+                Imprimir / PDF
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -1881,6 +2512,14 @@ const botaoPrimarioStyle: CSSProperties = {
   padding: '0 18px',
   fontWeight: 800,
   cursor: 'pointer',
+}
+
+const programacaoRelatorioHeaderBtnStyle: CSSProperties = {
+  ...botaoPrimarioStyle,
+  flexShrink: 0,
+  alignSelf: 'flex-start',
+  whiteSpace: 'nowrap',
+  boxShadow: '0 1px 3px rgba(22, 163, 74, 0.35)',
 }
 
 const botaoSecundarioStyle: CSSProperties = {
@@ -2279,4 +2918,62 @@ const botaoLimparContextoStyle: CSSProperties = {
   fontWeight: 700,
   cursor: 'pointer',
   fontSize: '13px',
+}
+
+const relatorioModalAcoesStyle: CSSProperties = {
+  display: 'flex',
+  gap: '12px',
+  flexWrap: 'wrap',
+  justifyContent: 'flex-end',
+  marginTop: '18px',
+  paddingTop: '16px',
+  borderTop: '1px solid #e5e7eb',
+  flexShrink: 0,
+}
+
+const relatorioModalOverlayStyle: CSSProperties = {
+  ...calendarPainelOverlayStyle,
+  zIndex: 10100,
+}
+
+const relatorioModalBoxStyle: CSSProperties = {
+  ...calendarPainelModalStyle,
+  maxWidth: '560px',
+}
+
+const relatorioSegmentWrapStyle: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: '8px',
+}
+
+const relatorioSegmentBtnStyle: CSSProperties = {
+  flex: '1',
+  minWidth: '88px',
+  height: '40px',
+  borderRadius: '12px',
+  border: '1px solid #d1d5db',
+  background: '#f8fafc',
+  color: '#475569',
+  fontWeight: 700,
+  fontSize: '13px',
+  cursor: 'pointer',
+}
+
+const relatorioSegmentBtnAtivoStyle: CSSProperties = {
+  background: '#0f172a',
+  color: '#ffffff',
+  borderColor: '#0f172a',
+}
+
+const relatorioResumoBarStyle: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: '10px',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '12px 14px',
+  borderRadius: '14px',
+  background: '#f1f5f9',
+  border: '1px solid #e2e8f0',
 }

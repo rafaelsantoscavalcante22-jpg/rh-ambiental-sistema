@@ -19,7 +19,14 @@ describe('etapaVisivelListaFinanceiro', () => {
 })
 
 describe('coletaVisivelListaFinanceiro', () => {
-  it('inclui seeds de teste pelas observações', () => {
+  it('inclui seeds de teste pelas observações (coleta_observacoes ou observacoes)', () => {
+    expect(
+      coletaVisivelListaFinanceiro({
+        fluxo_status: 'MTR_PREENCHIDA',
+        etapa_operacional: 'MTR_PREENCHIDA',
+        coleta_observacoes: '[FLUXO-20] seed',
+      })
+    ).toBe(true)
     expect(
       coletaVisivelListaFinanceiro({
         fluxo_status: 'MTR_PREENCHIDA',

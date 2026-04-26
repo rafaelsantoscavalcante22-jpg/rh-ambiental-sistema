@@ -1,5 +1,7 @@
 import type { CSSProperties } from 'react'
 
+import { BRAND_LOGO_MARK } from '../../lib/brandLogo'
+
 /** Conteúdo só para impressão (portal em document.body). Estilos em index.css (.exec-print-report-root). */
 
 export type ExecutivePrintReportProps = {
@@ -79,7 +81,13 @@ const kvVal: CSSProperties = { color: '#0f172a', fontWeight: 700, textAlign: 'ri
 export function ExecutivePrintReportRoot(p: ExecutivePrintReportProps) {
   return (
     <div className="exec-print-report-root">
-      <div className="exec-print-report__brand">RG Ambiental</div>
+      <header className="exec-print-report__header">
+        <img
+          className="exec-print-report__logo"
+          src={BRAND_LOGO_MARK}
+          alt="RG Ambiental"
+        />
+      </header>
       <h1 className="exec-print-report__title">Relatório gerencial — Visão executiva</h1>
       <p className="exec-print-report__meta">
         Emitido em <strong>{p.geradoEmLabel}</strong>
