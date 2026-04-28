@@ -249,7 +249,7 @@ export default function FinanceiroContasReceber() {
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: '16px' }}>
           <div>
             <h1 style={{ margin: 0, fontSize: '26px', fontWeight: 800, color: '#0f172a' }}>
-              Contas a receber
+              Títulos, vencimentos e saldos
             </h1>
             <p className="page-header__lead" style={{ margin: '8px 0 0', maxWidth: 720 }}>
               Relatório por título: saldos em aberto, vencidos e faixa de vencimento. Use a{' '}

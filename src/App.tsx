@@ -5,6 +5,7 @@ import { supabase } from './lib/supabase'
 import { usuarioPodeAcessarRota } from './lib/paginasSistema'
 import { ChatFloatProvider } from './contexts/ChatFloatContext'
 import { PerfilUsuarioProvider, type UsuarioPerfilApp } from './contexts/PerfilUsuarioContext'
+import { PresencaAoVivoProvider } from './contexts/PresencaAoVivoContext'
 import { PwaPremiumShell } from './components/pwa/PwaPremiumShell'
 
 import Login from './pages/Login'
@@ -12,6 +13,7 @@ import Login from './pages/Login'
 const BemVindoNexus = lazy(() => import('./pages/BemVindoNexus'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Clientes = lazy(() => import('./pages/Clientes'))
+const PosVenda = lazy(() => import('./pages/PosVenda'))
 const Motoristas = lazy(() => import('./pages/Motoristas'))
 const Caminhoes = lazy(() => import('./pages/Caminhoes'))
 const Financeiro = lazy(() => import('./pages/Financeiro'))
@@ -236,8 +238,9 @@ function App() {
       <BrowserRouter>
         <PwaPremiumShell />
         <ChatFloatProvider>
-      <Suspense fallback={routeSuspenseFallback}>
-      <Routes>
+          <PresencaAoVivoProvider>
+            <Suspense fallback={routeSuspenseFallback}>
+              <Routes>
         {!session ? (
           <>
             <Route path="/" element={<Login />} />
@@ -304,6 +307,29 @@ function App() {
                   ]}
                 >
                   <Clientes />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/pos-venda"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[
+                    'Administrador',
+                    'Operacional',
+                    'Logística',
+                    'Balanceiro',
+                    'Diretoria',
+                    'Faturamento',
+                    'Financeiro',
+                    'Visualizador',
+                  ]}
+                >
+                  <PosVenda />
                 </ProtectedRoute>
               }
             />
@@ -683,9 +709,10 @@ function App() {
             <Route path="*" element={<Navigate to="/bem-vindo" replace />} />
           </>
         )}
-      </Routes>
-      </Suspense>
-      </ChatFloatProvider>
+              </Routes>
+            </Suspense>
+          </PresencaAoVivoProvider>
+        </ChatFloatProvider>
     </BrowserRouter>
     </PerfilUsuarioProvider>
   )

@@ -1662,7 +1662,7 @@ export default function ControleMassa() {
                 color: "#0f172a",
               }}
             >
-              Pesagem e Ticket
+              Pesagem, MTR e ticket no mesmo ecrã
             </h1>
             <p className="page-header__lead" style={{ margin: "6px 0 0", maxWidth: "640px" }}>
               Escolha a <strong>MTR</strong>, lance a pesagem e use o bloco <strong>Ticket operacional</strong> abaixo

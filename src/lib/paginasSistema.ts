@@ -25,6 +25,7 @@ export const ROTAS_SISTEMA: { path: string; label: string }[] = [
   { path: '/envio-nf', label: 'Envio de NF' },
   { path: '/financeiro', label: 'Financeiro' },
   { path: '/financeiro/contas-receber', label: 'Contas a receber' },
+  { path: '/pos-venda', label: 'Pós-venda' },
   { path: '/usuarios', label: 'Usuários' },
   { path: '/chat', label: 'Chat' },
 ]

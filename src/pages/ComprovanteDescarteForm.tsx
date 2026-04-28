@@ -648,6 +648,15 @@ export default function ComprovanteDescarteForm() {
   return (
     <MainLayout>
       <div className="cd-page">
+        <div className="cd-page__hero no-print" style={{ marginBottom: 16 }}>
+          <div>
+            <h1 className="cd-page__title">Dados, fotos e conclusão do comprovante</h1>
+            <p className="cd-page__lead">
+              Preencha a ficha, valide as imagens e as assinaturas e finalize o documento — o nome curto do
+              módulo permanece no cabeçalho.
+            </p>
+          </div>
+        </div>
         <div className="cd-form-toolbar no-print">
           <Link to="/comprovantes-descarte" className="cd-btn cd-btn--secondary">
             Voltar à listagem

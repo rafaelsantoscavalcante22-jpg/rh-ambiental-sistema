@@ -658,7 +658,7 @@ export default function ConferenciaTransporte() {
               letterSpacing: '-0.02em',
             }}
           >
-            Conferência de transportes
+            Checklist e assinaturas do transporte
           </h1>
           <p style={{ margin: '14px auto 0', maxWidth: 580, fontSize: '15px', color: '#64748b', lineHeight: 1.6 }}>
             Fluxo em <strong>2 passos</strong>: escolha a coleta, marque os <strong>15 itens</strong> do checklist,

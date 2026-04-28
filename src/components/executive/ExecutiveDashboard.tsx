@@ -291,7 +291,9 @@ export function ExecutiveDashboard() {
   }, [])
 
   useEffect(() => {
-    void carregar()
+    queueMicrotask(() => {
+      void carregar()
+    })
   }, [carregar])
 
   const { ini: rangeIni, fim: rangeFim } = useMemo(
@@ -954,7 +956,7 @@ export function ExecutiveDashboard() {
                 <span style={execEyebrowMark} aria-hidden />
                 RG Ambiental · Painel executivo
               </p>
-              <h1 style={execH1}>Visão Executiva</h1>
+              <h1 style={execH1}>Síntese e prioridades do período</h1>
               <p style={execLead}>
                 Síntese financeira e operacional do período filtrado — leitura estratégica para decisão.
               </p>

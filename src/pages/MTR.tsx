@@ -2455,7 +2455,7 @@ export default function MTR() {
       <div className="mtr-page page-shell">
         <div className="mtr-topbar">
           <div className="mtr-topbar-left">
-            <h1>MTR</h1>
+            <h1>Manifesto e ligação às coletas</h1>
             <p className="page-header__lead" style={{ margin: '6px 0 0' }}>
               Manifesto ligado à programação; a coleta segue no fluxo a partir daqui.
             </p>

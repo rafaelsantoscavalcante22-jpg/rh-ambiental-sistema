@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties, type For
 import { Link } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import { supabase } from '../lib/supabase'
+import { limparSessionDraftKey, useCadastroFormDraft } from '../lib/useCadastroFormDraft'
 import { cargoPodeEmitirFaturamento } from '../lib/workflowPermissions'
 import type { RegraPrecoRow } from '../services/pricing'
 
@@ -33,6 +34,8 @@ const formInicial: FormState = {
   ativo: true,
 }
 
+const FATURAMENTO_REGRAS_DRAFT_KEY = 'rg-ambiental-faturamento-regras-draft'
+
 function parseNumeroOpcional(s: string): number | null {
   const t = s.replace(/\s/g, '').replace(',', '.').trim()
   if (!t) return null
@@ -52,6 +55,17 @@ export default function FaturamentoRegrasPreco() {
   const [form, setForm] = useState<FormState>(formInicial)
 
   const podeMutar = cargoPodeEmitirFaturamento(cargo)
+
+  const regrasDraftData = useMemo(() => ({ form, editandoId }), [form, editandoId])
+  useCadastroFormDraft({
+    storageKey: FATURAMENTO_REGRAS_DRAFT_KEY,
+    open: podeMutar,
+    data: regrasDraftData,
+    onRestore: (d) => {
+      setForm(d.form)
+      setEditandoId(d.editandoId)
+    },
+  })
 
   const carregarTudo = useCallback(async () => {
     setLoading(true)
@@ -110,6 +124,7 @@ export default function FaturamentoRegrasPreco() {
   }, [clientes])
 
   function iniciarNova() {
+    limparSessionDraftKey(FATURAMENTO_REGRAS_DRAFT_KEY)
     setEditandoId(null)
     setForm(formInicial)
     setErro('')
@@ -210,7 +225,7 @@ export default function FaturamentoRegrasPreco() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
-              Regras de preço (Faturamento)
+              Contratos e tabelas de preço
             </h1>
             <p className="page-header__lead" style={{ margin: '10px 0 0', maxWidth: 820, lineHeight: 1.65 }}>
               Cadastro de contratos e regras para <strong>sugestão automática</strong> no modal de faturamento. Prioridade:{' '}

@@ -174,13 +174,15 @@ export function FaturamentoModalRegisto({
 
   useEffect(() => {
     if (!open || !row) return
-    void carregarRegisto(row.coleta_id)
+    queueMicrotask(() => {
+      void carregarRegisto(row.coleta_id)
+    })
   }, [open, row?.coleta_id, carregarRegisto])
 
   useEffect(() => {
     if (!open) return
     let cancel = false
-    setCarregandoRegras(true)
+    queueMicrotask(() => setCarregandoRegras(true))
     void (async () => {
       const { data, error } = await supabase.from('faturamento_precos_regras').select('*').eq('ativo', true)
       if (cancel) return
@@ -198,8 +200,10 @@ export function FaturamentoModalRegisto({
 
   useEffect(() => {
     if (!open || !row) return
-    setManualValor(false)
-    setDataVencimentoIso(sugerirDataVencimentoIso(7))
+    queueMicrotask(() => {
+      setManualValor(false)
+      setDataVencimentoIso(sugerirDataVencimentoIso(7))
+    })
   }, [open, row?.coleta_id])
 
   useEffect(() => {
@@ -208,13 +212,15 @@ export function FaturamentoModalRegisto({
     if (manualValor) return
     const s = sugestaoPreco
     if (s && s.total > 0) {
-      setValorServicoStr(String(s.total))
-      setValorAdicionaisStr('')
+      queueMicrotask(() => {
+        setValorServicoStr(String(s.total))
+        setValorAdicionaisStr('')
+      })
       return
     }
     const v = row.valor_coleta
     if (v != null && Number(v) > 0) {
-      setValorServicoStr(String(v))
+      queueMicrotask(() => setValorServicoStr(String(v)))
     }
   }, [
     open,

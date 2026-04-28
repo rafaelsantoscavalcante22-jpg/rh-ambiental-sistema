@@ -16,7 +16,7 @@ import {
   normalizarPresencaStatus,
 } from '../lib/presencaStatus'
 import { chatTotalMensagensNaoLidas } from '../lib/chat'
-import { usuarioPodeAcessarRota } from '../lib/paginasSistema'
+import { ROTAS_SISTEMA, usuarioPodeAcessarRota } from '../lib/paginasSistema'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
 import { ChatInternoFloating } from '../components/chat/ChatInternoFloating'
 import SuporteTecnicoFloat from '../components/SuporteTecnicoFloat'
@@ -109,6 +109,10 @@ const menuGroups: { title: string; items: MenuItem[] }[] = [
     ],
   },
   {
+    title: 'Pós-venda',
+    items: [{ label: 'Pós-venda', path: '/pos-venda' }],
+  },
+  {
     title: 'Sistema',
     items: [{ label: 'Usuários', path: '/usuarios' }],
   },
@@ -155,7 +159,11 @@ function obterTituloDaPagina(pathname: string) {
   const item = ordenados.find(
     (menu) => pathname === menu.path || pathname.startsWith(`${menu.path}/`)
   )
-  return item?.label || 'Sistema RG Ambiental'
+  if (item?.label) return item.label
+
+  const extra = [...ROTAS_SISTEMA].sort((a, b) => b.path.length - a.path.length)
+  const sec = extra.find((r) => pathname === r.path || pathname.startsWith(`${r.path}/`))
+  return sec?.label ?? 'Sistema RG Ambiental'
 }
 
 function obterIniciais(nome?: string | null, email?: string | null) {
@@ -172,7 +180,8 @@ function obterIniciais(nome?: string | null, email?: string | null) {
   return base.slice(0, 2).toUpperCase()
 }
 
-const SIDEBAR_SECTIONS_KEY = 'rg-sidebar-sections-open'
+/** v2: padrão recolhido; chave nova para não herdar estado antigo “tudo aberto”. */
+const SIDEBAR_SECTIONS_KEY = 'rg-sidebar-sections-open-v2'
 
 function lerSecoesSidebar(): Record<string, boolean> | null {
   try {
@@ -248,7 +257,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
     const stored = lerSecoesSidebar()
     const init: Record<string, boolean> = {}
     for (const g of menuGroups) {
-      init[g.title] = stored?.[g.title] ?? true
+      init[g.title] = stored?.[g.title] ?? false
     }
     return init
   })
@@ -274,7 +283,9 @@ export default function MainLayout({ children }: MainLayoutProps) {
   }, [])
 
   useEffect(() => {
-    void atualizarBadgeChat()
+    queueMicrotask(() => {
+      void atualizarBadgeChat()
+    })
   }, [pathnameDebounced, atualizarBadgeChat])
 
   useEffect(() => {
@@ -415,7 +426,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
   }
 
   useEffect(() => {
-    setFotoIndisponivel(false)
+    queueMicrotask(() => setFotoIndisponivel(false))
   }, [usuario?.foto_url])
 
   async function handleEscolherFoto(event: ChangeEvent<HTMLInputElement>) {
@@ -525,8 +536,12 @@ export default function MainLayout({ children }: MainLayoutProps) {
     const titulo = grupoTituloParaPathAtivo(location.pathname, menuGroupsVisiveis)
     if (!titulo) return
     setOpenSections((prev) => {
-      if (prev[titulo] !== false) return prev
-      const next = { ...prev, [titulo]: true }
+      const next: Record<string, boolean> = {}
+      for (const g of menuGroups) {
+        next[g.title] = g.title === titulo
+      }
+      const unchanged = menuGroups.every((g) => prev[g.title] === next[g.title])
+      if (unchanged) return prev
       salvarSecoesSidebar(next)
       return next
     })
@@ -537,16 +552,22 @@ export default function MainLayout({ children }: MainLayoutProps) {
       <aside className="layout-sidebar">
         <div className="layout-sidebar__brand">
           <div className="layout-sidebar__logo-row">
-            {logoCarregou ? (
-              <img
-                className="layout-sidebar__logo-img"
-                src={BRAND_LOGO_MARK}
-                alt="RG Ambiental"
-                onError={() => setLogoCarregou(false)}
-              />
-            ) : (
-              <span className="layout-sidebar__wordmark">RG Ambiental</span>
-            )}
+            <Link
+              to="/bem-vindo"
+              className="layout-sidebar__logo-link"
+              aria-label="Ir para a página inicial"
+            >
+              {logoCarregou ? (
+                <img
+                  className="layout-sidebar__logo-img"
+                  src={BRAND_LOGO_MARK}
+                  alt="RG Ambiental"
+                  onError={() => setLogoCarregou(false)}
+                />
+              ) : (
+                <span className="layout-sidebar__wordmark">RG Ambiental</span>
+              )}
+            </Link>
           </div>
         </div>
 

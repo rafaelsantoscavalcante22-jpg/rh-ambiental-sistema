@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type CSSProperties } from "react";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import MainLayout from "../layouts/MainLayout";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from "../lib/coletasQueryLimits";
 import { sanitizeIlikePattern } from "../lib/sanitizeIlike";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { limparSessionDraftKey, useCadastroFormDraft } from "../lib/useCadastroFormDraft";
 
 type Motorista = {
   id: string;
@@ -12,6 +13,7 @@ type Motorista = {
   cnh_numero: string | null;
   cnh_categoria: string | null;
   cnh_validade: string | null;
+  cnh_foto_url: string | null;
   created_at: string | null;
 };
 
@@ -42,8 +44,55 @@ function formatarData(data?: string | null) {
   return `${partes[2]}/${partes[1]}/${partes[0]}`;
 }
 
+function formatarDataHora(iso?: string | null) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("pt-BR", {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+/** Bucket público definido em `20260428150000_motoristas_cnh_foto.sql`. */
+const BUCKET_CNH_MOTORISTA = "motoristas-cnh";
+const MAX_BYTES_FOTO_CNH = 8 * 1024 * 1024;
+
+function pathFromSupabasePublicUrl(url: string, bucketId: string): string | null {
+  try {
+    const u = new URL(url);
+    const needle = `/object/public/${bucketId}/`;
+    const idx = u.pathname.indexOf(needle);
+    if (idx === -1) return null;
+    return decodeURIComponent(u.pathname.slice(idx + needle.length));
+  } catch {
+    return null;
+  }
+}
+
+const nomeMotoristaFichaBtnStyle: CSSProperties = {
+  display: "inline",
+  padding: 0,
+  margin: 0,
+  border: "none",
+  background: "transparent",
+  font: "inherit",
+  fontWeight: 700,
+  color: "#15803d",
+  cursor: "pointer",
+  textAlign: "left",
+  textDecoration: "underline",
+  textUnderlineOffset: "2px",
+  textDecorationThickness: "1px",
+  textDecorationColor: "rgba(21, 128, 61, 0.4)",
+};
+
 const MOTORISTAS_SELECT =
-  "id, nome, cnh_numero, cnh_categoria, cnh_validade, created_at";
+  "id, nome, cnh_numero, cnh_categoria, cnh_validade, cnh_foto_url, created_at";
+
+const MOTORISTAS_CADASTRO_DRAFT_KEY = "rg-ambiental-motoristas-cadastro-draft";
 
 export default function Motoristas() {
   const [motoristas, setMotoristas] = useState<Motorista[]>([]);
@@ -58,6 +107,23 @@ export default function Motoristas() {
   const [sucesso, setSucesso] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormMotorista>(formInicial);
+  const [fichaMotorista, setFichaMotorista] = useState<Motorista | null>(null);
+  const [enviandoFotoCnh, setEnviandoFotoCnh] = useState(false);
+  const fichaDomBase = useId().replace(/:/g, "");
+  const fichaTituloFichaId = `${fichaDomBase}-titulo-ficha`;
+  const fichaCnhInputId = `${fichaDomBase}-cnh-file`;
+
+  const cadastroDraftData = useMemo(() => ({ form, editingId }), [form, editingId]);
+  useCadastroFormDraft({
+    storageKey: MOTORISTAS_CADASTRO_DRAFT_KEY,
+    open: mostrarCadastro,
+    data: cadastroDraftData,
+    onRestore: (d) => {
+      setForm(d.form);
+      setEditingId(d.editingId);
+      setMostrarCadastro(true);
+    },
+  });
 
   const fetchMotoristas = useCallback(async () => {
     setLoading(true);
@@ -97,7 +163,12 @@ export default function Motoristas() {
       return;
     }
 
-    setMotoristas((data as Motorista[]) || []);
+    setMotoristas(
+      ((data as Motorista[]) || []).map((r) => ({
+        ...r,
+        cnh_foto_url: r.cnh_foto_url ?? null,
+      }))
+    );
     setLoading(false);
   }, [page, pageSize, buscaDebounced]);
 
@@ -120,6 +191,7 @@ export default function Motoristas() {
   }
 
   function limparFormulario() {
+    limparSessionDraftKey(MOTORISTAS_CADASTRO_DRAFT_KEY);
     setForm(formInicial);
     setEditingId(null);
   }
@@ -209,8 +281,20 @@ export default function Motoristas() {
   }
 
   async function handleDelete(id: string) {
-    const confirmar = window.confirm("Deseja realmente remover este motorista?");
+    const confirmar = window.confirm("Deseja realmente excluir este motorista?");
     if (!confirmar) return;
+
+    const { data: rowFoto } = await supabase
+      .from("motoristas")
+      .select("cnh_foto_url")
+      .eq("id", id)
+      .maybeSingle();
+
+    const urlFoto = (rowFoto as { cnh_foto_url?: string | null } | null)?.cnh_foto_url;
+    if (urlFoto) {
+      const p = pathFromSupabasePublicUrl(urlFoto, BUCKET_CNH_MOTORISTA);
+      if (p) void supabase.storage.from(BUCKET_CNH_MOTORISTA).remove([p]);
+    }
 
     const { error } = await supabase.from("motoristas").delete().eq("id", id);
 
@@ -222,6 +306,9 @@ export default function Motoristas() {
 
     if (editingId === id) {
       limparFormulario();
+    }
+    if (fichaMotorista?.id === id) {
+      setFichaMotorista(null);
     }
 
     await fetchMotoristas();
@@ -237,6 +324,152 @@ export default function Motoristas() {
     const id = window.setTimeout(() => setPage(totalPaginas), 0);
     return () => window.clearTimeout(id);
   }, [page, totalPaginas]);
+
+  useEffect(() => {
+    if (!fichaMotorista) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setFichaMotorista(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fichaMotorista]);
+
+  const abrirFichaMotorista = useCallback(async (m: Motorista) => {
+    setFichaMotorista(m);
+    const { data, error } = await supabase
+      .from("motoristas")
+      .select(MOTORISTAS_SELECT)
+      .eq("id", m.id)
+      .maybeSingle();
+    if (!error && data) {
+      setFichaMotorista(data as Motorista);
+    }
+  }, []);
+
+  async function handleEscolherFotoCnh(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !fichaMotorista) return;
+
+    if (!file.type.startsWith("image/")) {
+      window.alert("Escolha uma imagem (JPEG, PNG, WebP ou GIF).");
+      return;
+    }
+    if (file.size > MAX_BYTES_FOTO_CNH) {
+      window.alert("A imagem deve ter no máximo 8 MB.");
+      return;
+    }
+
+    setEnviandoFotoCnh(true);
+    try {
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      const extSeguro =
+        ext && ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+      const path = `${fichaMotorista.id}/cnh.${extSeguro}`;
+
+      const { error: upErr } = await supabase.storage
+        .from(BUCKET_CNH_MOTORISTA)
+        .upload(path, file, { upsert: true, contentType: file.type || undefined });
+
+      if (upErr) {
+        console.error(upErr);
+        window.alert(
+          "Não foi possível enviar a foto. Aplique a migração do bucket motoristas-cnh no Supabase ou verifique as políticas de Storage."
+        );
+        return;
+      }
+
+      const { data: pub } = supabase.storage.from(BUCKET_CNH_MOTORISTA).getPublicUrl(path);
+      const publicUrl = pub.publicUrl;
+
+      const { error: dbErr } = await supabase
+        .from("motoristas")
+        .update({ cnh_foto_url: publicUrl })
+        .eq("id", fichaMotorista.id);
+
+      if (dbErr) {
+        console.error(dbErr);
+        window.alert(
+          "A foto foi enviada, mas falhou ao gravar o endereço no cadastro. Verifique se a coluna cnh_foto_url existe (migração SQL)."
+        );
+        return;
+      }
+
+      const antiga = fichaMotorista.cnh_foto_url;
+      if (antiga) {
+        const pAnt = pathFromSupabasePublicUrl(antiga, BUCKET_CNH_MOTORISTA);
+        if (pAnt && pAnt !== path) {
+          void supabase.storage.from(BUCKET_CNH_MOTORISTA).remove([pAnt]);
+        }
+      }
+
+      setFichaMotorista({ ...fichaMotorista, cnh_foto_url: publicUrl });
+      await fetchMotoristas();
+    } finally {
+      setEnviandoFotoCnh(false);
+    }
+  }
+
+  async function handleRemoverFotoCnh() {
+    if (!fichaMotorista?.cnh_foto_url) return;
+    if (!window.confirm("Remover a foto da CNH deste motorista?")) return;
+
+    const p = pathFromSupabasePublicUrl(fichaMotorista.cnh_foto_url, BUCKET_CNH_MOTORISTA);
+    if (p) {
+      const { error: rmErr } = await supabase.storage.from(BUCKET_CNH_MOTORISTA).remove([p]);
+      if (rmErr) console.warn("Storage remove:", rmErr);
+    }
+
+    const { error } = await supabase
+      .from("motoristas")
+      .update({ cnh_foto_url: null })
+      .eq("id", fichaMotorista.id);
+
+    if (error) {
+      window.alert("Não foi possível limpar o registo da foto.");
+      return;
+    }
+
+    setFichaMotorista({ ...fichaMotorista, cnh_foto_url: null });
+    await fetchMotoristas();
+  }
+
+  async function handleDescarregarFotoCnh() {
+    if (!fichaMotorista?.cnh_foto_url) return;
+    const url = fichaMotorista.cnh_foto_url;
+    const baseNome = (fichaMotorista.nome || "motorista")
+      .replace(/[^a-zA-Z0-9À-úà-ú]+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "")
+      .slice(0, 48) || "motorista";
+
+    function extPorMime(mime: string) {
+      if (mime.includes("png")) return "png";
+      if (mime.includes("webp")) return "webp";
+      if (mime.includes("gif")) return "gif";
+      return "jpg";
+    }
+
+    try {
+      const res = await fetch(url, { mode: "cors" });
+      if (!res.ok) throw new Error("fetch failed");
+      const blob = await res.blob();
+      const ext = extPorMime(blob.type || "image/jpeg");
+      const nomeArquivo = `CNH_${baseNome}_${fichaMotorista.id.slice(0, 8)}.${ext}`;
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl;
+      a.download = nomeArquivo;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objUrl);
+    } catch (err) {
+      console.warn("Download via fetch falhou, a abrir URL:", err);
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }
 
   return (
     <MainLayout>
@@ -276,7 +509,7 @@ export default function Motoristas() {
                   color: "#0f172a",
                 }}
               >
-                Motoristas
+                Motoristas e documentação (CNH)
               </h1>
               <p className="page-header__lead" style={{ margin: "6px 0 0" }}>
                 Cadastro base de motoristas e CNH. Integração com <strong>Logística</strong> e outras
@@ -573,48 +806,68 @@ export default function Motoristas() {
                           borderBottom: "1px solid #eef2f7",
                         }}
                       >
-                        <td style={tdStyle}>{m.nome}</td>
+                        <td style={{ ...tdStyle, whiteSpace: "normal", wordBreak: "break-word" }}>
+                          <button
+                            type="button"
+                            onClick={() => void abrirFichaMotorista(m)}
+                            style={nomeMotoristaFichaBtnStyle}
+                            title="Ver ficha e foto da CNH"
+                            aria-label={`Abrir ficha de ${m.nome}`}
+                          >
+                            {m.nome}
+                          </button>
+                        </td>
                         <td style={tdStyle}>{m.cnh_numero || "-"}</td>
                         <td style={tdStyle}>{m.cnh_categoria || "-"}</td>
                         <td style={tdStyle}>{formatarData(m.cnh_validade)}</td>
-                        <td style={tdStyle}>
+                        <td style={{ ...tdStyle, whiteSpace: "nowrap", verticalAlign: "middle" }}>
                           <div
+                            role="group"
+                            aria-label="Ações do motorista"
                             style={{
                               display: "flex",
-                              gap: "8px",
+                              flexDirection: "row",
+                              flexWrap: "nowrap",
                               alignItems: "center",
+                              gap: "5px",
                             }}
                           >
                             <button
                               type="button"
                               onClick={() => handleEditar(m)}
                               style={{
+                                flex: "0 0 auto",
                                 background: "#16a34a",
                                 color: "#ffffff",
                                 border: "none",
-                                borderRadius: "8px",
-                                padding: "7px 14px",
+                                borderRadius: "6px",
+                                padding: "5px 9px",
                                 fontWeight: 700,
+                                fontSize: "11px",
+                                lineHeight: 1.2,
                                 cursor: "pointer",
+                                boxShadow: "0 1px 2px rgba(22, 163, 74, 0.25)",
                               }}
                             >
                               Editar
                             </button>
-
                             <button
                               type="button"
                               onClick={() => handleDelete(m.id)}
                               style={{
-                                background: "#ef4444",
-                                color: "#ffffff",
-                                border: "none",
-                                borderRadius: "8px",
-                                padding: "7px 14px",
+                                flex: "0 0 auto",
+                                background: "#ffffff",
+                                color: "#b91c1c",
+                                border: "1px solid #fecaca",
+                                borderRadius: "6px",
+                                padding: "5px 9px",
                                 fontWeight: 700,
+                                fontSize: "11px",
+                                lineHeight: 1.2,
                                 cursor: "pointer",
                               }}
                             >
-                              Remover
+                              Excluir
                             </button>
                           </div>
                         </td>
@@ -729,11 +982,300 @@ export default function Motoristas() {
           </div>
         </div>
       </div>
+
+      {fichaMotorista ? (
+        <div
+          role="presentation"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 2000,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+            overflowY: "auto",
+          }}
+          onClick={() => setFichaMotorista(null)}
+          onKeyDown={(e) => e.key === "Escape" && setFichaMotorista(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={fichaTituloFichaId}
+            style={{
+              width: "100%",
+              maxWidth: "520px",
+              maxHeight: "min(92vh, 900px)",
+              overflowY: "auto",
+              background: "#ffffff",
+              borderRadius: "16px",
+              boxShadow: "0 25px 50px rgba(15, 23, 42, 0.2)",
+              border: "1px solid #e2e8f0",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: "12px",
+                padding: "18px 20px",
+                borderBottom: "1px solid #e5e7eb",
+              }}
+            >
+              <h2
+                id={fichaTituloFichaId}
+                style={{
+                  margin: 0,
+                  fontSize: "18px",
+                  fontWeight: 800,
+                  color: "#0f172a",
+                }}
+              >
+                Ficha do motorista
+              </h2>
+              <button
+                type="button"
+                onClick={() => setFichaMotorista(null)}
+                aria-label="Fechar ficha"
+                style={{
+                  flexShrink: 0,
+                  width: "36px",
+                  height: "36px",
+                  border: "none",
+                  borderRadius: "10px",
+                  background: "#f1f5f9",
+                  color: "#475569",
+                  fontSize: "20px",
+                  lineHeight: 1,
+                  cursor: "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "18px" }}>
+              <dl
+                style={{
+                  margin: 0,
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 38%) 1fr",
+                  gap: "10px 14px",
+                  fontSize: "14px",
+                }}
+              >
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Nome</dt>
+                <dd style={{ margin: 0, color: "#0f172a", fontWeight: 600 }}>{fichaMotorista.nome}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Nº CNH</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaMotorista.cnh_numero || "—"}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Categoria</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaMotorista.cnh_categoria || "—"}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Validade CNH</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{formatarData(fichaMotorista.cnh_validade)}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Cadastrado em</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{formatarDataHora(fichaMotorista.created_at)}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>ID</dt>
+                <dd
+                  style={{
+                    margin: 0,
+                    color: "#64748b",
+                    fontSize: "12px",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {fichaMotorista.id}
+                </dd>
+              </dl>
+
+              <div
+                style={{
+                  borderTop: "1px solid #e5e7eb",
+                  paddingTop: "18px",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 800,
+                    color: "#0f172a",
+                    marginBottom: "10px",
+                  }}
+                >
+                  Foto da CNH
+                </div>
+                <p style={{ margin: "0 0 12px", fontSize: "13px", color: "#64748b", lineHeight: 1.5 }}>
+                  Envie uma imagem legível da carteira (frente ou frente e verso num só ficheiro). Formatos:
+                  JPEG, PNG, WebP ou GIF; máx. 8 MB.
+                </p>
+
+                {fichaMotorista.cnh_foto_url ? (
+                  <a
+                    href={fichaMotorista.cnh_foto_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ display: "block", marginBottom: "12px" }}
+                  >
+                    <img
+                      src={fichaMotorista.cnh_foto_url}
+                      alt={`CNH de ${fichaMotorista.nome}`}
+                      style={{
+                        width: "100%",
+                        maxHeight: "280px",
+                        objectFit: "contain",
+                        borderRadius: "12px",
+                        border: "1px solid #e2e8f0",
+                        background: "#f8fafc",
+                      }}
+                    />
+                  </a>
+                ) : (
+                  <div
+                    style={{
+                      padding: "28px 16px",
+                      textAlign: "center",
+                      color: "#94a3b8",
+                      fontSize: "13px",
+                      borderRadius: "12px",
+                      border: "1px dashed #cbd5e1",
+                      background: "#f8fafc",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    Nenhuma foto cadastrada.
+                  </div>
+                )}
+
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center" }}>
+                  <input
+                    id={fichaCnhInputId}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    onChange={(e) => void handleEscolherFotoCnh(e)}
+                    disabled={enviandoFotoCnh}
+                    style={{ display: "none" }}
+                  />
+                  <label
+                    htmlFor={fichaCnhInputId}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      minHeight: "40px",
+                      padding: "0 16px",
+                      borderRadius: "10px",
+                      background: enviandoFotoCnh ? "#e2e8f0" : "#0f172a",
+                      color: "#ffffff",
+                      fontWeight: 700,
+                      fontSize: "13px",
+                      cursor: enviandoFotoCnh ? "wait" : "pointer",
+                    }}
+                  >
+                    {enviandoFotoCnh ? "A enviar…" : fichaMotorista.cnh_foto_url ? "Substituir foto" : "Carregar foto"}
+                  </label>
+                  {fichaMotorista.cnh_foto_url ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void handleDescarregarFotoCnh()}
+                        disabled={enviandoFotoCnh}
+                        title="Guardar a imagem da CNH no computador"
+                        style={{
+                          minHeight: "40px",
+                          padding: "0 14px",
+                          borderRadius: "10px",
+                          border: "1px solid #cbd5e1",
+                          background: "#ffffff",
+                          color: "#334155",
+                          fontWeight: 700,
+                          fontSize: "13px",
+                          cursor: enviandoFotoCnh ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        Descarregar imagem
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleRemoverFotoCnh()}
+                        disabled={enviandoFotoCnh}
+                        style={{
+                          minHeight: "40px",
+                          padding: "0 14px",
+                          borderRadius: "10px",
+                          border: "1px solid #fecaca",
+                          background: "#ffffff",
+                          color: "#b91c1c",
+                          fontWeight: 700,
+                          fontSize: "13px",
+                          cursor: enviandoFotoCnh ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        Remover foto
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "10px",
+                  paddingTop: "4px",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFichaMotorista(null);
+                    handleEditar(fichaMotorista);
+                  }}
+                  style={{
+                    background: "#16a34a",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "10px",
+                    height: "40px",
+                    padding: "0 16px",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Editar cadastro
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFichaMotorista(null)}
+                  style={{
+                    background: "#e5e7eb",
+                    color: "#111827",
+                    border: "none",
+                    borderRadius: "10px",
+                    height: "40px",
+                    padding: "0 16px",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </MainLayout>
   );
 }
 
-const inputStyle: React.CSSProperties = {
+const inputStyle: CSSProperties = {
   width: "100%",
   height: "40px",
   borderRadius: "10px",
@@ -746,7 +1288,7 @@ const inputStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
-const thStyle: React.CSSProperties = {
+const thStyle: CSSProperties = {
   textAlign: "left",
   padding: "14px 12px",
   color: "#0f172a",
@@ -754,7 +1296,7 @@ const thStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-const tdStyle: React.CSSProperties = {
+const tdStyle: CSSProperties = {
   padding: "12px",
   color: "#1f2937",
   verticalAlign: "middle",

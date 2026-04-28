@@ -424,6 +424,25 @@ img {
   margin-bottom: 0;
 }
 
+.layout-sidebar__logo-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.layout-sidebar__logo-link:hover {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.layout-sidebar__logo-link:focus-visible {
+  outline: 2px solid var(--sidebar-accent);
+  outline-offset: 2px;
+}
+
 .layout-sidebar__logo-img {
   max-height: 40px;
   width: auto;

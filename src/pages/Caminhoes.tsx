@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type CSSProperties } from "react";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import MainLayout from "../layouts/MainLayout";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from "../lib/coletasQueryLimits";
 import { sanitizeIlikePattern } from "../lib/sanitizeIlike";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { limparSessionDraftKey, useCadastroFormDraft } from "../lib/useCadastroFormDraft";
 
 type Caminhao = {
   id: string;
@@ -13,6 +14,7 @@ type Caminhao = {
   tipo: string | null;
   rodizio: string | null;
   status_disponibilidade: string;
+  foto_url: string | null;
   created_at: string | null;
 };
 
@@ -49,8 +51,54 @@ function formatarPlacaDigitacao(valor: string) {
   return valor.toUpperCase().replace(/\s+/g, "").slice(0, 8);
 }
 
+function formatarDataHora(iso?: string | null) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("pt-BR", {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+const BUCKET_FOTO_CAMINHAO = "caminhoes-fotos";
+const MAX_BYTES_FOTO_CAMINHAO = 8 * 1024 * 1024;
+
+function pathFromSupabasePublicUrl(url: string, bucketId: string): string | null {
+  try {
+    const u = new URL(url);
+    const needle = `/object/public/${bucketId}/`;
+    const idx = u.pathname.indexOf(needle);
+    if (idx === -1) return null;
+    return decodeURIComponent(u.pathname.slice(idx + needle.length));
+  } catch {
+    return null;
+  }
+}
+
+const placaCaminhaoFichaBtnStyle: CSSProperties = {
+  display: "inline",
+  padding: 0,
+  margin: 0,
+  border: "none",
+  background: "transparent",
+  font: "inherit",
+  fontWeight: 700,
+  color: "#15803d",
+  cursor: "pointer",
+  textAlign: "left",
+  textDecoration: "underline",
+  textUnderlineOffset: "2px",
+  textDecorationThickness: "1px",
+  textDecorationColor: "rgba(21, 128, 61, 0.4)",
+};
+
 const CAMINHOES_SELECT =
-  "id, placa, modelo, tipo, rodizio, status_disponibilidade, created_at";
+  "id, placa, modelo, tipo, rodizio, status_disponibilidade, foto_url, created_at";
+
+const CAMINHOES_CADASTRO_DRAFT_KEY = "rg-ambiental-caminhoes-cadastro-draft";
 
 export default function Caminhoes() {
   const [caminhoes, setCaminhoes] = useState<Caminhao[]>([]);
@@ -65,6 +113,23 @@ export default function Caminhoes() {
   const [sucesso, setSucesso] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormCaminhao>(formInicial);
+  const [fichaCaminhao, setFichaCaminhao] = useState<Caminhao | null>(null);
+  const [enviandoFotoCaminhao, setEnviandoFotoCaminhao] = useState(false);
+  const fichaCaminhaoDomBase = useId().replace(/:/g, "");
+  const fichaCaminhaoTituloId = `${fichaCaminhaoDomBase}-titulo-ficha`;
+  const fichaCaminhaoFotoInputId = `${fichaCaminhaoDomBase}-foto-file`;
+
+  const cadastroDraftData = useMemo(() => ({ form, editingId }), [form, editingId]);
+  useCadastroFormDraft({
+    storageKey: CAMINHOES_CADASTRO_DRAFT_KEY,
+    open: mostrarCadastro,
+    data: cadastroDraftData,
+    onRestore: (d) => {
+      setForm(d.form);
+      setEditingId(d.editingId);
+      setMostrarCadastro(true);
+    },
+  });
 
   const fetchCaminhoes = useCallback(async () => {
     setLoading(true);
@@ -104,7 +169,12 @@ export default function Caminhoes() {
       return;
     }
 
-    setCaminhoes((data as Caminhao[]) || []);
+    setCaminhoes(
+      ((data as Caminhao[]) || []).map((c) => ({
+        ...c,
+        foto_url: c.foto_url ?? null,
+      }))
+    );
     setLoading(false);
   }, [page, pageSize, buscaDebounced]);
 
@@ -129,6 +199,7 @@ export default function Caminhoes() {
   }
 
   function limparFormulario() {
+    limparSessionDraftKey(CAMINHOES_CADASTRO_DRAFT_KEY);
     setForm(formInicial);
     setEditingId(null);
   }
@@ -221,8 +292,20 @@ export default function Caminhoes() {
   }
 
   async function handleDelete(id: string) {
-    const confirmar = window.confirm("Deseja realmente remover este caminhão?");
+    const confirmar = window.confirm("Deseja realmente excluir este caminhão?");
     if (!confirmar) return;
+
+    const { data: rowFoto } = await supabase
+      .from("caminhoes")
+      .select("foto_url")
+      .eq("id", id)
+      .maybeSingle();
+
+    const urlFoto = (rowFoto as { foto_url?: string | null } | null)?.foto_url;
+    if (urlFoto) {
+      const p = pathFromSupabasePublicUrl(urlFoto, BUCKET_FOTO_CAMINHAO);
+      if (p) void supabase.storage.from(BUCKET_FOTO_CAMINHAO).remove([p]);
+    }
 
     const { error } = await supabase.from("caminhoes").delete().eq("id", id);
 
@@ -234,6 +317,9 @@ export default function Caminhoes() {
 
     if (editingId === id) {
       limparFormulario();
+    }
+    if (fichaCaminhao?.id === id) {
+      setFichaCaminhao(null);
     }
 
     await fetchCaminhoes();
@@ -249,6 +335,152 @@ export default function Caminhoes() {
     const id = window.setTimeout(() => setPage(totalPaginas), 0);
     return () => window.clearTimeout(id);
   }, [page, totalPaginas]);
+
+  useEffect(() => {
+    if (!fichaCaminhao) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setFichaCaminhao(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fichaCaminhao]);
+
+  const abrirFichaCaminhao = useCallback(async (c: Caminhao) => {
+    setFichaCaminhao(c);
+    const { data, error } = await supabase
+      .from("caminhoes")
+      .select(CAMINHOES_SELECT)
+      .eq("id", c.id)
+      .maybeSingle();
+    if (!error && data) {
+      setFichaCaminhao(data as Caminhao);
+    }
+  }, []);
+
+  async function handleEscolherFotoCaminhao(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !fichaCaminhao) return;
+
+    if (!file.type.startsWith("image/")) {
+      window.alert("Escolha uma imagem (JPEG, PNG, WebP ou GIF).");
+      return;
+    }
+    if (file.size > MAX_BYTES_FOTO_CAMINHAO) {
+      window.alert("A imagem deve ter no máximo 8 MB.");
+      return;
+    }
+
+    setEnviandoFotoCaminhao(true);
+    try {
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      const extSeguro =
+        ext && ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+      const path = `${fichaCaminhao.id}/foto.${extSeguro}`;
+
+      const { error: upErr } = await supabase.storage
+        .from(BUCKET_FOTO_CAMINHAO)
+        .upload(path, file, { upsert: true, contentType: file.type || undefined });
+
+      if (upErr) {
+        console.error(upErr);
+        window.alert(
+          "Não foi possível enviar a foto. Aplique a migração do bucket caminhoes-fotos no Supabase ou verifique as políticas de Storage."
+        );
+        return;
+      }
+
+      const { data: pub } = supabase.storage.from(BUCKET_FOTO_CAMINHAO).getPublicUrl(path);
+      const publicUrl = pub.publicUrl;
+
+      const { error: dbErr } = await supabase
+        .from("caminhoes")
+        .update({ foto_url: publicUrl })
+        .eq("id", fichaCaminhao.id);
+
+      if (dbErr) {
+        console.error(dbErr);
+        window.alert(
+          "A foto foi enviada, mas falhou ao gravar o endereço no cadastro. Verifique se a coluna foto_url existe (migração SQL)."
+        );
+        return;
+      }
+
+      const antiga = fichaCaminhao.foto_url;
+      if (antiga) {
+        const pAnt = pathFromSupabasePublicUrl(antiga, BUCKET_FOTO_CAMINHAO);
+        if (pAnt && pAnt !== path) {
+          void supabase.storage.from(BUCKET_FOTO_CAMINHAO).remove([pAnt]);
+        }
+      }
+
+      setFichaCaminhao({ ...fichaCaminhao, foto_url: publicUrl });
+      await fetchCaminhoes();
+    } finally {
+      setEnviandoFotoCaminhao(false);
+    }
+  }
+
+  async function handleRemoverFotoCaminhao() {
+    if (!fichaCaminhao?.foto_url) return;
+    if (!window.confirm("Remover a fotografia deste caminhão?")) return;
+
+    const p = pathFromSupabasePublicUrl(fichaCaminhao.foto_url, BUCKET_FOTO_CAMINHAO);
+    if (p) {
+      const { error: rmErr } = await supabase.storage.from(BUCKET_FOTO_CAMINHAO).remove([p]);
+      if (rmErr) console.warn("Storage remove:", rmErr);
+    }
+
+    const { error } = await supabase
+      .from("caminhoes")
+      .update({ foto_url: null })
+      .eq("id", fichaCaminhao.id);
+
+    if (error) {
+      window.alert("Não foi possível limpar o registo da foto.");
+      return;
+    }
+
+    setFichaCaminhao({ ...fichaCaminhao, foto_url: null });
+    await fetchCaminhoes();
+  }
+
+  async function handleDescarregarFotoCaminhao() {
+    if (!fichaCaminhao?.foto_url) return;
+    const url = fichaCaminhao.foto_url;
+    const baseNome = (fichaCaminhao.placa || "caminhao")
+      .replace(/[^a-zA-Z0-9]+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "")
+      .slice(0, 16) || "caminhao";
+
+    function extPorMime(mime: string) {
+      if (mime.includes("png")) return "png";
+      if (mime.includes("webp")) return "webp";
+      if (mime.includes("gif")) return "gif";
+      return "jpg";
+    }
+
+    try {
+      const res = await fetch(url, { mode: "cors" });
+      if (!res.ok) throw new Error("fetch failed");
+      const blob = await res.blob();
+      const ext = extPorMime(blob.type || "image/jpeg");
+      const nomeArquivo = `Caminhao_${baseNome}_${fichaCaminhao.id.slice(0, 8)}.${ext}`;
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl;
+      a.download = nomeArquivo;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objUrl);
+    } catch (err) {
+      console.warn("Download via fetch falhou, a abrir URL:", err);
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }
 
   return (
     <MainLayout>
@@ -288,7 +520,7 @@ export default function Caminhoes() {
                   color: "#0f172a",
                 }}
               >
-                Caminhões
+                Frota e cadastro de veículos
               </h1>
               <p className="page-header__lead" style={{ margin: "6px 0 0" }}>
                 Frota e disponibilidade. Integração com <strong>Logística</strong> e outras etapas será
@@ -600,49 +832,69 @@ export default function Caminhoes() {
                           borderBottom: "1px solid #eef2f7",
                         }}
                       >
-                        <td style={tdStyle}>{c.placa}</td>
+                        <td style={{ ...tdStyle, whiteSpace: "normal", wordBreak: "break-word" }}>
+                          <button
+                            type="button"
+                            onClick={() => void abrirFichaCaminhao(c)}
+                            style={placaCaminhaoFichaBtnStyle}
+                            title="Ver ficha e fotografia do veículo"
+                            aria-label={`Abrir ficha do caminhão ${c.placa}`}
+                          >
+                            {c.placa}
+                          </button>
+                        </td>
                         <td style={tdStyle}>{c.modelo || "-"}</td>
                         <td style={tdStyle}>{c.tipo || "-"}</td>
                         <td style={tdStyle}>{c.rodizio || "-"}</td>
                         <td style={tdStyle}>{c.status_disponibilidade}</td>
-                        <td style={tdStyle}>
+                        <td style={{ ...tdStyle, whiteSpace: "nowrap", verticalAlign: "middle" }}>
                           <div
+                            role="group"
+                            aria-label="Ações do caminhão"
                             style={{
                               display: "flex",
-                              gap: "8px",
+                              flexDirection: "row",
+                              flexWrap: "nowrap",
                               alignItems: "center",
+                              gap: "5px",
                             }}
                           >
                             <button
                               type="button"
                               onClick={() => handleEditar(c)}
                               style={{
+                                flex: "0 0 auto",
                                 background: "#16a34a",
                                 color: "#ffffff",
                                 border: "none",
-                                borderRadius: "8px",
-                                padding: "7px 14px",
+                                borderRadius: "6px",
+                                padding: "5px 9px",
                                 fontWeight: 700,
+                                fontSize: "11px",
+                                lineHeight: 1.2,
                                 cursor: "pointer",
+                                boxShadow: "0 1px 2px rgba(22, 163, 74, 0.25)",
                               }}
                             >
                               Editar
                             </button>
-
                             <button
                               type="button"
                               onClick={() => handleDelete(c.id)}
                               style={{
-                                background: "#ef4444",
-                                color: "#ffffff",
-                                border: "none",
-                                borderRadius: "8px",
-                                padding: "7px 14px",
+                                flex: "0 0 auto",
+                                background: "#ffffff",
+                                color: "#b91c1c",
+                                border: "1px solid #fecaca",
+                                borderRadius: "6px",
+                                padding: "5px 9px",
                                 fontWeight: 700,
+                                fontSize: "11px",
+                                lineHeight: 1.2,
                                 cursor: "pointer",
                               }}
                             >
-                              Remover
+                              Excluir
                             </button>
                           </div>
                         </td>
@@ -757,11 +1009,305 @@ export default function Caminhoes() {
           </div>
         </div>
       </div>
+
+      {fichaCaminhao ? (
+        <div
+          role="presentation"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 2000,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+            overflowY: "auto",
+          }}
+          onClick={() => setFichaCaminhao(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={fichaCaminhaoTituloId}
+            style={{
+              width: "100%",
+              maxWidth: "520px",
+              maxHeight: "min(92vh, 900px)",
+              overflowY: "auto",
+              background: "#ffffff",
+              borderRadius: "16px",
+              boxShadow: "0 25px 50px rgba(15, 23, 42, 0.2)",
+              border: "1px solid #e2e8f0",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: "12px",
+                padding: "18px 20px",
+                borderBottom: "1px solid #e5e7eb",
+              }}
+            >
+              <h2
+                id={fichaCaminhaoTituloId}
+                style={{
+                  margin: 0,
+                  fontSize: "18px",
+                  fontWeight: 800,
+                  color: "#0f172a",
+                }}
+              >
+                Ficha do caminhão
+              </h2>
+              <button
+                type="button"
+                onClick={() => setFichaCaminhao(null)}
+                aria-label="Fechar ficha"
+                style={{
+                  flexShrink: 0,
+                  width: "36px",
+                  height: "36px",
+                  border: "none",
+                  borderRadius: "10px",
+                  background: "#f1f5f9",
+                  color: "#475569",
+                  fontSize: "20px",
+                  lineHeight: 1,
+                  cursor: "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "18px" }}>
+              <dl
+                style={{
+                  margin: 0,
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 38%) 1fr",
+                  gap: "10px 14px",
+                  fontSize: "14px",
+                }}
+              >
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Placa</dt>
+                <dd style={{ margin: 0, color: "#0f172a", fontWeight: 600 }}>{fichaCaminhao.placa}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Modelo</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.modelo || "—"}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Tipo</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.tipo || "—"}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Rodízio</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.rodizio || "—"}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Disponibilidade</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.status_disponibilidade}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Cadastrado em</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{formatarDataHora(fichaCaminhao.created_at)}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>ID</dt>
+                <dd
+                  style={{
+                    margin: 0,
+                    color: "#64748b",
+                    fontSize: "12px",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {fichaCaminhao.id}
+                </dd>
+              </dl>
+
+              <div
+                style={{
+                  borderTop: "1px solid #e5e7eb",
+                  paddingTop: "18px",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 800,
+                    color: "#0f172a",
+                    marginBottom: "10px",
+                  }}
+                >
+                  Fotografia do veículo
+                </div>
+                <p style={{ margin: "0 0 12px", fontSize: "13px", color: "#64748b", lineHeight: 1.5 }}>
+                  Envie uma imagem do caminhão (lateral ou 3/4, por exemplo). Formatos: JPEG, PNG, WebP ou
+                  GIF; máx. 8 MB.
+                </p>
+
+                {fichaCaminhao.foto_url ? (
+                  <a
+                    href={fichaCaminhao.foto_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ display: "block", marginBottom: "12px" }}
+                  >
+                    <img
+                      src={fichaCaminhao.foto_url}
+                      alt={`Caminhão ${fichaCaminhao.placa}`}
+                      style={{
+                        width: "100%",
+                        maxHeight: "280px",
+                        objectFit: "contain",
+                        borderRadius: "12px",
+                        border: "1px solid #e2e8f0",
+                        background: "#f8fafc",
+                      }}
+                    />
+                  </a>
+                ) : (
+                  <div
+                    style={{
+                      padding: "28px 16px",
+                      textAlign: "center",
+                      color: "#94a3b8",
+                      fontSize: "13px",
+                      borderRadius: "12px",
+                      border: "1px dashed #cbd5e1",
+                      background: "#f8fafc",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    Nenhuma fotografia cadastrada.
+                  </div>
+                )}
+
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center" }}>
+                  <input
+                    id={fichaCaminhaoFotoInputId}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    onChange={(e) => void handleEscolherFotoCaminhao(e)}
+                    disabled={enviandoFotoCaminhao}
+                    style={{ display: "none" }}
+                  />
+                  <label
+                    htmlFor={fichaCaminhaoFotoInputId}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      minHeight: "40px",
+                      padding: "0 16px",
+                      borderRadius: "10px",
+                      background: enviandoFotoCaminhao ? "#e2e8f0" : "#0f172a",
+                      color: "#ffffff",
+                      fontWeight: 700,
+                      fontSize: "13px",
+                      cursor: enviandoFotoCaminhao ? "wait" : "pointer",
+                    }}
+                  >
+                    {enviandoFotoCaminhao
+                      ? "A enviar…"
+                      : fichaCaminhao.foto_url
+                        ? "Substituir foto"
+                        : "Carregar foto"}
+                  </label>
+                  {fichaCaminhao.foto_url ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void handleDescarregarFotoCaminhao()}
+                        disabled={enviandoFotoCaminhao}
+                        title="Guardar a imagem no computador"
+                        style={{
+                          minHeight: "40px",
+                          padding: "0 14px",
+                          borderRadius: "10px",
+                          border: "1px solid #cbd5e1",
+                          background: "#ffffff",
+                          color: "#334155",
+                          fontWeight: 700,
+                          fontSize: "13px",
+                          cursor: enviandoFotoCaminhao ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        Descarregar imagem
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleRemoverFotoCaminhao()}
+                        disabled={enviandoFotoCaminhao}
+                        style={{
+                          minHeight: "40px",
+                          padding: "0 14px",
+                          borderRadius: "10px",
+                          border: "1px solid #fecaca",
+                          background: "#ffffff",
+                          color: "#b91c1c",
+                          fontWeight: 700,
+                          fontSize: "13px",
+                          cursor: enviandoFotoCaminhao ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        Remover foto
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "10px",
+                  paddingTop: "4px",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFichaCaminhao(null);
+                    handleEditar(fichaCaminhao);
+                  }}
+                  style={{
+                    background: "#16a34a",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "10px",
+                    height: "40px",
+                    padding: "0 16px",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Editar cadastro
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFichaCaminhao(null)}
+                  style={{
+                    background: "#e5e7eb",
+                    color: "#111827",
+                    border: "none",
+                    borderRadius: "10px",
+                    height: "40px",
+                    padding: "0 16px",
+                    fontWeight: 700,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </MainLayout>
   );
 }
 
-const inputStyle: React.CSSProperties = {
+const inputStyle: CSSProperties = {
   width: "100%",
   height: "40px",
   borderRadius: "10px",
@@ -774,7 +1320,7 @@ const inputStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
-const thStyle: React.CSSProperties = {
+const thStyle: CSSProperties = {
   textAlign: "left",
   padding: "14px 12px",
   color: "#0f172a",
@@ -782,7 +1328,7 @@ const thStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-const tdStyle: React.CSSProperties = {
+const tdStyle: CSSProperties = {
   padding: "12px",
   color: "#1f2937",
   verticalAlign: "middle",

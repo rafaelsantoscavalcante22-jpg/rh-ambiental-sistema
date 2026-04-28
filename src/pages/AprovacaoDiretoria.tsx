@@ -325,7 +325,7 @@ export default function AprovacaoDiretoria() {
       <div className="page-shell">
         <header style={{ marginBottom: 22 }}>
           <h1 style={{ margin: 0, fontSize: '26px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
-            Aprovação da diretoria
+            Decisão sobre o pacote da coleta
           </h1>
           <p className="page-header__lead" style={{ margin: '8px 0 0', maxWidth: 720 }}>
             Decisão sobre o pacote (ticket + contexto) após o ticket operacional e antes do faturamento.

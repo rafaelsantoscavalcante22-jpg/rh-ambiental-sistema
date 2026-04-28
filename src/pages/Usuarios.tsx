@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import MainLayout from '../layouts/MainLayout'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../lib/coletasQueryLimits'
+import { limparSessionDraftKey, useCadastroFormDraft } from '../lib/useCadastroFormDraft'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
 import {
   formatarErroEdgeFunction,
@@ -64,6 +65,16 @@ const estadoInicialEdicao = (): FormEdicaoState => ({
   novaSenha: '',
 })
 
+const USUARIOS_CADASTRO_DRAFT_KEY = 'rg-ambiental-usuarios-cadastro-draft'
+
+type UsuariosCadastroDraftPayload =
+  | { modo: 'criar'; form: FormState }
+  | {
+      modo: 'editar'
+      usuario: Pick<Usuario, 'id' | 'nome' | 'email' | 'cargo' | 'status' | 'created_at'>
+      formEdicao: FormEdicaoState
+    }
+
 function formatarData(data: string | null) {
   if (!data) return '-'
 
@@ -114,6 +125,46 @@ export default function Usuarios() {
   const podeGerenciar = meuCargo === null || souAdministrador
 
   const podeDefinirPaginas = emailPodeDefinirPaginasPorUsuario(meuEmail)
+
+  const cadastroPainelAberto = formularioAberto || usuarioEmEdicao != null
+
+  const usuariosCadastroDraftData = useMemo((): UsuariosCadastroDraftPayload => {
+    if (usuarioEmEdicao) {
+      return {
+        modo: 'editar',
+        usuario: {
+          id: usuarioEmEdicao.id,
+          nome: usuarioEmEdicao.nome,
+          email: usuarioEmEdicao.email,
+          cargo: usuarioEmEdicao.cargo,
+          status: usuarioEmEdicao.status,
+          created_at: usuarioEmEdicao.created_at,
+        },
+        formEdicao,
+      }
+    }
+    return { modo: 'criar', form }
+  }, [usuarioEmEdicao, form, formEdicao])
+
+  useCadastroFormDraft<UsuariosCadastroDraftPayload>({
+    storageKey: USUARIOS_CADASTRO_DRAFT_KEY,
+    open: cadastroPainelAberto,
+    data: usuariosCadastroDraftData,
+    onRestore: (d) => {
+      if (d.modo === 'criar') {
+        setForm(d.form)
+        setFormularioAberto(true)
+        setUsuarioEmEdicao(null)
+        return
+      }
+      setUsuarioEmEdicao({
+        ...d.usuario,
+        paginas_permitidas: null,
+      })
+      setFormEdicao(d.formEdicao)
+      setFormularioAberto(false)
+    },
+  })
 
   const totalUsuarios = useMemo(() => usuarios.length, [usuarios])
 
@@ -317,6 +368,7 @@ export default function Usuarios() {
       setSucesso(data?.message || 'Usuário criado com sucesso.')
       setForm(estadoInicialFormulario)
       setFormularioAberto(false)
+      limparSessionDraftKey(USUARIOS_CADASTRO_DRAFT_KEY)
 
       await carregarUsuarios()
     } catch (err) {
@@ -333,7 +385,11 @@ export default function Usuarios() {
     setForm(estadoInicialFormulario)
     setFormularioAberto((prev) => {
       const abrir = !prev
-      if (abrir) setUsuarioEmEdicao(null)
+      if (abrir) {
+        setUsuarioEmEdicao(null)
+      } else {
+        limparSessionDraftKey(USUARIOS_CADASTRO_DRAFT_KEY)
+      }
       return abrir
     })
   }
@@ -372,6 +428,7 @@ export default function Usuarios() {
   }
 
   function fecharEdicao() {
+    limparSessionDraftKey(USUARIOS_CADASTRO_DRAFT_KEY)
     setUsuarioEmEdicao(null)
     setFormEdicao(estadoInicialEdicao())
     setErro('')
@@ -487,7 +544,7 @@ export default function Usuarios() {
       >
         <div>
           <h1 style={{ margin: 0, fontSize: '26px', fontWeight: 800, color: '#0f172a' }}>
-            Usuários
+            Acessos, perfis e permissões
           </h1>
           <p className="page-header__lead" style={{ margin: '6px 0 0' }}>
             Quem acessa o sistema e com qual perfil (cargo). Criar, editar e excluir é permitido apenas
@@ -665,6 +722,7 @@ export default function Usuarios() {
               <button
                 type="button"
                 onClick={() => {
+                  limparSessionDraftKey(USUARIOS_CADASTRO_DRAFT_KEY)
                   setFormularioAberto(false)
                   setForm(estadoInicialFormulario)
                   setErro('')

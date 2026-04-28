@@ -390,7 +390,7 @@ export default function DashboardLegacy() {
       >
         <div>
           <h1 style={{ margin: 0, fontSize: '26px', color: '#0f172a', fontWeight: 800 }}>
-            Dashboard
+            Indicadores e resumo operacional
           </h1>
           <p className="page-header__lead" style={{ margin: '6px 0 0' }}>
             Resumo operacional e financeiro. O fluxo principal é{' '}

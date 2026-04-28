@@ -14,6 +14,7 @@ import {
 import { normalizarPresencaStatus } from '../../lib/presencaStatus'
 import type { ChatConversaLista, ChatMensagem, ChatUsuarioLista } from '../../types/chat'
 import { useChatFloat } from '../../contexts/ChatFloatContext'
+import { usePresencaAoVivo } from '../../contexts/PresencaAoVivoContext'
 import { ChatSidebarPanel } from './ChatSidebarPanel'
 import { ChatThreadPanel } from './ChatThreadPanel'
 import { RgChatLogo } from './RgChatLogo'
@@ -60,6 +61,7 @@ type Props = {
 
 export function ChatInternoFloating({ naoLidasBadge }: Props) {
   const { open, setOpen, pendingUserId, clearPendingUserId } = useChatFloat()
+  const { isOnline } = usePresencaAoVivo()
 
   const [meuId, setMeuId] = useState<string | null>(null)
   const [erro, setErro] = useState('')
@@ -262,7 +264,7 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
     channelThreadRef.current = null
 
     if (!conversaId || !open) {
-      setMensagens([])
+      queueMicrotask(() => setMensagens([]))
       return
     }
 
@@ -348,19 +350,24 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
     }
     const uid = pendingUserId
     clearPendingUserId()
-    void iniciarComUsuario(uid)
+    queueMicrotask(() => {
+      void iniciarComUsuario(uid)
+    })
   }, [open, meuId, pendingUserId, clearPendingUserId, iniciarComUsuario])
 
   const conversaNaLista = conversaId ? conversas.find((c) => c.id === conversaId) : undefined
   const outroIdEfectivo = conversaNaLista?.outro_id ?? outroIdPainel ?? null
   const outroMeta = outroIdEfectivo ? usuariosPorId.get(outroIdEfectivo) : undefined
   const outroNome = outroMeta?.nome || outroMeta?.email || 'Conversa'
-  const presencaOutro = normalizarPresencaStatus(outroMeta?.presenca_status)
+  const prefOutro = normalizarPresencaStatus(outroMeta?.presenca_status)
+  const presencaOutro = !isOnline(outroIdEfectivo) || prefOutro === 'offline' ? 'offline' : prefOutro
   const mostrarThread = Boolean(conversaId && outroIdEfectivo)
 
   useEffect(() => {
     if (!conversaId || !outroIdPainel) return
-    if (conversas.some((c) => c.id === conversaId)) setOutroIdPainel(null)
+    if (conversas.some((c) => c.id === conversaId)) {
+      queueMicrotask(() => setOutroIdPainel(null))
+    }
   }, [conversaId, conversas, outroIdPainel])
 
   async function handleEnviarTexto(t: string) {
@@ -500,6 +507,7 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
             <div className="chat-interno-shell chat-interno-shell--float">
               <ChatSidebarPanel
                 meuId={meuId || ''}
+                isOnline={isOnline}
                 tab={tab}
                 onTab={handleTab}
                 busca={busca}

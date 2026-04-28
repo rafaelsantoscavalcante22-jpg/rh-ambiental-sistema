@@ -450,7 +450,7 @@ export default function EnvioNF() {
                   color: '#0f172a',
                 }}
               >
-                Envio de NF (mala direta)
+                Mala direta a clientes
               </h1>
               <p className="page-header__lead" style={{ margin: '6px 0 0' }}>
                 Selecione clientes com <strong>e-mail para NF</strong> em <strong>Clientes</strong>. Use{' '}

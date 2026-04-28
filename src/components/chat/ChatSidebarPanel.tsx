@@ -9,6 +9,7 @@ import {
 
 type Props = {
   meuId: string
+  isOnline: (userId: string | null | undefined) => boolean
   tab: 'conversas' | 'pessoas'
   onTab: (t: 'conversas' | 'pessoas') => void
   busca: string
@@ -26,6 +27,7 @@ type Props = {
 
 export function ChatSidebarPanel({
   meuId,
+  isOnline,
   tab,
   onTab,
   busca,
@@ -39,6 +41,13 @@ export function ChatSidebarPanel({
   onStartComUsuario,
   carregandoLista,
 }: Props) {
+  function presencaEfetiva(userId: string | null | undefined, preferenciaRaw: string | null | undefined): PresencaStatus {
+    const pref = normalizarPresencaStatus(preferenciaRaw)
+    if (!isOnline(userId)) return 'offline'
+    if (pref === 'offline') return 'offline'
+    return pref
+  }
+
   function classeDotPresenca(p: PresencaStatus): string {
     if (p === 'ausente') return 'chat-interno-dot chat-interno-dot--ausente'
     if (p === 'offline') return 'chat-interno-dot chat-interno-dot--offline'
@@ -94,7 +103,7 @@ export function ChatSidebarPanel({
               const u = usuariosPorId.get(c.outro_id)
               const nome = u?.nome || u?.email || 'Utilizador'
               const preview = formatarPreviewLista(c.ultima_preview, c.ultima_remetente_id, meuId)
-              const pres = normalizarPresencaStatus(u?.presenca_status)
+              const pres = presencaEfetiva(u?.id, u?.presenca_status)
               const active = conversaSelecionadaId === c.id
               return (
                 <button
@@ -137,7 +146,7 @@ export function ChatSidebarPanel({
           </div>
         ) : (
           usuariosFiltrados.map((u) => {
-            const pres = normalizarPresencaStatus(u.presenca_status)
+            const pres = presencaEfetiva(u.id, u.presenca_status)
             const rotulo = (u.nome || '').trim() || u.email || 'Utilizador'
             return (
               <button

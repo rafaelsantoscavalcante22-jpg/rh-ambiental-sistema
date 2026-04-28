@@ -171,17 +171,19 @@ export function TicketOperacionalPanel({
 
   useEffect(() => {
     if (coletaAtiva) {
-      void carregarDadosImpressao(coletaAtiva)
+      queueMicrotask(() => {
+        void carregarDadosImpressao(coletaAtiva)
+      })
     }
   }, [coletaAtiva, carregarDadosImpressao])
 
   useEffect(() => {
     if (!coletaAtiva) {
-      setPreReqPesagem(false)
+      queueMicrotask(() => setPreReqPesagem(false))
       return
     }
     let cancel = false
-    setCarregandoPreReq(true)
+    queueMicrotask(() => setCarregandoPreReq(true))
     void Promise.resolve(
       supabase
         .from('controle_massa')
@@ -274,18 +276,22 @@ export function TicketOperacionalPanel({
   }, [])
 
   useEffect(() => {
-    setEditandoTicketGerado(false)
+    queueMicrotask(() => setEditandoTicketGerado(false))
   }, [coletaAtiva?.id])
 
   useEffect(() => {
     if (coletaAtiva) {
-      void carregarTicket(coletaAtiva.id)
+      queueMicrotask(() => {
+        void carregarTicket(coletaAtiva.id)
+      })
     } else {
-      setTicketId(null)
-      setNumero('')
-      setDescricao('')
-      setTipoTicket('saida')
-      setCriadoEm(null)
+      queueMicrotask(() => {
+        setTicketId(null)
+        setNumero('')
+        setDescricao('')
+        setTipoTicket('saida')
+        setCriadoEm(null)
+      })
     }
   }, [coletaAtiva, carregarTicket])
 
@@ -614,9 +620,9 @@ export function TicketOperacionalPanel({
             }}
           >
             <div>
-              <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: '#0f172a' }}>
-                Ticket operacional
-              </h2>
+              <h1 style={{ margin: 0, fontSize: '26px', fontWeight: 800, color: '#0f172a' }}>
+                Registo e impressão do ticket interno
+              </h1>
               <p className="page-header__lead" style={{ margin: '8px 0 0', maxWidth: 720 }}>
                 <strong>Seguimento:</strong> após a pesagem no módulo Pesagem e Ticket — registo do{' '}
                 <strong>ticket interno</strong> (distinto da MTR). Depois siga para faturamento/financeiro no menu.

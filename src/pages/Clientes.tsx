@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import MainLayout from "../layouts/MainLayout";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from "../lib/coletasQueryLimits";
 import { sanitizeIlikePattern } from "../lib/sanitizeIlike";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { limparSessionDraftKey, useCadastroFormDraft } from "../lib/useCadastroFormDraft";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+import { clienteEstaAtivo } from "../lib/brasilRegioes";
 
 type Cliente = {
   id: string;
@@ -36,6 +40,8 @@ type Cliente = {
 
   licenca_numero: string | null;
   validade: string | null;
+  status_ativo_desde: string | null;
+  status_inativo_desde: string | null;
 };
 
 type ResiduoForm = {
@@ -69,6 +75,8 @@ type FormCliente = {
 
   licenca_numero: string;
   validade: string;
+  status_ativo_desde: string;
+  status_inativo_desde: string;
 
   residuos: ResiduoForm[];
 };
@@ -104,6 +112,8 @@ const formInicial: FormCliente = {
 
   licenca_numero: "",
   validade: "",
+  status_ativo_desde: "",
+  status_inativo_desde: "",
 
   residuos: [{ ...residuoInicial }],
 };
@@ -119,6 +129,23 @@ function formatarData(data?: string | null) {
   const partes = limpa.split("-");
   if (partes.length !== 3) return data;
   return `${partes[2]}/${partes[1]}/${partes[0]}`;
+}
+
+/** Endereço para relatório: prioriza campos estruturados; senão texto livre de coleta/faturamento. */
+function formatarEnderecoRelatorio(c: Cliente): string {
+  const partes: string[] = [];
+  const linha = [c.rua?.trim(), c.numero?.trim()].filter(Boolean).join(", ");
+  if (linha) partes.push(linha);
+  if (c.complemento?.trim()) partes.push(c.complemento.trim());
+  if (c.bairro?.trim()) partes.push(c.bairro.trim());
+  const uf = c.estado?.trim();
+  if (uf) partes.push(uf);
+  if (c.cep?.trim()) partes.push(`CEP ${c.cep.trim()}`);
+  const estruturado = partes.join(" · ");
+  if (estruturado) return estruturado;
+  const livre = (c.endereco_coleta || c.endereco_faturamento || "").trim();
+  if (livre) return livre;
+  return "-";
 }
 
 function formatarCNPJ(valor: string) {
@@ -179,8 +206,15 @@ function montarResiduosDoCliente(cliente: Cliente): ResiduoForm[] {
   }));
 }
 
-const CLIENTES_SELECT =
+/** Listagem / relatório: sem colunas opcionais recentes, para não falhar se a migração ainda não foi aplicada. */
+const CLIENTES_SELECT_LIST =
   "id, nome, razao_social, cnpj, status, cep, rua, numero, complemento, bairro, cidade, estado, endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade";
+
+const CLIENTES_SELECT_FULL =
+  CLIENTES_SELECT_LIST + ", status_ativo_desde, status_inativo_desde";
+
+/** Rascunho do cadastro: evita perder dados se a aba for recarregada ou descartada pelo navegador. */
+const CLIENTES_CADASTRO_DRAFT_KEY = "rg-ambiental-clientes-cadastro-draft";
 
 export default function Clientes() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -192,22 +226,37 @@ export default function Clientes() {
   const buscaDebounced = useDebouncedValue(busca, 400);
   const [mostrarCadastro, setMostrarCadastro] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [gerandoRelatorio, setGerandoRelatorio] = useState(false);
   const [sucesso, setSucesso] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [alternandoStatusId, setAlternandoStatusId] = useState<string | null>(null);
   const [form, setForm] = useState<FormCliente>(formInicial);
+
+  const termoFiltro = useMemo(() => buscaDebounced.trim(), [buscaDebounced]);
+
+  const cadastroDraftData = useMemo(() => ({ form, editingId }), [form, editingId]);
+  useCadastroFormDraft({
+    storageKey: CLIENTES_CADASTRO_DRAFT_KEY,
+    open: mostrarCadastro,
+    data: cadastroDraftData,
+    onRestore: (d) => {
+      setForm({ ...formInicial, ...d.form });
+      setEditingId(d.editingId);
+      setMostrarCadastro(true);
+    },
+  });
 
   const fetchClientes = useCallback(async () => {
     setLoading(true);
 
-    const term = buscaDebounced.trim();
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
     let countQ = supabase.from("clientes").select("id", { count: "exact", head: true });
-    let dataQ = supabase.from("clientes").select(CLIENTES_SELECT).order("nome", { ascending: true });
+    let dataQ = supabase.from("clientes").select(CLIENTES_SELECT_LIST).order("nome", { ascending: true });
 
-    if (term) {
-      const s = sanitizeIlikePattern(term);
+    if (termoFiltro) {
+      const s = sanitizeIlikePattern(termoFiltro);
       const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
       countQ = countQ.or(orFilter);
       dataQ = dataQ.or(orFilter);
@@ -233,7 +282,123 @@ export default function Clientes() {
 
     setClientes((data as Cliente[]) || []);
     setLoading(false);
-  }, [page, pageSize, buscaDebounced]);
+  }, [page, pageSize, termoFiltro]);
+
+  const fetchClientesRelatorio = useCallback(async (): Promise<Cliente[]> => {
+    const PAGE = 1000;
+    let dataQ = supabase.from("clientes").select(CLIENTES_SELECT_LIST).order("nome", { ascending: true });
+
+    if (termoFiltro) {
+      const s = sanitizeIlikePattern(termoFiltro);
+      const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
+      dataQ = dataQ.or(orFilter);
+    }
+
+    const out: Cliente[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const to = from + PAGE - 1;
+      const { data, error } = await dataQ.range(from, to);
+      if (error) throw error;
+      const chunk = ((data as Cliente[]) || []).filter(Boolean);
+      out.push(...chunk);
+      if (chunk.length < PAGE) break;
+    }
+    return out;
+  }, [termoFiltro]);
+
+  const handleGerarRelatorioPdf = useCallback(async () => {
+    try {
+      setGerandoRelatorio(true);
+      const linhas = await fetchClientesRelatorio();
+
+      const agora = new Date();
+      const dataHora = new Intl.DateTimeFormat("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(agora);
+
+      const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+      const titulo = "Relatório de clientes";
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text(titulo, 40, 36);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Gerado em: ${dataHora}`, 40, 54);
+      doc.text(
+        termoFiltro
+          ? `Buscando por: "${termoFiltro}"`
+          : "Buscando por: todos os clientes (sem filtro de busca)",
+        40,
+        68
+      );
+      doc.text(`Total de registros: ${linhas.length}`, 40, 82);
+
+      autoTable(doc, {
+        startY: 96,
+        head: [[
+          "Nome",
+          "Razão social",
+          "CNPJ",
+          "Cidade",
+          "Endereço",
+          "Responsável",
+          "Telefone",
+          "E-mail",
+          "E-mail NF",
+          "Resíduo",
+          "Classe",
+          "Licença válida até",
+          "Status",
+        ]],
+        body: linhas.map((c) => [
+          c.nome ?? "",
+          c.razao_social ?? "",
+          c.cnpj ?? "",
+          c.cidade ?? "-",
+          formatarEnderecoRelatorio(c),
+          c.responsavel_nome?.trim() || "-",
+          c.telefone?.trim() || "-",
+          c.email?.trim() || "-",
+          c.email_nf?.trim() || "-",
+          c.tipo_residuo ?? "-",
+          c.classificacao ?? "-",
+          formatarData(c.validade),
+          c.status ?? "Ativo",
+        ]),
+        styles: { fontSize: 7, cellPadding: 3, overflow: "linebreak" },
+        headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 7 },
+        margin: { left: 40, right: 40 },
+        tableWidth: "auto",
+        columnStyles: {
+          0: { cellWidth: 62 },
+          1: { cellWidth: 72 },
+          2: { cellWidth: 58 },
+          3: { cellWidth: 44 },
+          4: { cellWidth: 78 },
+          5: { cellWidth: 48 },
+          6: { cellWidth: 46 },
+          7: { cellWidth: 54 },
+          8: { cellWidth: 50 },
+          9: { cellWidth: 44 },
+          10: { cellWidth: 34 },
+          11: { cellWidth: 40 },
+          12: { cellWidth: 34 },
+        },
+      });
+
+      const iso = agora.toISOString().slice(0, 10);
+      doc.save(`relatorio-clientes_${iso}.pdf`);
+    } catch (err) {
+      console.error("Erro ao gerar relatório de clientes:", err);
+      alert("Não foi possível gerar o relatório em PDF. Tente novamente.");
+    } finally {
+      setGerandoRelatorio(false);
+    }
+  }, [fetchClientesRelatorio, termoFiltro]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -300,6 +465,7 @@ export default function Clientes() {
   }
 
   function limparFormulario() {
+    limparSessionDraftKey(CLIENTES_CADASTRO_DRAFT_KEY);
     setForm(formInicial);
     setEditingId(null);
   }
@@ -310,33 +476,46 @@ export default function Clientes() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function handleEditar(cliente: Cliente) {
+  async function handleEditar(cliente: Cliente) {
+    const { data: fullRow, error } = await supabase
+      .from("clientes")
+      .select(CLIENTES_SELECT_FULL)
+      .eq("id", cliente.id)
+      .maybeSingle();
+
+    let row: Cliente = cliente
+    if (!error && fullRow && typeof fullRow === "object" && fullRow !== null && "id" in fullRow) {
+      row = fullRow as Cliente
+    }
+
     setForm({
-      nome: cliente.nome || "",
-      razao_social: cliente.razao_social || "",
-      cnpj: cliente.cnpj || "",
-      status: cliente.status || "Ativo",
+      nome: row.nome || "",
+      razao_social: row.razao_social || "",
+      cnpj: row.cnpj || "",
+      status: row.status || "Ativo",
 
-      cep: cliente.cep || "",
-      rua: cliente.rua || "",
-      numero: cliente.numero || "",
-      complemento: cliente.complemento || "",
-      bairro: cliente.bairro || "",
-      cidade: cliente.cidade || "",
-      estado: cliente.estado || "",
+      cep: row.cep || "",
+      rua: row.rua || "",
+      numero: row.numero || "",
+      complemento: row.complemento || "",
+      bairro: row.bairro || "",
+      cidade: row.cidade || "",
+      estado: row.estado || "",
 
-      endereco_coleta: cliente.endereco_coleta || "",
-      endereco_faturamento: cliente.endereco_faturamento || "",
-      email_nf: cliente.email_nf || "",
+      endereco_coleta: row.endereco_coleta || "",
+      endereco_faturamento: row.endereco_faturamento || "",
+      email_nf: row.email_nf || "",
 
-      responsavel_nome: cliente.responsavel_nome || "",
-      telefone: cliente.telefone || "",
-      email: cliente.email || "",
+      responsavel_nome: row.responsavel_nome || "",
+      telefone: row.telefone || "",
+      email: row.email || "",
 
-      licenca_numero: cliente.licenca_numero || "",
-      validade: cliente.validade || "",
+      licenca_numero: row.licenca_numero || "",
+      validade: row.validade || "",
+      status_ativo_desde: row.status_ativo_desde ?? "",
+      status_inativo_desde: row.status_inativo_desde ?? "",
 
-      residuos: montarResiduosDoCliente(cliente),
+      residuos: montarResiduosDoCliente(row),
     });
 
     setEditingId(cliente.id);
@@ -398,6 +577,8 @@ export default function Clientes() {
       licenca_numero: limparOuNull(form.licenca_numero),
       validade: limparOuNull(form.validade),
       status: form.status?.trim() || "Ativo",
+      status_ativo_desde: limparOuNull(form.status_ativo_desde),
+      status_inativo_desde: limparOuNull(form.status_inativo_desde),
     };
 
     let error: PostgrestError | null = null;
@@ -467,6 +648,19 @@ export default function Clientes() {
     await fetchClientes();
   }
 
+  async function alternarInativoRapido(cliente: Cliente, marcarInativo: boolean) {
+    const novoStatus = marcarInativo ? "Inativo" : "Ativo";
+    setAlternandoStatusId(cliente.id);
+    const { error } = await supabase.from("clientes").update({ status: novoStatus }).eq("id", cliente.id);
+    setAlternandoStatusId(null);
+    if (error) {
+      console.error("Erro ao atualizar status do cliente:", error);
+      alert(`Erro ao atualizar status.\n\n${error.message}`);
+      return;
+    }
+    setClientes((prev) => prev.map((c) => (c.id === cliente.id ? { ...c, status: novoStatus } : c)));
+  }
+
   const totalPaginas =
     totalCount != null && totalCount > 0 ? Math.max(1, Math.ceil(totalCount / pageSize)) : 1;
 
@@ -516,7 +710,7 @@ export default function Clientes() {
                 color: "#0f172a",
               }}
             >
-              Clientes
+              Cadastro da carteira de clientes
             </h1>
             <p className="page-header__lead" style={{ margin: "6px 0 0" }}>
               Cadastro base para <strong>Programação</strong>, <strong>MTR</strong>,{" "}
@@ -554,6 +748,27 @@ export default function Clientes() {
                 {totalExibidoKpi}
               </div>
             </div>
+
+            <button
+              type="button"
+              disabled={gerandoRelatorio}
+              onClick={() => void handleGerarRelatorioPdf()}
+              style={{
+                background: "#0f172a",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "12px",
+                height: "50px",
+                padding: "0 18px",
+                fontWeight: 800,
+                cursor: gerandoRelatorio ? "not-allowed" : "pointer",
+                alignSelf: "stretch",
+                opacity: gerandoRelatorio ? 0.85 : 1,
+              }}
+              title="Gera um PDF com todos os clientes conforme o filtro atual"
+            >
+              {gerandoRelatorio ? "Gerando PDF..." : "Relatório (PDF)"}
+            </button>
 
             <button
               type="button"
@@ -663,6 +878,33 @@ export default function Clientes() {
                     <option value="Ativo">Ativo</option>
                     <option value="Inativo">Inativo</option>
                   </select>
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: "12px",
+                    marginTop: "12px",
+                  }}
+                >
+                  <input
+                    type="date"
+                    name="status_ativo_desde"
+                    value={form.status_ativo_desde}
+                    onChange={handleInputChange}
+                    aria-label="Ativo desde"
+                    title="Ativo desde (opcional)"
+                    style={inputStyle}
+                  />
+                  <input
+                    type="date"
+                    name="status_inativo_desde"
+                    value={form.status_inativo_desde}
+                    onChange={handleInputChange}
+                    aria-label="Inativo desde"
+                    title="Inativo desde (opcional)"
+                    style={inputStyle}
+                  />
                 </div>
               </div>
 
@@ -1111,10 +1353,13 @@ export default function Clientes() {
             <input
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
-              placeholder="Busca (aguarda digitar — nome, razão social, CNPJ, cidade…)"
+              placeholder="Busca (aguarda digitar — nome, razão social, CNPJ, cidade, e-mail NF, resíduo, endereços…)"
+              title="Filtra por nome, razão social, CNPJ, cidade, tipo de resíduo, status, e-mail NF ou endereços de coleta/faturamento."
               style={{
-                width: "360px",
-                maxWidth: "100%",
+                flex: "1 1 280px",
+                width: "100%",
+                maxWidth: "560px",
+                minWidth: "240px",
                 height: "40px",
                 borderRadius: "10px",
                 border: "1px solid #d1d5db",
@@ -1139,10 +1384,11 @@ export default function Clientes() {
               Carregando clientes...
             </div>
           ) : (
-            <div style={{ overflowX: "auto" }}>
+            <div style={{ overflowX: "hidden", WebkitOverflowScrolling: "touch" }}>
               <table
                 style={{
                   width: "100%",
+                  tableLayout: "fixed",
                   borderCollapse: "collapse",
                   fontSize: "14px",
                 }}
@@ -1154,89 +1400,209 @@ export default function Clientes() {
                       borderBottom: "1px solid #e5e7eb",
                     }}
                   >
-                    <th style={thStyle}>Nome</th>
-                    <th style={thStyle}>Razão social</th>
-                    <th style={thStyle}>CNPJ</th>
-                    <th style={thStyle}>Cidade</th>
-                    <th style={thStyle}>E-mail NF</th>
-                    <th style={thStyle}>Resíduo</th>
-                    <th style={thStyle}>Classe</th>
-                    <th style={thStyle}>Licença válida até</th>
-                    <th style={thStyle}>Status</th>
-                    <th style={thStyle}>Ações</th>
+                    <th
+                      style={{
+                        ...thStyle,
+                        width: "4%",
+                        minWidth: 56,
+                        maxWidth: 72,
+                        textAlign: "center",
+                        padding: "10px 6px",
+                      }}
+                      title="Marcar cliente como inativo na lista"
+                    >
+                      Inativo
+                    </th>
+                    <th style={{ ...thStyle, width: "18%" }} title="Nome e localização (cidade e UF)">
+                      Cliente
+                    </th>
+                    <th style={{ ...thStyle, width: "16%" }}>Razão social</th>
+                    <th style={{ ...thStyle, width: "10%", whiteSpace: "nowrap" }}>CNPJ</th>
+                    <th style={{ ...thStyle, width: "12%" }}>E-mail NF</th>
+                    <th style={{ ...thStyle, width: "14%" }}>Resíduo</th>
+                    <th style={{ ...thStyle, width: "5%", whiteSpace: "nowrap" }}>Classe</th>
+                    <th
+                      scope="col"
+                      style={{
+                        ...thStyle,
+                        width: "7%",
+                        whiteSpace: "normal",
+                        lineHeight: 1.25,
+                      }}
+                      title="Licença válida até"
+                    >
+                      Validade
+                    </th>
+                    <th style={{ ...thStyle, width: "6%", whiteSpace: "nowrap" }}>Status</th>
+                    <th style={{ ...thStyle, width: "8%", whiteSpace: "nowrap" }}>Ações</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {clientes.map((cliente) => (
+                  {clientes.map((cliente) => {
+                    const linhaInativa = !clienteEstaAtivo(cliente.status);
+                    return (
                     <tr
                       key={cliente.id}
                       style={{
                         borderBottom: "1px solid #eef2f7",
+                        backgroundColor: linhaInativa ? "#fef2f2" : undefined,
                       }}
                     >
-                      <td style={tdStyle}>{cliente.nome}</td>
-                      <td style={tdStyle}>{cliente.razao_social}</td>
-                      <td style={tdStyle}>{cliente.cnpj}</td>
-                      <td style={tdStyle}>{cliente.cidade || "-"}</td>
                       <td
                         style={{
                           ...tdStyle,
-                          maxWidth: "200px",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
+                          ...tdNowrap,
+                          width: "4%",
+                          minWidth: 56,
+                          textAlign: "center",
+                          verticalAlign: "middle",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={linhaInativa}
+                          disabled={alternandoStatusId === cliente.id}
+                          onChange={(e) => void alternarInativoRapido(cliente, e.target.checked)}
+                          aria-label={
+                            linhaInativa
+                              ? "Desmarcar inativo (voltar a ativo)"
+                              : "Marcar como inativo"
+                          }
+                          title={linhaInativa ? "Cliente inativo — desmarque para reativar" : "Marcar como inativo"}
+                          style={{ width: 18, height: 18, cursor: alternandoStatusId === cliente.id ? "wait" : "pointer" }}
+                        />
+                      </td>
+                      <td style={tdStyle}>
+                        {(() => {
+                          const nomeBruto = (cliente.nome ?? "").trim();
+                          const sep = " — ";
+                          const idx = nomeBruto.indexOf(sep);
+                          const parteNome = idx >= 0 ? nomeBruto.slice(0, idx) : nomeBruto;
+                          const parteSufixo = idx >= 0 ? nomeBruto.slice(idx) : "";
+                          const labelEdicao =
+                            parteNome || cliente.razao_social?.trim() || "cliente";
+                          return (
+                            <>
+                              <div
+                                style={{
+                                  fontWeight: 700,
+                                  color: "#0f172a",
+                                  lineHeight: 1.4,
+                                  wordBreak: "break-word",
+                                }}
+                              >
+                                {parteNome ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleEditar(cliente)}
+                                      style={nomeClienteEditarBtnStyle}
+                                      title="Abrir cadastro para edição"
+                                      aria-label={`Editar ${labelEdicao}`}
+                                    >
+                                      {parteNome}
+                                    </button>
+                                    {parteSufixo ? (
+                                      <span style={{ fontWeight: 700, color: "#0f172a" }}>{parteSufixo}</span>
+                                    ) : null}
+                                  </>
+                                ) : cliente.razao_social?.trim() ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleEditar(cliente)}
+                                    style={nomeClienteEditarBtnStyle}
+                                    title="Abrir cadastro para edição"
+                                    aria-label={`Editar ${cliente.razao_social.trim()}`}
+                                  >
+                                    {cliente.razao_social.trim()}
+                                  </button>
+                                ) : (
+                                  <span style={{ color: "#64748b" }}>—</span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>
+                                {[cliente.cidade, cliente.estado].filter(Boolean).join(" · ") || "—"}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </td>
+                      <td style={tdStyle}>{cliente.razao_social || "—"}</td>
+                      <td style={{ ...tdStyle, ...tdNowrap }}>{cliente.cnpj || "—"}</td>
+                      <td
+                        style={{
+                          ...tdStyle,
+                          wordBreak: "break-all",
                         }}
                         title={cliente.email_nf || undefined}
                       >
                         {cliente.email_nf || "-"}
                       </td>
                       <td style={tdStyle}>{cliente.tipo_residuo || "-"}</td>
-                      <td style={tdStyle}>{cliente.classificacao || "-"}</td>
-                      <td style={tdStyle}>{formatarData(cliente.validade)}</td>
-                      <td style={tdStyle}>{cliente.status || "Ativo"}</td>
-                      <td style={tdStyle}>
+                      <td style={{ ...tdStyle, ...tdNowrap }}>{cliente.classificacao || "-"}</td>
+                      <td style={{ ...tdStyle, ...tdNowrap }}>{formatarData(cliente.validade)}</td>
+                      <td style={{ ...tdStyle, ...tdNowrap }}>{cliente.status || "Ativo"}</td>
+                      <td
+                        style={{
+                          ...tdStyle,
+                          ...tdNowrap,
+                          verticalAlign: "middle",
+                        }}
+                      >
                         <div
+                          role="group"
+                          aria-label="Ações do cliente"
                           style={{
                             display: "flex",
-                            gap: "8px",
+                            flexDirection: "row",
+                            flexWrap: "nowrap",
                             alignItems: "center",
+                            gap: "5px",
                           }}
                         >
                           <button
                             type="button"
-                            onClick={() => handleEditar(cliente)}
+                            onClick={() => void handleEditar(cliente)}
                             style={{
+                              flex: "0 0 auto",
                               background: "#16a34a",
                               color: "#ffffff",
                               border: "none",
-                              borderRadius: "8px",
-                              padding: "7px 14px",
+                              borderRadius: "6px",
+                              padding: "5px 9px",
                               fontWeight: 700,
+                              fontSize: "11px",
+                              lineHeight: 1.2,
                               cursor: "pointer",
+                              boxShadow: "0 1px 2px rgba(22, 163, 74, 0.25)",
                             }}
                           >
                             Editar
                           </button>
-
                           <button
                             type="button"
                             onClick={() => handleDelete(cliente.id)}
                             style={{
-                              background: "#ef4444",
-                              color: "#ffffff",
-                              border: "none",
-                              borderRadius: "8px",
-                              padding: "7px 14px",
+                              flex: "0 0 auto",
+                              background: "#ffffff",
+                              color: "#b91c1c",
+                              border: "1px solid #fecaca",
+                              borderRadius: "6px",
+                              padding: "5px 9px",
                               fontWeight: 700,
+                              fontSize: "11px",
+                              lineHeight: 1.2,
                               cursor: "pointer",
                             }}
                           >
-                            Remover
+                            Excluir
                           </button>
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                  })}
 
                   {clientes.length === 0 && (
                     <tr>
@@ -1367,12 +1733,41 @@ const thStyle: React.CSSProperties = {
   padding: "14px 12px",
   color: "#0f172a",
   fontWeight: 800,
+  whiteSpace: "normal",
+  lineHeight: 1.35,
+  verticalAlign: "bottom",
+  hyphens: "auto",
+};
+
+/** Células de texto longo — quebram dentro da coluna (evita scroll horizontal). */
+const tdStyle: React.CSSProperties = {
+  padding: "12px 10px",
+  color: "#1f2937",
+  verticalAlign: "middle",
+  whiteSpace: "normal",
+  wordBreak: "break-word",
+  overflowWrap: "anywhere",
+  lineHeight: 1.35,
+};
+
+const tdNowrap: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-const tdStyle: React.CSSProperties = {
-  padding: "12px",
-  color: "#1f2937",
-  verticalAlign: "middle",
-  whiteSpace: "nowrap",
+/** Botão invisível com aspecto de hiperligação — abre o formulário de edição (mesmo fluxo que «Editar»). */
+const nomeClienteEditarBtnStyle: React.CSSProperties = {
+  display: "inline",
+  padding: 0,
+  margin: 0,
+  border: "none",
+  background: "transparent",
+  font: "inherit",
+  fontWeight: 700,
+  color: "#15803d",
+  cursor: "pointer",
+  textAlign: "left",
+  textDecoration: "underline",
+  textUnderlineOffset: "2px",
+  textDecorationThickness: "1px",
+  textDecorationColor: "rgba(21, 128, 61, 0.4)",
 };

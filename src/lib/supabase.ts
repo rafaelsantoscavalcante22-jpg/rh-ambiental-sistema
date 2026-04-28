@@ -15,4 +15,15 @@ if (!supabaseAnonKey) {
   throw new Error("VITE_SUPABASE_ANON_KEY não definida no arquivo .env");
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+/**
+ * Cliente único do Supabase. Sessão em `localStorage` (padrão) — adequado para reabrir a app
+ * sem rede e alinhar com PWA. O service worker (produção) usa NetworkFirst em `/rest/v1/` para
+ * reutilizar a última resposta GET quando offline; `/auth/v1/` permanece sempre em rede.
+ */
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});

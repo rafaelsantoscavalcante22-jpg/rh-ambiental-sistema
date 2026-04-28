@@ -234,7 +234,7 @@ function ProgramacaoRelatorioPrintRoot(p: ProgramacaoRelatorioPrintProps) {
           alt="RG Ambiental"
           decoding="async"
         />
-        <h1 className="programacao-relatorio-print__title">Relatório de programações</h1>
+        <h1 className="programacao-relatorio-print__title">Calendário: visitas e coletas (impressão)</h1>
         <p className="programacao-relatorio-print__meta">
           Filtro: {p.filtroLabel}
           <br />
@@ -1273,7 +1273,7 @@ export default function Programacao() {
       >
         <div style={{ flex: '1', minWidth: 'min(100%, 260px)' }}>
           <h1 style={{ margin: 0, fontSize: '26px', color: '#0f172a', fontWeight: 800 }}>
-            Programação
+            Calendário das programações de Coleta
           </h1>
           <p className="page-header__lead" style={{ margin: '6px 0 0' }}>
             <strong>Fluxo:</strong> Programação → MTR → Controle de Massa (pesagem). Monte o calendário e

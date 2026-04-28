@@ -88,7 +88,7 @@ export function ExecutivePrintReportRoot(p: ExecutivePrintReportProps) {
           alt="RG Ambiental"
         />
       </header>
-      <h1 className="exec-print-report__title">Relatório gerencial — Visão executiva</h1>
+      <h1 className="exec-print-report__title">Relatório gerencial — síntese e prioridades do período</h1>
       <p className="exec-print-report__meta">
         Emitido em <strong>{p.geradoEmLabel}</strong>
       </p>

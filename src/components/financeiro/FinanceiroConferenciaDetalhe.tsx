@@ -109,18 +109,20 @@ export function FinanceiroConferenciaDetalhe({
   const saldo = Math.max(0, vTot - vPago)
 
   useEffect(() => {
-    setBaixaValor('')
-    setBaixaObs('')
+    queueMicrotask(() => {
+      setBaixaValor('')
+      setBaixaObs('')
+    })
   }, [item.id])
 
   useEffect(() => {
     const contaId = (item.contaReceberId || '').trim()
     if (!contaId) {
-      setBaixasHistorico([])
+      queueMicrotask(() => setBaixasHistorico([]))
       return
     }
     let cancelado = false
-    setCarregandoHistoricoBaixas(true)
+    queueMicrotask(() => setCarregandoHistoricoBaixas(true))
     void (async () => {
       const { data, error } = await supabase
         .from('contas_receber_baixas')

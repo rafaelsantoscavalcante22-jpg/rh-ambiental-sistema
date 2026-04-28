@@ -893,7 +893,7 @@ export default function Financeiro() {
       >
         <div>
           <h1 style={{ margin: 0, fontSize: '26px', color: '#0f172a', fontWeight: 800 }}>
-            Financeiro
+            Faturamento, cobrança e documentos
           </h1>
           <p className="page-header__lead" style={{ margin: '6px 0 0', maxWidth: '920px' }}>
             Primeiro consolide o <strong>faturamento</strong> (coletas já pesadas no fluxo); em seguida utilize a

@@ -211,7 +211,7 @@ export default function FaturamentoOperacional() {
     <MainLayout>
       <div className="page-shell">
         <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
-          Faturamento
+          Consolidação e emissão por coleta
         </h1>
         <p className="page-header__lead" style={{ margin: '10px 0 0', maxWidth: 760, lineHeight: 1.65 }}>
           Consolidação de coletas já pesadas. <strong>Não cria</strong> dados operacionais: você registra valores e, ao emitir,

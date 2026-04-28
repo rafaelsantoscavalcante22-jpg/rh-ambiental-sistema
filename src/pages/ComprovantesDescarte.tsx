@@ -128,7 +128,7 @@ export default function ComprovantesDescarte() {
       <div className="cd-page">
         <div className="cd-page__hero">
           <div>
-            <h1 className="cd-page__title">Comprovante de Descarte</h1>
+            <h1 className="cd-page__title">Registo e imagens de descarte</h1>
             <p className="cd-page__lead">
               Registo técnico da comprovação do descarte, com rastreio de pesagem, intervenientes e
               imagens de suporte para auditoria e faturamento.
