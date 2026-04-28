@@ -32,3 +32,6 @@ dist-ssr
 
 # Segredos só para `supabase secrets set` local (nunca commitar)
 supabase/.secrets.edge.env
+
+# Agregado local de migrações (gerado; não versionar)
+supabase/_bundle_all_migrations.sql

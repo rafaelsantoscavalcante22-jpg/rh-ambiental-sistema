@@ -232,12 +232,12 @@ export default function FaturamentoOperacional() {
               fontSize: '14px',
             }}
           >
-            {erroVista}{' '}
+            <span style={{ whiteSpace: 'pre-wrap', display: 'block' }}>{erroVista}</span>
             <button
               type="button"
               onClick={() => void carregarVista()}
               style={{
-                marginTop: '8px',
+                marginTop: '12px',
                 padding: '6px 12px',
                 borderRadius: '8px',
                 border: '1px solid #991b1b',

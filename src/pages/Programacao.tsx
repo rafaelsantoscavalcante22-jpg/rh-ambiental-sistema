@@ -7,6 +7,7 @@ import { chunkArray } from '../lib/chunkArray'
 import { supabase } from '../lib/supabase'
 import { cargoPodeEditarProgramacao } from '../lib/workflowPermissions'
 import { BRAND_LOGO_MARK } from '../lib/brandLogo'
+import { RgReportPdfIcon } from '../components/ui/RgReportPdfIcon'
 
 type ClienteOption = {
   id: string
@@ -1299,7 +1300,8 @@ export default function Programacao() {
         </div>
         <button
           type="button"
-          style={programacaoRelatorioHeaderBtnStyle}
+          className="rg-btn rg-btn--report"
+          style={{ flexShrink: 0, alignSelf: 'flex-start' }}
           onClick={() => {
             setRelatorioDiaRef(todayIsoLocal())
             setRelatorioMesRef(mesSelecionado)
@@ -1308,14 +1310,15 @@ export default function Programacao() {
           }}
           aria-label="Abrir relatório de programações"
         >
-          Relatório
+          <RgReportPdfIcon className="rg-btn__icon" />
+          Relatório (PDF)
         </button>
       </div>
 
       <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
         <button
           type="button"
-          style={botaoSecundarioStyle}
+          className="rg-btn rg-btn--outline"
           onClick={carregarDados}
           disabled={loading}
         >
@@ -1361,7 +1364,7 @@ export default function Programacao() {
           {itemContextoResolvido ? (
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
               {itemContextoResolvido.mtrId ? (
-                <button type="button" style={botaoSecundarioStyle} onClick={() => irMtr(itemContextoResolvido)}>
+                <button type="button" className="rg-btn rg-btn--outline" onClick={() => irMtr(itemContextoResolvido)}>
                   MTR
                 </button>
               ) : null}
@@ -1369,21 +1372,21 @@ export default function Programacao() {
                 <>
                   <button
                     type="button"
-                    style={botaoSecundarioStyle}
+                    className="rg-btn rg-btn--outline"
                     onClick={() => irControleMassa(itemContextoResolvido)}
                   >
                     Controle de Massa
                   </button>
                   <button
                     type="button"
-                    style={botaoSecundarioStyle}
+                    className="rg-btn rg-btn--outline"
                     onClick={() => irFaturamento(itemContextoResolvido)}
                   >
                     Faturamento
                   </button>
                   <button
                     type="button"
-                    style={botaoSecundarioStyle}
+                    className="rg-btn rg-btn--outline"
                     onClick={() => irFinanceiro(itemContextoResolvido)}
                   >
                     Financeiro
@@ -1440,8 +1443,8 @@ export default function Programacao() {
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
               <button
                 type="submit"
+                className="rg-btn rg-btn--primary"
                 style={{
-                  ...botaoPrimarioStyle,
                   opacity: salvando || !podeMutarProgramacao ? 0.55 : 1,
                   cursor: salvando || !podeMutarProgramacao ? 'not-allowed' : 'pointer',
                 }}
@@ -1457,7 +1460,7 @@ export default function Programacao() {
 
               <button
                 type="button"
-                style={botaoSecundarioStyle}
+                className="rg-btn rg-btn--outline"
                 onClick={limparFormulario}
               >
                 Limpar
@@ -1758,7 +1761,7 @@ export default function Programacao() {
                               {item.mtrId ? (
                                 <button
                                   type="button"
-                                  style={botaoSecundarioStyle}
+                                  className="rg-btn rg-btn--outline"
                                   onClick={() => irMtr(item)}
                                   title="Abrir MTR desta programação"
                                 >
@@ -1769,7 +1772,7 @@ export default function Programacao() {
                                 <>
                                   <button
                                     type="button"
-                                    style={botaoSecundarioStyle}
+                                    className="rg-btn rg-btn--outline"
                                     onClick={() => irControleMassa(item)}
                                     title="Abrir Controle de Massa desta coleta"
                                   >
@@ -1777,7 +1780,7 @@ export default function Programacao() {
                                   </button>
                                   <button
                                     type="button"
-                                    style={botaoSecundarioStyle}
+                                    className="rg-btn rg-btn--outline"
                                     onClick={() => irFaturamento(item)}
                                     title="Abrir Faturamento desta coleta"
                                   >
@@ -1980,7 +1983,7 @@ export default function Programacao() {
                         {item.mtrId ? (
                           <button
                             type="button"
-                            style={botaoSecundarioStyle}
+                            className="rg-btn rg-btn--outline"
                             onClick={() => {
                               irMtr(item)
                               setDiaPainelCalendario(null)
@@ -1994,7 +1997,7 @@ export default function Programacao() {
                           <>
                             <button
                               type="button"
-                              style={botaoSecundarioStyle}
+                              className="rg-btn rg-btn--outline"
                               onClick={() => {
                                 irControleMassa(item)
                                 setDiaPainelCalendario(null)
@@ -2005,7 +2008,7 @@ export default function Programacao() {
                             </button>
                             <button
                               type="button"
-                              style={botaoSecundarioStyle}
+                              className="rg-btn rg-btn--outline"
                               onClick={() => {
                                 irFaturamento(item)
                                 setDiaPainelCalendario(null)
@@ -2016,7 +2019,7 @@ export default function Programacao() {
                             </button>
                             <button
                               type="button"
-                              style={botaoSecundarioStyle}
+                              className="rg-btn rg-btn--outline"
                               onClick={() => {
                                 irFinanceiro(item)
                                 setDiaPainelCalendario(null)
@@ -2236,7 +2239,7 @@ export default function Programacao() {
                               {item.mtrId ? (
                                 <button
                                   type="button"
-                                  style={botaoSecundarioStyle}
+                                  className="rg-btn rg-btn--outline"
                                   onClick={() => {
                                     irMtr(item)
                                     setRelatorioAberto(false)
@@ -2249,7 +2252,7 @@ export default function Programacao() {
                                 <>
                                   <button
                                     type="button"
-                                    style={botaoSecundarioStyle}
+                                    className="rg-btn rg-btn--outline"
                                     onClick={() => {
                                       irControleMassa(item)
                                       setRelatorioAberto(false)
@@ -2259,7 +2262,7 @@ export default function Programacao() {
                                   </button>
                                   <button
                                     type="button"
-                                    style={botaoSecundarioStyle}
+                                    className="rg-btn rg-btn--outline"
                                     onClick={() => {
                                       irFaturamento(item)
                                       setRelatorioAberto(false)
@@ -2295,12 +2298,12 @@ export default function Programacao() {
             )}
 
             <div style={relatorioModalAcoesStyle}>
-              <button type="button" style={botaoSecundarioStyle} onClick={() => setRelatorioAberto(false)}>
+              <button type="button" className="rg-btn rg-btn--outline" onClick={() => setRelatorioAberto(false)}>
                 Fechar
               </button>
               <button
                 type="button"
-                style={botaoPrimarioStyle}
+                className="rg-btn rg-btn--report"
                 onClick={() =>
                   setRelatorioPrintTick((prev) => ({
                     n: prev.n + 1,
@@ -2309,6 +2312,7 @@ export default function Programacao() {
                 }
                 title="Abre a impressão do navegador — escolha &quot;Salvar como PDF&quot; se disponível"
               >
+                <RgReportPdfIcon className="rg-btn__icon" />
                 Imprimir / PDF
               </button>
             </div>
@@ -2380,8 +2384,8 @@ export default function Programacao() {
               >
                 <button
                   type="submit"
+                  className="rg-btn rg-btn--primary"
                   style={{
-                    ...botaoPrimarioStyle,
                     opacity: salvandoEdicaoModal || !podeMutarProgramacao ? 0.55 : 1,
                     cursor:
                       salvandoEdicaoModal || !podeMutarProgramacao ? 'not-allowed' : 'pointer',
@@ -2395,7 +2399,7 @@ export default function Programacao() {
                 >
                   {salvandoEdicaoModal ? 'Salvando...' : 'Salvar alterações'}
                 </button>
-                <button type="button" style={botaoSecundarioStyle} onClick={fecharModalEdicao}>
+                <button type="button" className="rg-btn rg-btn--outline" onClick={fecharModalEdicao}>
                   Cancelar
                 </button>
               </div>
@@ -2511,36 +2515,6 @@ const checkboxLabelStyle: CSSProperties = {
   color: '#0f172a',
   fontWeight: 600,
   fontSize: '14px',
-}
-
-const botaoPrimarioStyle: CSSProperties = {
-  background: '#16a34a',
-  color: '#ffffff',
-  border: 'none',
-  borderRadius: '12px',
-  height: '42px',
-  padding: '0 18px',
-  fontWeight: 800,
-  cursor: 'pointer',
-}
-
-const programacaoRelatorioHeaderBtnStyle: CSSProperties = {
-  ...botaoPrimarioStyle,
-  flexShrink: 0,
-  alignSelf: 'flex-start',
-  whiteSpace: 'nowrap',
-  boxShadow: '0 1px 3px rgba(22, 163, 74, 0.35)',
-}
-
-const botaoSecundarioStyle: CSSProperties = {
-  background: '#ffffff',
-  color: '#0f172a',
-  border: '1px solid #d1d5db',
-  borderRadius: '12px',
-  height: '42px',
-  padding: '0 18px',
-  fontWeight: 700,
-  cursor: 'pointer',
 }
 
 const erroStyle: CSSProperties = {

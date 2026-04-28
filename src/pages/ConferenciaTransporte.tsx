@@ -29,6 +29,7 @@ import { queryColetasListaResumoFluxo } from '../lib/coletasSelectSeguimento'
 import { cargoPodeEditarChecklistTransporte } from '../lib/workflowPermissions'
 import { BRAND_LOGO_MARK } from '../lib/brandLogo'
 import ChecklistTransporte from '../components/ChecklistTransporte'
+import { RgReportPdfIcon } from '../components/ui/RgReportPdfIcon'
 
 type ColetaResumo = {
   id: string
@@ -675,20 +676,12 @@ export default function ConferenciaTransporte() {
             <div style={{ marginTop: 22 }}>
               <button
                 type="button"
+                className="rg-btn rg-btn--report"
                 onClick={imprimirDocumentoUnificado}
-                style={{
-                  padding: '12px 32px',
-                  borderRadius: '12px',
-                  border: 'none',
-                  background: ACCENT,
-                  color: '#fff',
-                  fontWeight: 700,
-                  fontSize: '15px',
-                  cursor: 'pointer',
-                  boxShadow: '0 2px 8px rgba(13, 148, 136, 0.35)',
-                }}
+                style={{ paddingLeft: 24, paddingRight: 24 }}
               >
-                Imprimir PDF
+                <RgReportPdfIcon className="rg-btn__icon" />
+                Relatório (PDF)
               </button>
             </div>
           ) : null}

@@ -13,6 +13,7 @@ import {
   resolverUfSigla,
 } from '../lib/brasilRegioes'
 import { BrasilMapaEstados } from '../components/posvenda/BrasilMapaEstados'
+import { RgReportPdfIcon } from '../components/ui/RgReportPdfIcon'
 import { CarteiraStatusHistorico } from '../components/posvenda/CarteiraStatusHistorico'
 
 type ClienteRow = {
@@ -676,46 +677,21 @@ export default function PosVenda() {
                 assumem clientes que já tenham pelo menos uma coleta registada no sistema.
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              <Link
-                to="/clientes"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  background: '#0f172a',
-                  color: '#ffffff',
-                  borderRadius: '12px',
-                  height: '48px',
-                  padding: '0 18px',
-                  fontWeight: 800,
-                  fontSize: '14px',
-                  textDecoration: 'none',
-                }}
-              >
+            <div className="rg-page-toolbar">
+              <Link to="/clientes" className="rg-btn rg-btn--outline">
                 Ir para Clientes
               </Link>
               <button
                 type="button"
+                className="rg-btn rg-btn--primary"
                 onClick={() => void carregar()}
                 disabled={loading}
-                style={{
-                  background: '#16a34a',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '12px',
-                  height: '48px',
-                  padding: '0 18px',
-                  fontWeight: 800,
-                  fontSize: '14px',
-                  cursor: loading ? 'wait' : 'pointer',
-                  opacity: loading ? 0.85 : 1,
-                }}
               >
                 {loading ? 'A atualizar…' : 'Atualizar'}
               </button>
               <button
                 type="button"
+                className="rg-btn rg-btn--report"
                 onClick={handleGerarPdfRelatorio}
                 disabled={loading || !!erro || kpis.total === 0}
                 title={
@@ -723,20 +699,9 @@ export default function PosVenda() {
                     ? 'Carregue a carteira para gerar o relatório'
                     : 'Descarregar PDF com indicadores, regiões, UFs e fila de prioridades'
                 }
-                style={{
-                  background: '#ffffff',
-                  color: '#0f172a',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: '12px',
-                  height: '48px',
-                  padding: '0 18px',
-                  fontWeight: 800,
-                  fontSize: '14px',
-                  cursor: loading || !!erro || kpis.total === 0 ? 'not-allowed' : 'pointer',
-                  opacity: loading || !!erro || kpis.total === 0 ? 0.55 : 1,
-                }}
               >
-                Gerar PDF do relatório
+                <RgReportPdfIcon className="rg-btn__icon" />
+                Relatório (PDF)
               </button>
             </div>
           </div>

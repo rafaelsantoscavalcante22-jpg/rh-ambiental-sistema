@@ -8,6 +8,7 @@ import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { limparSessionDraftKey, useCadastroFormDraft } from "../lib/useCadastroFormDraft";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { RgReportPdfIcon } from "../components/ui/RgReportPdfIcon";
 
 type Motorista = {
   id: string;
@@ -612,73 +613,24 @@ export default function Motoristas() {
               </p>
             </div>
 
-            <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-              <div
-                style={{
-                  minWidth: "225px",
-                  background: "#ffffff",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "16px",
-                  padding: "16px 18px",
-                  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "14px",
-                    color: "#64748b",
-                    marginBottom: "6px",
-                  }}
-                >
-                  Total de motoristas
-                </div>
-                <div
-                  style={{
-                    fontSize: "20px",
-                    fontWeight: 800,
-                    color: "#0f172a",
-                  }}
-                >
-                  {totalExibidoKpi}
-                </div>
+            <div className="rg-page-toolbar">
+              <div className="rg-kpi-card">
+                <div className="rg-kpi-card__label">Total de motoristas</div>
+                <div className="rg-kpi-card__value">{totalExibidoKpi}</div>
               </div>
 
               <button
                 type="button"
+                className="rg-btn rg-btn--report"
                 disabled={gerandoRelatorio}
                 onClick={() => void handleGerarRelatorioPdf()}
-                style={{
-                  background: "#0f172a",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "12px",
-                  height: "50px",
-                  padding: "0 18px",
-                  fontWeight: 800,
-                  cursor: gerandoRelatorio ? "not-allowed" : "pointer",
-                  alignSelf: "stretch",
-                  opacity: gerandoRelatorio ? 0.85 : 1,
-                }}
                 title="Gera um PDF com todos os motoristas conforme o filtro atual"
               >
-                {gerandoRelatorio ? "Gerando PDF..." : "Relatório (PDF)"}
+                <RgReportPdfIcon className="rg-btn__icon" />
+                {gerandoRelatorio ? "Gerando PDF…" : "Relatório (PDF)"}
               </button>
 
-              <button
-                type="button"
-                onClick={abrirCadastroNovo}
-                style={{
-                  background: "#16a34a",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "12px",
-                  height: "50px",
-                  padding: "0 18px",
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  alignSelf: "stretch",
-                }}
-              >
+              <button type="button" className="rg-btn rg-btn--primary" onClick={abrirCadastroNovo}>
                 Novo motorista
               </button>
             </div>

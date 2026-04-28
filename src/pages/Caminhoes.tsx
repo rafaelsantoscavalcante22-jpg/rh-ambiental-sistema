@@ -118,6 +118,15 @@ export default function Caminhoes() {
   const fichaCaminhaoDomBase = useId().replace(/:/g, "");
   const fichaCaminhaoTituloId = `${fichaCaminhaoDomBase}-titulo-ficha`;
   const fichaCaminhaoFotoInputId = `${fichaCaminhaoDomBase}-foto-file`;
+  const cadastroFotoInputId = `${fichaCaminhaoDomBase}-cadastro-foto`;
+
+  /** URL já gravada no Supabase (edição ou após guardar). */
+  const [cadastroFotoServidor, setCadastroFotoServidor] = useState<string | null>(null);
+  /** Ficheiro escolhido antes de existir `id` (só cadastro novo). */
+  const [cadastroFotoPendente, setCadastroFotoPendente] = useState<File | null>(null);
+  /** Pré-visualização local (blob) para ficheiro pendente. */
+  const [cadastroFotoBlobUrl, setCadastroFotoBlobUrl] = useState<string | null>(null);
+  const [cadastroFotoEnviando, setCadastroFotoEnviando] = useState(false);
 
   const cadastroDraftData = useMemo(() => ({ form, editingId }), [form, editingId]);
   useCadastroFormDraft({
@@ -125,9 +134,30 @@ export default function Caminhoes() {
     open: mostrarCadastro,
     data: cadastroDraftData,
     onRestore: (d) => {
+      setCadastroFotoBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      setCadastroFotoServidor(null);
+      setCadastroFotoPendente(null);
+      setCadastroFotoEnviando(false);
       setForm(d.form);
       setEditingId(d.editingId);
       setMostrarCadastro(true);
+      if (d.editingId) {
+        queueMicrotask(() => {
+          void supabase
+            .from("caminhoes")
+            .select("foto_url")
+            .eq("id", d.editingId as string)
+            .maybeSingle()
+            .then(({ data }) => {
+              setCadastroFotoServidor(
+                (data as { foto_url?: string | null } | null)?.foto_url ?? null
+              );
+            });
+        });
+      }
     },
   });
 
@@ -198,10 +228,25 @@ export default function Caminhoes() {
     setForm((prev) => ({ ...prev, [name]: value }));
   }
 
+  function revogarBlobCadastroFoto() {
+    setCadastroFotoBlobUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  }
+
+  function limparEstadoFotoCadastro() {
+    revogarBlobCadastroFoto();
+    setCadastroFotoServidor(null);
+    setCadastroFotoPendente(null);
+    setCadastroFotoEnviando(false);
+  }
+
   function limparFormulario() {
     limparSessionDraftKey(CAMINHOES_CADASTRO_DRAFT_KEY);
     setForm(formInicial);
     setEditingId(null);
+    limparEstadoFotoCadastro();
   }
 
   function abrirCadastroNovo() {
@@ -211,6 +256,9 @@ export default function Caminhoes() {
   }
 
   function handleEditar(c: Caminhao) {
+    revogarBlobCadastroFoto();
+    setCadastroFotoPendente(null);
+    setCadastroFotoServidor(c.foto_url ?? null);
     setForm({
       placa: c.placa || "",
       modelo: c.modelo || "",
@@ -222,6 +270,130 @@ export default function Caminhoes() {
     setMostrarCadastro(true);
     setSucesso("");
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function persistirFotoCaminhao(
+    caminhaoId: string,
+    file: File,
+    urlAnterior: string | null
+  ): Promise<{ ok: true; publicUrl: string } | { ok: false }> {
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    const extSeguro =
+      ext && ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+    const path = `${caminhaoId}/foto.${extSeguro}`;
+
+    const { error: upErr } = await supabase.storage
+      .from(BUCKET_FOTO_CAMINHAO)
+      .upload(path, file, { upsert: true, contentType: file.type || undefined });
+
+    if (upErr) {
+      console.error(upErr);
+      window.alert(
+        "Não foi possível enviar a foto. Aplique a migração do bucket caminhoes-fotos no Supabase ou verifique as políticas de Storage."
+      );
+      return { ok: false };
+    }
+
+    const { data: pub } = supabase.storage.from(BUCKET_FOTO_CAMINHAO).getPublicUrl(path);
+    const publicUrl = pub.publicUrl;
+
+    const { error: dbErr } = await supabase
+      .from("caminhoes")
+      .update({ foto_url: publicUrl })
+      .eq("id", caminhaoId);
+
+    if (dbErr) {
+      console.error(dbErr);
+      window.alert(
+        "A foto foi enviada, mas falhou ao gravar o endereço no cadastro. Verifique se a coluna foto_url existe (migração SQL)."
+      );
+      return { ok: false };
+    }
+
+    if (urlAnterior) {
+      const pAnt = pathFromSupabasePublicUrl(urlAnterior, BUCKET_FOTO_CAMINHAO);
+      if (pAnt && pAnt !== path) {
+        void supabase.storage.from(BUCKET_FOTO_CAMINHAO).remove([pAnt]);
+      }
+    }
+
+    return { ok: true, publicUrl };
+  }
+
+  function validarArquivoFotoCaminhao(file: File): boolean {
+    if (!file.type.startsWith("image/")) {
+      window.alert("Escolha uma imagem (JPEG, PNG, WebP ou GIF).");
+      return false;
+    }
+    if (file.size > MAX_BYTES_FOTO_CAMINHAO) {
+      window.alert("A imagem deve ter no máximo 8 MB.");
+      return false;
+    }
+    return true;
+  }
+
+  async function handleCadastroEscolherFoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!validarArquivoFotoCaminhao(file)) return;
+
+    if (editingId) {
+      setCadastroFotoEnviando(true);
+      try {
+        const res = await persistirFotoCaminhao(editingId, file, cadastroFotoServidor);
+        if (res.ok) {
+          setCadastroFotoServidor(res.publicUrl);
+          revogarBlobCadastroFoto();
+          setCadastroFotoPendente(null);
+          await fetchCaminhoes();
+          if (fichaCaminhao?.id === editingId) {
+            setFichaCaminhao((prev) => (prev ? { ...prev, foto_url: res.publicUrl } : prev));
+          }
+        }
+      } finally {
+        setCadastroFotoEnviando(false);
+      }
+      return;
+    }
+
+    revogarBlobCadastroFoto();
+    setCadastroFotoPendente(file);
+    setCadastroFotoBlobUrl(URL.createObjectURL(file));
+  }
+
+  async function handleCadastroRemoverFoto() {
+    if (editingId) {
+      if (!cadastroFotoServidor) return;
+      if (!window.confirm("Remover a fotografia deste caminhão?")) return;
+      setCadastroFotoEnviando(true);
+      try {
+        const p = pathFromSupabasePublicUrl(cadastroFotoServidor, BUCKET_FOTO_CAMINHAO);
+        if (p) {
+          const { error: rmErr } = await supabase.storage.from(BUCKET_FOTO_CAMINHAO).remove([p]);
+          if (rmErr) console.warn("Storage remove:", rmErr);
+        }
+        const { error } = await supabase
+          .from("caminhoes")
+          .update({ foto_url: null })
+          .eq("id", editingId);
+        if (error) {
+          window.alert("Não foi possível limpar o registo da foto.");
+          return;
+        }
+        setCadastroFotoServidor(null);
+        await fetchCaminhoes();
+        if (fichaCaminhao?.id === editingId) {
+          setFichaCaminhao((prev) => (prev ? { ...prev, foto_url: null } : prev));
+        }
+      } finally {
+        setCadastroFotoEnviando(false);
+      }
+      return;
+    }
+
+    revogarBlobCadastroFoto();
+    setCadastroFotoPendente(null);
   }
 
   async function handleSalvar(e: React.FormEvent<HTMLFormElement>) {
@@ -245,12 +417,15 @@ export default function Caminhoes() {
 
     let error: PostgrestError | null = null;
 
+    let novoId: string | null = null;
+
     if (editingId) {
       const response = await supabase.from("caminhoes").update(payload).eq("id", editingId);
       error = response.error;
     } else {
-      const response = await supabase.from("caminhoes").insert([payload]);
+      const response = await supabase.from("caminhoes").insert([payload]).select("id").single();
       error = response.error;
+      novoId = response.data?.id ?? null;
     }
 
     if (error) {
@@ -273,6 +448,15 @@ export default function Caminhoes() {
 
       setSalvando(false);
       return;
+    }
+
+    if (!editingId && novoId && cadastroFotoPendente) {
+      const fotoRes = await persistirFotoCaminhao(novoId, cadastroFotoPendente, null);
+      if (!fotoRes.ok) {
+        window.alert(
+          "O caminhão foi guardado, mas a foto não foi enviada. Pode anexá-la ao editar o registo."
+        );
+      }
     }
 
     const mensagem = editingId
@@ -361,61 +545,15 @@ export default function Caminhoes() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !fichaCaminhao) return;
-
-    if (!file.type.startsWith("image/")) {
-      window.alert("Escolha uma imagem (JPEG, PNG, WebP ou GIF).");
-      return;
-    }
-    if (file.size > MAX_BYTES_FOTO_CAMINHAO) {
-      window.alert("A imagem deve ter no máximo 8 MB.");
-      return;
-    }
+    if (!validarArquivoFotoCaminhao(file)) return;
 
     setEnviandoFotoCaminhao(true);
     try {
-      const ext = file.name.split(".").pop()?.toLowerCase();
-      const extSeguro =
-        ext && ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
-      const path = `${fichaCaminhao.id}/foto.${extSeguro}`;
-
-      const { error: upErr } = await supabase.storage
-        .from(BUCKET_FOTO_CAMINHAO)
-        .upload(path, file, { upsert: true, contentType: file.type || undefined });
-
-      if (upErr) {
-        console.error(upErr);
-        window.alert(
-          "Não foi possível enviar a foto. Aplique a migração do bucket caminhoes-fotos no Supabase ou verifique as políticas de Storage."
-        );
-        return;
+      const res = await persistirFotoCaminhao(fichaCaminhao.id, file, fichaCaminhao.foto_url);
+      if (res.ok) {
+        setFichaCaminhao({ ...fichaCaminhao, foto_url: res.publicUrl });
+        await fetchCaminhoes();
       }
-
-      const { data: pub } = supabase.storage.from(BUCKET_FOTO_CAMINHAO).getPublicUrl(path);
-      const publicUrl = pub.publicUrl;
-
-      const { error: dbErr } = await supabase
-        .from("caminhoes")
-        .update({ foto_url: publicUrl })
-        .eq("id", fichaCaminhao.id);
-
-      if (dbErr) {
-        console.error(dbErr);
-        window.alert(
-          "A foto foi enviada, mas falhou ao gravar o endereço no cadastro. Verifique se a coluna foto_url existe (migração SQL)."
-        );
-        return;
-      }
-
-      const antiga = fichaCaminhao.foto_url;
-      if (antiga) {
-        const pAnt = pathFromSupabasePublicUrl(antiga, BUCKET_FOTO_CAMINHAO);
-        if (pAnt && pAnt !== path) {
-          void supabase.storage.from(BUCKET_FOTO_CAMINHAO).remove([pAnt]);
-        }
-      }
-
-      setFichaCaminhao({ ...fichaCaminhao, foto_url: publicUrl });
-      await fetchCaminhoes();
     } finally {
       setEnviandoFotoCaminhao(false);
     }
@@ -684,6 +822,127 @@ export default function Caminhoes() {
 
                 <div
                   style={{
+                    borderTop: "1px solid #f1f5f9",
+                    paddingTop: "18px",
+                    marginTop: "4px",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "15px",
+                      fontWeight: 800,
+                      color: "#0f172a",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Fotografia do veículo
+                  </div>
+                  <p
+                    style={{
+                      margin: "0 0 14px",
+                      fontSize: "13px",
+                      color: "#64748b",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Anexe uma imagem do caminhão (lateral ou 3/4). JPEG, PNG, WebP ou GIF; máximo 8 MB.
+                    {editingId
+                      ? " A foto é guardada logo que escolhe o ficheiro."
+                      : " Ao criar o registo, a foto é enviada automaticamente depois de guardar."}
+                  </p>
+                  {cadastroFotoBlobUrl || cadastroFotoServidor ? (
+                    <a
+                      href={cadastroFotoBlobUrl ?? cadastroFotoServidor ?? undefined}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ display: "block", marginBottom: "12px" }}
+                    >
+                      <img
+                        src={cadastroFotoBlobUrl ?? cadastroFotoServidor ?? ""}
+                        alt="Pré-visualização do caminhão"
+                        style={{
+                          width: "100%",
+                          maxHeight: "240px",
+                          objectFit: "contain",
+                          borderRadius: "12px",
+                          border: "1px solid #e2e8f0",
+                          background: "#f8fafc",
+                        }}
+                      />
+                    </a>
+                  ) : (
+                    <div
+                      style={{
+                        padding: "24px 16px",
+                        textAlign: "center",
+                        color: "#94a3b8",
+                        fontSize: "13px",
+                        borderRadius: "12px",
+                        border: "1px dashed #cbd5e1",
+                        background: "#f8fafc",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      Nenhuma fotografia anexada.
+                    </div>
+                  )}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center" }}>
+                    <input
+                      id={cadastroFotoInputId}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      onChange={(e) => void handleCadastroEscolherFoto(e)}
+                      disabled={cadastroFotoEnviando || salvando}
+                      style={{ display: "none" }}
+                    />
+                    <label
+                      htmlFor={cadastroFotoInputId}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        minHeight: "40px",
+                        padding: "0 16px",
+                        borderRadius: "10px",
+                        background:
+                          cadastroFotoEnviando || salvando ? "#e2e8f0" : "#0f172a",
+                        color: "#ffffff",
+                        fontWeight: 700,
+                        fontSize: "13px",
+                        cursor: cadastroFotoEnviando || salvando ? "wait" : "pointer",
+                      }}
+                    >
+                      {cadastroFotoEnviando
+                        ? "A enviar…"
+                        : cadastroFotoBlobUrl || cadastroFotoServidor
+                          ? "Substituir foto"
+                          : "Anexar foto"}
+                    </label>
+                    {cadastroFotoBlobUrl || cadastroFotoServidor ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleCadastroRemoverFoto()}
+                        disabled={cadastroFotoEnviando || salvando}
+                        style={{
+                          minHeight: "40px",
+                          padding: "0 14px",
+                          borderRadius: "10px",
+                          border: "1px solid #fecaca",
+                          background: "#ffffff",
+                          color: "#b91c1c",
+                          fontWeight: 700,
+                          fontSize: "13px",
+                          cursor: cadastroFotoEnviando || salvando ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        Remover foto
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div
+                  style={{
                     display: "flex",
                     gap: "10px",
                     alignItems: "center",
@@ -693,7 +952,7 @@ export default function Caminhoes() {
                 >
                   <button
                     type="submit"
-                    disabled={salvando}
+                    disabled={salvando || cadastroFotoEnviando}
                     style={{
                       background: "#16a34a",
                       color: "#ffffff",
@@ -703,7 +962,7 @@ export default function Caminhoes() {
                       padding: "0 18px",
                       fontWeight: 700,
                       cursor: "pointer",
-                      opacity: salvando ? 0.8 : 1,
+                      opacity: salvando || cadastroFotoEnviando ? 0.8 : 1,
                     }}
                   >
                     {salvando

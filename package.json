@@ -30,7 +30,7 @@
     "db:apply:sql": "tsx scripts/apply-supabase-sql.ts",
     "db:apply:clientes-etapa1": "tsx scripts/apply-supabase-sql.ts supabase/migrations/20260413120000_clientes_enderecos_email_nf.sql",
     "db:apply:clientes-status-datas": "tsx scripts/apply-supabase-sql.ts supabase/migrations/20260427140000_clientes_status_datas.sql",
-    "db:apply:faturamento-view": "tsx scripts/apply-supabase-sql.ts supabase/migrations/20260419120000_vw_faturamento_resumo.sql",
+    "db:apply:faturamento-view": "tsx scripts/apply-supabase-sql.ts supabase/sql_editor_vw_faturamento_resumo.sql",
     "supabase": "supabase",
     "functions:deploy:admin-update": "supabase functions deploy admin-update-user",
     "functions:deploy:admin-delete": "supabase functions deploy admin-delete-user",

@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js'
 import type { FaturamentoResumoViewRow } from './faturamentoResumo'
 
 const PAGE_SIZE = 1000
@@ -20,6 +20,25 @@ function createdAtMinIsoOptIn(): string | null {
 export type FetchVwFaturamentoResumoPaginatedOpts = {
   /** Filtro PostgREST `.or(...)` — ex.: lista financeira (`COLETAS_OR_FINANCEIRO_QUERY`). */
   orFilter?: string
+}
+
+/** Erro PostgREST típico quando a view ainda não foi criada no projeto Supabase. */
+export function isVwFaturamentoResumoMissingError(err: PostgrestError | { message?: string; code?: string }): boolean {
+  const code = 'code' in err ? String(err.code ?? '') : ''
+  const msg = String(err.message ?? '')
+  if (code === 'PGRST205') return true
+  if (!/vw_faturamento_resumo/i.test(msg)) return false
+  return /schema cache|could not find|does not exist|relation /i.test(msg)
+}
+
+function mensagemCorrecaoViewFaturamento(): string {
+  return (
+    '\n\n▸ Como corrigir: no Supabase, abra SQL Editor, cole e execute o ficheiro do repositório:\n' +
+    '   supabase/sql_editor_vw_faturamento_resumo.sql\n\n' +
+    '   Em desenvolvimento (com DATABASE_URL ou SUPABASE_DB_PASSWORD + VITE_SUPABASE_URL no .env):\n' +
+    '   npm run db:apply:faturamento-view\n\n' +
+    '   Depois use «Tentar de novo» ou atualize a página.'
+  )
 }
 
 /**
@@ -51,7 +70,9 @@ export async function fetchVwFaturamentoResumoPaginated(
       .range(from, to)
 
     if (error) {
-      return { data: [], error: new Error(error.message) }
+      const base = error.message || 'Erro ao ler vw_faturamento_resumo.'
+      const msg = isVwFaturamentoResumoMissingError(error) ? base + mensagemCorrecaoViewFaturamento() : base
+      return { data: [], error: new Error(msg) }
     }
 
     const chunk = (data as FaturamentoResumoViewRow[]) || []

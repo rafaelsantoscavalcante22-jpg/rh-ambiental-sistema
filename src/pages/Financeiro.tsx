@@ -963,7 +963,7 @@ export default function Financeiro() {
                 fontSize: '14px',
               }}
             >
-              {erroVistaFat}
+              <span style={{ whiteSpace: 'pre-wrap', display: 'block' }}>{erroVistaFat}</span>
             </div>
           ) : null}
         </div>

@@ -10,6 +10,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import { clienteEstaAtivo } from "../lib/brasilRegioes";
+import { RgReportPdfIcon } from "../components/ui/RgReportPdfIcon";
 
 type Cliente = {
   id: string;
@@ -1062,59 +1063,24 @@ export default function Clientes() {
             </p>
           </div>
 
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-            <div
-              style={{
-                minWidth: "225px",
-                background: "#ffffff",
-                border: "1px solid #e5e7eb",
-                borderRadius: "16px",
-                padding: "16px 18px",
-                boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "14px",
-                  color: "#64748b",
-                  marginBottom: "6px",
-                }}
-              >
-                Total de clientes
-              </div>
-              <div
-                style={{
-                  fontSize: "20px",
-                  fontWeight: 800,
-                  color: "#0f172a",
-                }}
-              >
-                {totalExibidoKpi}
-              </div>
+          <div className="rg-page-toolbar">
+            <div className="rg-kpi-card">
+              <div className="rg-kpi-card__label">Total de clientes</div>
+              <div className="rg-kpi-card__value">{totalExibidoKpi}</div>
             </div>
 
             <button
               type="button"
+              className="rg-btn rg-btn--report"
               disabled={gerandoRelatorio}
               onClick={() => void handleGerarRelatorioPdf()}
-              style={{
-                background: "#0f172a",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "12px",
-                height: "50px",
-                padding: "0 18px",
-                fontWeight: 800,
-                cursor: gerandoRelatorio ? "not-allowed" : "pointer",
-                alignSelf: "stretch",
-                opacity: gerandoRelatorio ? 0.85 : 1,
-              }}
               title="Gera um PDF com todos os clientes conforme o filtro atual"
             >
-              {gerandoRelatorio ? "Gerando PDF..." : "Relatório (PDF)"}
+              <RgReportPdfIcon className="rg-btn__icon" />
+              {gerandoRelatorio ? "Gerando PDF…" : "Relatório (PDF)"}
             </button>
 
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "stretch" }}>
+            <div className="rg-page-toolbar" style={{ gap: "8px" }}>
               <input
                 type="file"
                 accept=".xlsx"
@@ -1129,58 +1095,24 @@ export default function Clientes() {
               />
               <button
                 type="button"
+                className="rg-btn rg-btn--outline"
                 disabled={importandoExcel}
                 onClick={() => document.getElementById("clientes-import-xlsx")?.click()}
-                style={{
-                  background: "#ffffff",
-                  color: "#0f172a",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "12px",
-                  height: "50px",
-                  padding: "0 16px",
-                  fontWeight: 800,
-                  cursor: importandoExcel ? "not-allowed" : "pointer",
-                  alignSelf: "stretch",
-                }}
                 title="Importa clientes a partir de uma planilha .xlsx (valida e insere/atualiza por CNPJ)"
               >
-                {importandoExcel ? "Importando..." : "Importar (Excel)"}
+                {importandoExcel ? "Importando…" : "Importar (Excel)"}
               </button>
               <button
                 type="button"
+                className="rg-btn rg-btn--outline"
                 onClick={handleBaixarModeloExcel}
-                style={{
-                  background: "#0f172a",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "12px",
-                  height: "50px",
-                  padding: "0 14px",
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  alignSelf: "stretch",
-                }}
                 title="Baixa um modelo .xlsx com os cabeçalhos esperados"
               >
-                Modelo
+                Modelo Excel
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={abrirCadastroNovo}
-              style={{
-                background: "#16a34a",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "12px",
-                height: "50px",
-                padding: "0 18px",
-                fontWeight: 800,
-                cursor: "pointer",
-                alignSelf: "stretch",
-              }}
-            >
+            <button type="button" className="rg-btn rg-btn--primary" onClick={abrirCadastroNovo}>
               Novo cliente
             </button>
           </div>
