@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 import { usuarioPodeAcessarRota } from './lib/paginasSistema'
@@ -9,29 +9,30 @@ import { PresencaAoVivoProvider } from './contexts/PresencaAoVivoContext'
 import { PwaPremiumShell } from './components/pwa/PwaPremiumShell'
 
 import Login from './pages/Login'
+import { lazyWithRetry } from './lib/lazyWithRetry'
 
-const BemVindoNexus = lazy(() => import('./pages/BemVindoNexus'))
-const Dashboard = lazy(() => import('./pages/Dashboard'))
-const Clientes = lazy(() => import('./pages/Clientes'))
-const PosVenda = lazy(() => import('./pages/PosVenda'))
-const Motoristas = lazy(() => import('./pages/Motoristas'))
-const Caminhoes = lazy(() => import('./pages/Caminhoes'))
-const Financeiro = lazy(() => import('./pages/Financeiro'))
-const FinanceiroContasReceber = lazy(() => import('./pages/FinanceiroContasReceber'))
-const EnvioNF = lazy(() => import('./pages/EnvioNF'))
-const Usuarios = lazy(() => import('./pages/Usuarios'))
-const ChecklistTransporte = lazy(() => import('./pages/ChecklistTransporte'))
-const ConferenciaTransporte = lazy(() => import('./pages/ConferenciaTransporte'))
-const TicketOperacional = lazy(() => import('./pages/TicketOperacional'))
-const AprovacaoDiretoria = lazy(() => import('./pages/AprovacaoDiretoria'))
-const FaturamentoOperacional = lazy(() => import('./pages/FaturamentoOperacional'))
-const FaturamentoRegrasPreco = lazy(() => import('./pages/FaturamentoRegrasPreco'))
-const Programacao = lazy(() => import('./pages/Programacao'))
-const MTR = lazy(() => import('./pages/MTR'))
-const ControleMassa = lazy(() => import('./pages/ControleMassa'))
-const ComprovantesDescarte = lazy(() => import('./pages/ComprovantesDescarte'))
-const ComprovanteDescarteForm = lazy(() => import('./pages/ComprovanteDescarteForm'))
-const Chat = lazy(() => import('./pages/Chat'))
+const BemVindoNexus = lazyWithRetry(() => import('./pages/BemVindoNexus'))
+const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'))
+const Clientes = lazyWithRetry(() => import('./pages/Clientes'))
+const PosVenda = lazyWithRetry(() => import('./pages/PosVenda'))
+const Motoristas = lazyWithRetry(() => import('./pages/Motoristas'))
+const Caminhoes = lazyWithRetry(() => import('./pages/Caminhoes'))
+const Financeiro = lazyWithRetry(() => import('./pages/Financeiro'))
+const FinanceiroContasReceber = lazyWithRetry(() => import('./pages/FinanceiroContasReceber'))
+const EnvioNF = lazyWithRetry(() => import('./pages/EnvioNF'))
+const Usuarios = lazyWithRetry(() => import('./pages/Usuarios'))
+const ChecklistTransporte = lazyWithRetry(() => import('./pages/ChecklistTransporte'))
+const ConferenciaTransporte = lazyWithRetry(() => import('./pages/ConferenciaTransporte'))
+const TicketOperacional = lazyWithRetry(() => import('./pages/TicketOperacional'))
+const AprovacaoDiretoria = lazyWithRetry(() => import('./pages/AprovacaoDiretoria'))
+const FaturamentoOperacional = lazyWithRetry(() => import('./pages/FaturamentoOperacional'))
+const FaturamentoRegrasPreco = lazyWithRetry(() => import('./pages/FaturamentoRegrasPreco'))
+const Programacao = lazyWithRetry(() => import('./pages/Programacao'))
+const MTR = lazyWithRetry(() => import('./pages/MTR'))
+const ControleMassa = lazyWithRetry(() => import('./pages/ControleMassa'))
+const ComprovantesDescarte = lazyWithRetry(() => import('./pages/ComprovantesDescarte'))
+const ComprovanteDescarteForm = lazyWithRetry(() => import('./pages/ComprovanteDescarteForm'))
+const Chat = lazyWithRetry(() => import('./pages/Chat'))
 
 const routeSuspenseFallback = (
   <div

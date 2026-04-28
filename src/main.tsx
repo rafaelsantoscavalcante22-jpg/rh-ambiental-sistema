@@ -40,6 +40,10 @@ class ErrorBoundary extends React.Component<
 
   render() {
     if (this.state.hasError) {
+      const msg = this.state.message;
+      const pareceChunkDeploy =
+        /Failed to fetch dynamically imported module/i.test(msg) ||
+        /Loading chunk \d+ failed/i.test(msg);
       return (
         <div
           style={{
@@ -71,6 +75,14 @@ class ErrorBoundary extends React.Component<
               O sistema encontrou um erro durante a renderização.
             </p>
 
+            {pareceChunkDeploy ? (
+              <p style={{ color: "#334155", marginBottom: 16 }}>
+                Isto costuma acontecer após uma atualização: o navegador ainda
+                tentava carregar ficheiros antigos. Recarregue a página para
+                obter a versão nova.
+              </p>
+            ) : null}
+
             <pre
               style={{
                 whiteSpace: "pre-wrap",
@@ -83,8 +95,35 @@ class ErrorBoundary extends React.Component<
                 margin: 0,
               }}
             >
-              {this.state.message}
+              {msg}
             </pre>
+
+            {pareceChunkDeploy ? (
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    sessionStorage.removeItem("rg-chunk-reload-once");
+                  } catch {
+                    /* ignore */
+                  }
+                  window.location.reload();
+                }}
+                style={{
+                  marginTop: 20,
+                  padding: "12px 20px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: "#0f766e",
+                  color: "#fff",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontSize: 15,
+                }}
+              >
+                Recarregar página
+              </button>
+            ) : null}
           </div>
         </div>
       );

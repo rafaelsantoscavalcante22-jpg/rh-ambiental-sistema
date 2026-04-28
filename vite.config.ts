@@ -112,7 +112,8 @@ export default defineConfig(({ mode }) => {
         navigationPreload: true,
         cleanupOutdatedCaches: true,
         clientsClaim: true,
-        skipWaiting: false,
+        /** Após deploy, activar já o novo SW reduz referências a chunks antigos no precache. */
+        skipWaiting: true,
         runtimeCaching: [
           ...supabaseCaching,
           {
