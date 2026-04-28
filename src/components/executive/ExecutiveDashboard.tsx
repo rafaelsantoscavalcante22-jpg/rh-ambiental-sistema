@@ -226,38 +226,66 @@ export function ExecutiveDashboard() {
   const [relatorioPrintNonce, setRelatorioPrintNonce] = useState(0)
   const [linhaTempoAberta, setLinhaTempoAberta] = useState(false)
 
+  const EXEC_PAGE_SIZE = 1000
+  const EXEC_MAX_COLETAS = 3000
+  const EXEC_MAX_MTRS = 2000
+
   const carregar = useCallback(async () => {
     try {
       setLoading(true)
       setErro('')
       const desdeIso = dataMinimaColetasDashboardExecutivo()
-      const [cRes, mRes, clRes] = await Promise.all([
-        supabase
+      const clRes = await supabase.from('clientes').select('id', { count: 'exact', head: true })
+      if (clRes.error) throw clRes.error
+
+      const coletasAcc: ColetaRow[] = []
+      for (let from = 0; from < EXEC_MAX_COLETAS; from += EXEC_PAGE_SIZE) {
+        const to = Math.min(from + EXEC_PAGE_SIZE - 1, EXEC_MAX_COLETAS - 1)
+        const cRes = await supabase
           .from('coletas')
           .select(
             'id, numero, cliente, cliente_id, cidade, tipo_residuo, data_agendada, etapa_operacional, fluxo_status, observacoes, liberado_financeiro, valor_coleta, status_pagamento, data_vencimento, peso_liquido, created_at, programacao_id, mtr_id'
           )
           .gte('created_at', desdeIso)
           .order('created_at', { ascending: false })
-          .limit(6500),
-        supabase
+          .range(from, to)
+        if (cRes.error) throw cRes.error
+        const chunk = (cRes.data || []) as ColetaRow[]
+        coletasAcc.push(...chunk)
+        if (chunk.length < EXEC_PAGE_SIZE) break
+      }
+
+      const mtrsAcc: MtrRow[] = []
+      for (let from = 0; from < EXEC_MAX_MTRS; from += EXEC_PAGE_SIZE) {
+        const to = Math.min(from + EXEC_PAGE_SIZE - 1, EXEC_MAX_MTRS - 1)
+        const mRes = await supabase
           .from('mtrs')
           .select('id, created_at, status')
           .gte('created_at', desdeIso)
           .order('created_at', { ascending: false })
-          .limit(4000),
-        supabase.from('clientes').select('id', { count: 'exact', head: true }),
-      ])
+          .range(from, to)
+        if (mRes.error) throw mRes.error
+        const chunk = (mRes.data || []) as MtrRow[]
+        mtrsAcc.push(...chunk)
+        if (chunk.length < EXEC_PAGE_SIZE) break
+      }
 
-      if (cRes.error) throw cRes.error
-      if (mRes.error) throw mRes.error
+      if (coletasAcc.length >= EXEC_MAX_COLETAS) {
+        console.warn(
+          `[ExecutiveDashboard] Cap de ${EXEC_MAX_COLETAS} coletas atingido; resultados podem estar truncados.`
+        )
+      }
+      if (mtrsAcc.length >= EXEC_MAX_MTRS) {
+        console.warn(
+          `[ExecutiveDashboard] Cap de ${EXEC_MAX_MTRS} MTRs atingido; resultados podem estar truncados.`
+        )
+      }
 
-      const coletasCarregadas = (cRes.data || []) as ColetaRow[]
-      setColetas(coletasCarregadas)
-      setMtrs((mRes.data || []) as MtrRow[])
+      setColetas(coletasAcc)
+      setMtrs(mtrsAcc)
 
       const progIds = [
-        ...new Set(coletasCarregadas.map((c) => c.programacao_id).filter(Boolean)),
+        ...new Set(coletasAcc.map((c) => c.programacao_id).filter(Boolean)),
       ] as string[]
       const tc: Record<string, string> = {}
       const PROG_CHUNK = 450
@@ -956,7 +984,7 @@ export function ExecutiveDashboard() {
                 <span style={execEyebrowMark} aria-hidden />
                 RG Ambiental · Painel executivo
               </p>
-              <h1 style={execH1}>Síntese e prioridades do período</h1>
+              <h1 style={execH1}>Relatório Gerencial</h1>
               <p style={execLead}>
                 Síntese financeira e operacional do período filtrado — leitura estratégica para decisão.
               </p>

@@ -112,17 +112,23 @@ export default function EnvioNF() {
   }, [])
 
   useEffect(() => {
-    void carregarClientes()
+    queueMicrotask(() => {
+      void carregarClientes()
+    })
   }, [carregarClientes])
 
   useEffect(() => {
-    void carregarLogs()
+    queueMicrotask(() => {
+      void carregarLogs()
+    })
   }, [carregarLogs])
 
   useEffect(() => {
     if (!clienteParam) return
-    setSelecionados(new Set([clienteParam]))
-    setSomenteComEmail(false)
+    queueMicrotask(() => {
+      setSelecionados(new Set([clienteParam]))
+      setSomenteComEmail(false)
+    })
   }, [clienteParam])
 
   useEffect(() => {
@@ -143,8 +149,10 @@ export default function EnvioNF() {
         }
         const id = (data?.cliente_id || '').trim()
         if (!id) return
-        setSelecionados(new Set([id]))
-        setSomenteComEmail(false)
+        queueMicrotask(() => {
+          setSelecionados(new Set([id]))
+          setSomenteComEmail(false)
+        })
       } catch (e) {
         console.error(e)
       }
@@ -155,13 +163,17 @@ export default function EnvioNF() {
   }, [clienteParam, coletaParam])
 
   useEffect(() => {
-    setColetasComContaMarcadas(new Set())
+    queueMicrotask(() => {
+      setColetasComContaMarcadas(new Set())
+    })
   }, [selecionados])
 
   useEffect(() => {
     const clientIds = [...selecionados]
     if (clientIds.length === 0) {
-      setContasAbertasOpts([])
+      queueMicrotask(() => {
+        setContasAbertasOpts([])
+      })
       return
     }
     let cancel = false
@@ -175,7 +187,9 @@ export default function EnvioNF() {
       if (cancel) return
       if (error) {
         console.error(error)
-        setContasAbertasOpts([])
+        queueMicrotask(() => {
+          setContasAbertasOpts([])
+        })
         return
       }
 
@@ -200,7 +214,9 @@ export default function EnvioNF() {
           saldoFmt: saldo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
         }
       })
-      setContasAbertasOpts(opts)
+      queueMicrotask(() => {
+        setContasAbertasOpts(opts)
+      })
     })()
     return () => {
       cancel = true

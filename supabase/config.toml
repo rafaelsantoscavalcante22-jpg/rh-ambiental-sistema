@@ -1,38 +1,30 @@
 
 [functions.admin-create-user]
 enabled = true
-# Gateway JWT check falha com algumas combinações (ex.: chave publishable + tokens atuais).
-# A função valida o Bearer com auth.getUser() e perfil Administrador.
-verify_jwt = false
+verify_jwt = true
 import_map = "./functions/admin-create-user/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
 entrypoint = "./functions/admin-create-user/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/admin-create-user/*.html" ]
 
 [functions.admin-update-user]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 import_map = "./functions/admin-update-user/deno.json"
 entrypoint = "./functions/admin-update-user/index.ts"
 
 [functions.admin-delete-user]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 import_map = "./functions/admin-delete-user/deno.json"
 entrypoint = "./functions/admin-delete-user/index.ts"
 
 [functions.admin-set-user-pages]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 import_map = "./functions/admin-set-user-pages/deno.json"
 entrypoint = "./functions/admin-set-user-pages/index.ts"
 
-# Envio de NF (Gmail SMTP ou Resend). A função valida o JWT com auth.getUser (compatível com chave publishable).
 [functions.send-nf-email]
 enabled = true
-verify_jwt = false
+verify_jwt = true
 import_map = "./functions/send-nf-email/deno.json"
 entrypoint = "./functions/send-nf-email/index.ts"

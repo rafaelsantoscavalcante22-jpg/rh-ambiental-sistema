@@ -196,11 +196,15 @@ export default function Usuarios() {
   }, [usuariosFiltrados, paginaSegura, itensPorPagina])
 
   useEffect(() => {
-    setPaginaUsuarios(0)
+    queueMicrotask(() => {
+      setPaginaUsuarios(0)
+    })
   }, [buscaDebounced, itensPorPagina, usuarios.length])
 
   useEffect(() => {
-    setPaginaUsuarios((p) => Math.min(p, Math.max(0, totalPaginas - 1)))
+    queueMicrotask(() => {
+      setPaginaUsuarios((p) => Math.min(p, Math.max(0, totalPaginas - 1)))
+    })
   }, [totalPaginas])
 
   async function carregarUsuarios() {
@@ -226,7 +230,9 @@ export default function Usuarios() {
   }
 
   useEffect(() => {
-    carregarUsuarios()
+    queueMicrotask(() => {
+      void carregarUsuarios()
+    })
   }, [])
 
   useEffect(() => {

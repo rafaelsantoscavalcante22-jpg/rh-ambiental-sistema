@@ -642,7 +642,7 @@ export default function ControleMassa() {
       (coletaSelecionada?.mtr_id != null ? String(coletaSelecionada.mtr_id) : "");
     if (!id) return null;
     return mtrsLista.find((m) => m.id === id) ?? null;
-  }, [mtrSemColetaSelecionado, coletaSelecionada?.mtr_id, mtrsLista]);
+  }, [mtrSemColetaSelecionado, coletaSelecionada, mtrsLista]);
 
   const estadoFluxo = useMemo(() => {
     const id = form.coleta_id.trim();
@@ -840,10 +840,12 @@ export default function ControleMassa() {
   }, []);
 
   useEffect(() => {
-    setLoadingVinculo(true);
-    setErroTela("");
-    const extraUrl = urlColetaId ? [urlColetaId] : [];
-    void fetchMtrsEColetas({ silent: true, extraColetaIds: extraUrl });
+    queueMicrotask(() => {
+      setLoadingVinculo(true);
+      setErroTela("");
+      const extraUrl = urlColetaId ? [urlColetaId] : [];
+      void fetchMtrsEColetas({ silent: true, extraColetaIds: extraUrl });
+    })
   }, [fetchMtrsEColetas, urlColetaId]);
 
   useEffect(() => {

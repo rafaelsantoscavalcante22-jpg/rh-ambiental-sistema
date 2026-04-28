@@ -54,15 +54,32 @@ export default function FinanceiroContasReceber() {
       const selectCr =
         'id, valor, valor_pago, valor_travado, status_pagamento, data_vencimento, data_emissao, nf_enviada_em, referencia_coleta_id, cliente_id'
 
-      const { data: cr, error: e1 } = await supabase
-        .from('contas_receber')
-        .select(selectCr)
-        .order('data_vencimento', { ascending: true, nullsFirst: false })
-        .limit(4000)
+      const PAGE_SIZE = 1000
+      const MAX_PAGES = 10
+      const list: Record<string, unknown>[] = []
 
-      if (e1) throw e1
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const from = page * PAGE_SIZE
+        const to = from + PAGE_SIZE - 1
+        const { data: chunk, error: e1 } = await supabase
+          .from('contas_receber')
+          .select(selectCr)
+          .order('data_vencimento', { ascending: true, nullsFirst: false })
+          .range(from, to)
 
-      const list = (cr || []) as Record<string, unknown>[]
+        if (e1) throw e1
+        const rows = (chunk || []) as Record<string, unknown>[]
+        if (rows.length === 0) break
+        list.push(...rows)
+        if (rows.length < PAGE_SIZE) break
+      }
+
+      if (list.length >= PAGE_SIZE * MAX_PAGES) {
+        console.warn(
+          `[FinanceiroContasReceber] Cap de ${PAGE_SIZE * MAX_PAGES} linhas atingido; resultados podem estar truncados.`
+        )
+      }
+
       const refIds = [...new Set(list.map((r) => String(r.referencia_coleta_id || '')).filter(Boolean))]
       const cliIds = [
         ...new Set(list.map((r) => r.cliente_id as string | null).filter(Boolean) as string[]),
@@ -138,7 +155,9 @@ export default function FinanceiroContasReceber() {
   }, [])
 
   useEffect(() => {
-    void carregar()
+    queueMicrotask(() => {
+      void carregar()
+    })
   }, [carregar])
 
   useEffect(() => {

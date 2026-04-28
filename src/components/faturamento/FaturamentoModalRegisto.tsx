@@ -118,13 +118,26 @@ export function FaturamentoModalRegisto({
     setCarregando(true)
     setErro('')
     setOkMsg('')
-    const { data, error } = await supabase
-      .from('faturamento_registros')
-      .select('*')
-      .eq('coleta_id', coletaId)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
+    const selectCandidates = [
+      'id, valor, valor_adicionais, referencia_nf, status, observacoes, updated_at',
+      'id, valor, referencia_nf, status, updated_at',
+    ] as const
+
+    let data: unknown = null
+    let error: PostgrestError | null = null
+    for (const sel of selectCandidates) {
+      const res = await supabase
+        .from('faturamento_registros')
+        .select(sel)
+        .eq('coleta_id', coletaId)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      data = res.data
+      error = res.error
+      if (!error) break
+      if (!faturamentoRegistrosErroColunasOpcionais(error)) break
+    }
 
     if (error) {
       console.error(error)
@@ -177,7 +190,7 @@ export function FaturamentoModalRegisto({
     queueMicrotask(() => {
       void carregarRegisto(row.coleta_id)
     })
-  }, [open, row?.coleta_id, carregarRegisto])
+  }, [open, row, carregarRegisto])
 
   useEffect(() => {
     if (!open) return
@@ -204,7 +217,7 @@ export function FaturamentoModalRegisto({
       setManualValor(false)
       setDataVencimentoIso(sugerirDataVencimentoIso(7))
     })
-  }, [open, row?.coleta_id])
+  }, [open, row])
 
   useEffect(() => {
     if (!open || !row || carregando || carregandoRegras) return

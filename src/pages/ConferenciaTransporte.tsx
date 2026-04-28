@@ -230,7 +230,9 @@ export default function ConferenciaTransporte() {
   }, [])
 
   useEffect(() => {
-    void carregarColetas()
+    queueMicrotask(() => {
+      void carregarColetas()
+    })
   }, [carregarColetas])
 
   useEffect(() => {
@@ -289,13 +291,18 @@ export default function ConferenciaTransporte() {
   }, [])
 
   useEffect(() => {
-    if (coletaAtiva) void carregarChecklistMotorista(coletaAtiva.id)
-    else {
-      setChecklistMotoristaId(null)
-      setRespostasMotorista(respostasChecklistMotoristaIniciais())
-      setObservacoesMotorista('')
-      setAssinaturaMotorista('')
-      setAssinaturaResponsavel('')
+    if (coletaAtiva) {
+      queueMicrotask(() => {
+        void carregarChecklistMotorista(coletaAtiva.id)
+      })
+    } else {
+      queueMicrotask(() => {
+        setChecklistMotoristaId(null)
+        setRespostasMotorista(respostasChecklistMotoristaIniciais())
+        setObservacoesMotorista('')
+        setAssinaturaMotorista('')
+        setAssinaturaResponsavel('')
+      })
     }
   }, [coletaAtiva, carregarChecklistMotorista])
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
@@ -556,7 +556,9 @@ export default function Programacao() {
     navigate(`/financeiro?${montarParamsFluxo(item).toString()}`)
   }
 
-  async function carregarDados() {
+  const anoCalendario = mesSelecionado.slice(0, 4)
+
+  const carregarDados = useCallback(async () => {
     try {
       setLoading(true)
       setErro('')
@@ -575,7 +577,7 @@ export default function Programacao() {
       const clientesLista = (clientesData || []) as ClienteOption[]
       setClientes(clientesLista)
 
-      const ano = mesSelecionado.slice(0, 4)
+      const ano = anoCalendario
       const rangeIni = `${ano}-01-01`
       const rangeFim = `${ano}-12-31`
 
@@ -672,13 +674,13 @@ export default function Programacao() {
     } finally {
       setLoading(false)
     }
-  }
-
-  const anoCalendario = mesSelecionado.slice(0, 4)
+  }, [anoCalendario])
 
   useEffect(() => {
-    void carregarDados()
-  }, [anoCalendario])
+    queueMicrotask(() => {
+      void carregarDados()
+    })
+  }, [carregarDados])
 
   useEffect(() => {
     async function carregarCargo() {
@@ -703,9 +705,11 @@ export default function Programacao() {
     if (loading) return
 
     if (!temParametrosContexto) {
-      setContextoDestaqueId(null)
-      prevContextoUrlKeyRef.current = ''
-      prevScrollKeyRef.current = ''
+      queueMicrotask(() => {
+        setContextoDestaqueId(null)
+        prevContextoUrlKeyRef.current = ''
+        prevScrollKeyRef.current = ''
+      })
       return
     }
 
@@ -719,18 +723,24 @@ export default function Programacao() {
     const urlKey = [urlProgramacaoId, urlColetaId, urlClienteId, urlMtrId].join('|')
 
     if (!target) {
-      setContextoDestaqueId(null)
-      prevContextoUrlKeyRef.current = urlKey
-      prevScrollKeyRef.current = ''
+      queueMicrotask(() => {
+        setContextoDestaqueId(null)
+        prevContextoUrlKeyRef.current = urlKey
+        prevScrollKeyRef.current = ''
+      })
       return
     }
 
-    setContextoDestaqueId(target.id)
+    queueMicrotask(() => {
+      setContextoDestaqueId(target.id)
+    })
 
     if (prevContextoUrlKeyRef.current !== urlKey) {
       const dp = target.dataProgramada
       if (dp && dp.length >= 7) {
-        setMesSelecionado(dp.slice(0, 7))
+        queueMicrotask(() => {
+          setMesSelecionado(dp.slice(0, 7))
+        })
       }
       prevContextoUrlKeyRef.current = urlKey
     }

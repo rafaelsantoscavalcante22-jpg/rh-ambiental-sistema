@@ -6,6 +6,8 @@ import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from "../lib/coletasQueryLimits"
 import { sanitizeIlikePattern } from "../lib/sanitizeIlike";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { limparSessionDraftKey, useCadastroFormDraft } from "../lib/useCadastroFormDraft";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 type Motorista = {
   id: string;
@@ -104,6 +106,7 @@ export default function Motoristas() {
   const buscaDebounced = useDebouncedValue(busca, 400);
   const [mostrarCadastro, setMostrarCadastro] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [gerandoRelatorio, setGerandoRelatorio] = useState(false);
   const [sucesso, setSucesso] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormMotorista>(formInicial);
@@ -171,6 +174,98 @@ export default function Motoristas() {
     );
     setLoading(false);
   }, [page, pageSize, buscaDebounced]);
+
+  const fetchMotoristasRelatorio = useCallback(async (): Promise<Motorista[]> => {
+    const PAGE = 1000;
+    const term = buscaDebounced.trim();
+    let dataQ = supabase.from("motoristas").select(MOTORISTAS_SELECT).order("nome", { ascending: true });
+
+    if (term) {
+      const s = sanitizeIlikePattern(term);
+      const orFilter = `nome.ilike.%${s}%,cnh_numero.ilike.%${s}%,cnh_categoria.ilike.%${s}%`;
+      dataQ = dataQ.or(orFilter);
+    }
+
+    const out: Motorista[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const to = from + PAGE - 1;
+      const { data, error } = await dataQ.range(from, to);
+      if (error) throw error;
+      const chunk = ((data as Motorista[]) || []).filter(Boolean);
+      out.push(
+        ...chunk.map((r) => ({
+          ...r,
+          cnh_foto_url: r.cnh_foto_url ?? null,
+        }))
+      );
+      if (chunk.length < PAGE) break;
+    }
+    return out;
+  }, [buscaDebounced]);
+
+  const handleGerarRelatorioPdf = useCallback(async () => {
+    try {
+      setGerandoRelatorio(true);
+      const linhas = await fetchMotoristasRelatorio();
+
+      const agora = new Date();
+      const dataHora = new Intl.DateTimeFormat("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(agora);
+
+      const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+      const titulo = "Relatório de motoristas";
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text(titulo, 40, 36);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Gerado em: ${dataHora}`, 40, 54);
+      doc.text(
+        buscaDebounced.trim() ? `Filtro: "${buscaDebounced.trim()}"` : "Filtro: todos os motoristas",
+        40,
+        68
+      );
+      doc.text(`Total de registros: ${linhas.length}`, 40, 82);
+
+      autoTable(doc, {
+        startY: 96,
+        head: [["Nome", "Nº CNH", "Categoria", "Validade CNH", "Cadastrado em", "CNH (foto)"]],
+        body: linhas.map((m) => [
+          m.nome ?? "",
+          m.cnh_numero ?? "-",
+          m.cnh_categoria ?? "-",
+          formatarData(m.cnh_validade),
+          formatarDataHora(m.created_at),
+          m.cnh_foto_url ? "Sim" : "Não",
+        ]),
+        styles: { fontSize: 8, cellPadding: 3, overflow: "linebreak", cellWidth: "wrap" },
+        headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8 },
+        margin: { left: 40, right: 40 },
+        tableWidth: "auto",
+        columnStyles: {
+          0: { cellWidth: 210 },
+          1: { cellWidth: 105 },
+          2: { cellWidth: 75 },
+          3: { cellWidth: 90 },
+          4: { cellWidth: 115 },
+          5: { cellWidth: 70 },
+        },
+      });
+
+      const iso = agora.toISOString().slice(0, 10);
+      doc.save(`relatorio-motoristas_${iso}.pdf`);
+    } catch (err) {
+      console.error("Erro ao gerar relatório de motoristas:", err);
+      alert("Não foi possível gerar o relatório em PDF. Tente novamente.");
+    } finally {
+      setGerandoRelatorio(false);
+    }
+  }, [fetchMotoristasRelatorio, buscaDebounced]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -547,6 +642,27 @@ export default function Motoristas() {
                   {totalExibidoKpi}
                 </div>
               </div>
+
+              <button
+                type="button"
+                disabled={gerandoRelatorio}
+                onClick={() => void handleGerarRelatorioPdf()}
+                style={{
+                  background: "#0f172a",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "12px",
+                  height: "50px",
+                  padding: "0 18px",
+                  fontWeight: 800,
+                  cursor: gerandoRelatorio ? "not-allowed" : "pointer",
+                  alignSelf: "stretch",
+                  opacity: gerandoRelatorio ? 0.85 : 1,
+                }}
+                title="Gera um PDF com todos os motoristas conforme o filtro atual"
+              >
+                {gerandoRelatorio ? "Gerando PDF..." : "Relatório (PDF)"}
+              </button>
 
               <button
                 type="button"

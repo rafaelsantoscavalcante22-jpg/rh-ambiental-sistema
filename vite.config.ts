@@ -6,8 +6,8 @@ import type { RuntimeCaching } from 'workbox-build'
 /**
  * Regras de cache para o projecto Supabase (build-time via VITE_SUPABASE_URL).
  * - auth: nunca cachear (tokens / refresh).
- * - REST: NetworkFirst com fallback — última leitura disponível offline (por URL + cabeçalhos).
- * - Edge Functions: idem, TTL mais curto.
+ * - REST / Edge Functions: NetworkOnly — respostas dependem de Authorization; cache partilhado
+ *   pode vazar dados entre sessões (ex.: dispositivo partilhado após logout).
  * - Storage público: SWR para imagens/anexos servidos sem auth.
  */
 function runtimeCachingSupabase(supabaseUrlRaw: string): RuntimeCaching[] {
@@ -25,23 +25,11 @@ function runtimeCachingSupabase(supabaseUrlRaw: string): RuntimeCaching[] {
     },
     {
       urlPattern: new RegExp(`^${escaped}/rest/v1/`),
-      handler: 'NetworkFirst',
-      options: {
-        cacheName: 'rg-supabase-rest-v1',
-        networkTimeoutSeconds: 4,
-        expiration: { maxEntries: 80, maxAgeSeconds: 60 * 60 * 24 * 7 },
-        cacheableResponse: cacheable,
-      },
+      handler: 'NetworkOnly',
     },
     {
       urlPattern: new RegExp(`^${escaped}/functions/v1/`),
-      handler: 'NetworkFirst',
-      options: {
-        cacheName: 'rg-supabase-functions-v1',
-        networkTimeoutSeconds: 4,
-        expiration: { maxEntries: 40, maxAgeSeconds: 60 * 60 * 24 * 3 },
-        cacheableResponse: cacheable,
-      },
+      handler: 'NetworkOnly',
     },
     {
       urlPattern: new RegExp(`^${escaped}/storage/v1/object/public/`),

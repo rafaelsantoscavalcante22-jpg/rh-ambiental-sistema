@@ -131,7 +131,7 @@ export async function listarComprovantesDescarte(
 
   const { data: statsRows, error: statsErr } = await statsQuery
 
-  let resumo = {
+  const resumo = {
     totalPesoLiquido: 0,
     finalizados: 0,
     rascunhos: 0,
@@ -345,7 +345,9 @@ export async function buscarColetaPorId(
   const { data, error } = await supabase.from('coletas').select(sel).eq('id', id).maybeSingle()
 
   if (error) {
-    const fallback = await supabase.from('coletas').select('*').eq('id', id).maybeSingle()
+    const fallbackSel =
+      'id, numero_coleta, numero, cliente, nome_cliente, tipo_residuo, placa, motorista, motorista_nome, mtr_id, peso_liquido'
+    const fallback = await supabase.from('coletas').select(fallbackSel).eq('id', id).maybeSingle()
     if (fallback.error) return { data: null, error: new Error(fallback.error.message) }
     if (!fallback.data) return { data: null, error: null }
     const row = fallback.data as Record<string, unknown>
@@ -396,7 +398,8 @@ export async function buscarColetasParaVinculo(
   let res = await supabase.from('coletas').select(sel).order('created_at', { ascending: false }).limit(limite)
 
   if (res.error) {
-    res = await supabase.from('coletas').select('*').order('id', { ascending: false }).limit(limite)
+    // Fallback conservador: tenta um select mínimo compatível (evita payload gigante do `*`).
+    res = await supabase.from('coletas').select(sel).order('id', { ascending: false }).limit(limite)
   }
 
   if (res.error) return { data: [], error: new Error(res.error.message) }

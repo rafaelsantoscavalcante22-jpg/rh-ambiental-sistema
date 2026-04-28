@@ -1,12 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Content-Type": "application/json",
-};
+import { corsHeadersFor, handleCorsOptions } from "../_shared/cors.ts";
 
 /** Base: alinhado a `src/lib/paginasSistema.ts` (EMAILS_BYPASS_PAGINAS_BASE). */
 const EMAILS_PODE_DEFINIR_PAGINAS_BASE = new Set([
@@ -54,10 +47,10 @@ const ROTAS_VALIDAS = new Set([
   "/chat",
 ]);
 
-function jsonResponse(status: number, body: Record<string, unknown>) {
+function jsonResponse(req: Request, status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: corsHeaders,
+    headers: corsHeadersFor(req),
   });
 }
 
@@ -68,12 +61,11 @@ type Body = {
 };
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  const corsEarly = handleCorsOptions(req);
+  if (corsEarly) return corsEarly;
 
   if (req.method !== "POST") {
-    return jsonResponse(405, { error: "Método não permitido." });
+    return jsonResponse(req, 405, { error: "Método não permitido." });
   }
 
   try {
@@ -82,31 +74,31 @@ Deno.serve(async (req: Request) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!supabaseUrl || !anonKey || !serviceRoleKey) {
-      return jsonResponse(500, { error: "Variáveis do Supabase não encontradas." });
+      return jsonResponse(req,500, { error: "Variáveis do Supabase não encontradas." });
     }
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return jsonResponse(401, { error: "Token de autorização não enviado." });
+      return jsonResponse(req,401, { error: "Token de autorização não enviado." });
     }
 
     const token = authHeader.replace("Bearer ", "").trim();
     if (!token) {
-      return jsonResponse(401, { error: "Token inválido." });
+      return jsonResponse(req,401, { error: "Token inválido." });
     }
 
     let body: Body;
     try {
       body = await req.json();
     } catch {
-      return jsonResponse(400, { error: "Body inválido. Envie JSON válido." });
+      return jsonResponse(req,400, { error: "Body inválido. Envie JSON válido." });
     }
 
     const userId = String(body?.userId || "").trim();
     const paginasRaw = body?.paginas;
 
     if (!userId) {
-      return jsonResponse(400, { error: "userId é obrigatório." });
+      return jsonResponse(req,400, { error: "userId é obrigatório." });
     }
 
     const client = createClient(supabaseUrl, anonKey, {
@@ -120,7 +112,7 @@ Deno.serve(async (req: Request) => {
     } = await client.auth.getUser();
 
     if (userError || !usuarioLogado?.email) {
-      return jsonResponse(401, {
+      return jsonResponse(req,401, {
         error: "Usuário não autenticado.",
         details: userError?.message || null,
       });
@@ -128,7 +120,7 @@ Deno.serve(async (req: Request) => {
 
     const emailLogado = usuarioLogado.email.trim().toLowerCase();
     if (!EMAILS_PODE_DEFINIR_PAGINAS.has(emailLogado)) {
-      return jsonResponse(403, {
+      return jsonResponse(req,403, {
         error: "Apenas contas autorizadas podem definir o acesso por páginas.",
       });
     }
@@ -137,14 +129,14 @@ Deno.serve(async (req: Request) => {
     if (paginasRaw === null || paginasRaw === undefined) {
       valor = null;
     } else if (!Array.isArray(paginasRaw)) {
-      return jsonResponse(400, { error: "paginas deve ser um array de rotas ou null." });
+      return jsonResponse(req,400, { error: "paginas deve ser um array de rotas ou null." });
     } else {
       const limpo = [...new Set(
         paginasRaw.map((p) => String(p).trim()).filter(Boolean),
       )];
       for (const p of limpo) {
         if (!ROTAS_VALIDAS.has(p)) {
-          return jsonResponse(400, {
+          return jsonResponse(req,400, {
             error: `Rota não permitida: ${p}`,
           });
         }
@@ -159,7 +151,7 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (alvoErr || !alvo) {
-      return jsonResponse(404, {
+      return jsonResponse(req,404, {
         error: "Utilizador não encontrado.",
         details: alvoErr?.message || null,
       });
@@ -171,13 +163,13 @@ Deno.serve(async (req: Request) => {
       .eq("id", userId);
 
     if (upErr) {
-      return jsonResponse(400, {
+      return jsonResponse(req,400, {
         error: "Falha ao guardar permissões de páginas.",
         details: upErr.message,
       });
     }
 
-    return jsonResponse(200, {
+    return jsonResponse(req,200, {
       success: true,
       message: valor === null
         ? "Restrição por páginas removida (vale o cargo)."
@@ -185,7 +177,7 @@ Deno.serve(async (req: Request) => {
       paginas_permitidas: valor,
     });
   } catch (error) {
-    return jsonResponse(500, {
+    return jsonResponse(req,500, {
       error: "Erro interno na Edge Function.",
       details: error instanceof Error ? error.message : String(error),
     });

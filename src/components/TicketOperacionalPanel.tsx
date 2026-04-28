@@ -203,7 +203,7 @@ export function TicketOperacionalPanel({
     return () => {
       cancel = true
     }
-  }, [coletaAtiva?.id])
+  }, [coletaAtiva])
 
   const carregarTicket = useCallback(async (coletaId: string) => {
     setCarregandoTicket(true)

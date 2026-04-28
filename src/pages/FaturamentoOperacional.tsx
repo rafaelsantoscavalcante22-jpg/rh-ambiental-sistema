@@ -103,7 +103,9 @@ export default function FaturamentoOperacional() {
   }, [])
 
   useEffect(() => {
-    void carregarVista()
+    queueMicrotask(() => {
+      void carregarVista()
+    })
   }, [carregarVista])
 
   useEffect(() => {

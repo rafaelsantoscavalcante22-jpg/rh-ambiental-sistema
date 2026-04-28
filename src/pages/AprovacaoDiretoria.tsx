@@ -138,7 +138,9 @@ export default function AprovacaoDiretoria() {
   }, [])
 
   useEffect(() => {
-    void carregarColetas()
+    queueMicrotask(() => {
+      void carregarColetas()
+    })
   }, [carregarColetas])
 
   useEffect(() => {
@@ -207,18 +209,24 @@ export default function AprovacaoDiretoria() {
 
   useEffect(() => {
     if (coletaAtiva) {
-      void carregarRegisto(coletaAtiva.id)
+      queueMicrotask(() => {
+        void carregarRegisto(coletaAtiva.id)
+      })
     } else {
-      setUltimaDecisaoId(null)
-      setDecisaoGravada(null)
-      setObservacoesGravadas('')
-      setDecididoEm(null)
+      queueMicrotask(() => {
+        setUltimaDecisaoId(null)
+        setDecisaoGravada(null)
+        setObservacoesGravadas('')
+        setDecididoEm(null)
+      })
     }
   }, [coletaAtiva, carregarRegisto])
 
   useEffect(() => {
     if (!coletaAtiva) {
-      setPreReq({ ticket: false })
+      queueMicrotask(() => {
+        setPreReq({ ticket: false })
+      })
       return
     }
     let cancel = false
@@ -241,7 +249,7 @@ export default function AprovacaoDiretoria() {
     return () => {
       cancel = true
     }
-  }, [coletaAtiva?.id])
+  }, [coletaAtiva])
 
   function aoEscolherColeta(id: string) {
     const p = new URLSearchParams(searchParams)

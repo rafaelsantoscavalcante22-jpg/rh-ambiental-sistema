@@ -84,7 +84,9 @@ export default function ComprovantesDescarte() {
   }, [filtrosAplicados, page])
 
   useEffect(() => {
-    void carregar()
+    queueMicrotask(() => {
+      void carregar()
+    })
   }, [carregar])
 
   useEffect(() => {

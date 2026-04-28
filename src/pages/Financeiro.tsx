@@ -291,7 +291,11 @@ export default function Financeiro() {
   useEffect(() => {
     const t = (urlSomenteVencidos || '').trim().toLowerCase()
     if (!t) return
-    if (t === '1' || t === 'true' || t === 'sim' || t === 'yes') setSomenteVencidos(true)
+    if (t === '1' || t === 'true' || t === 'sim' || t === 'yes') {
+      queueMicrotask(() => {
+        setSomenteVencidos(true)
+      })
+    }
   }, [urlSomenteVencidos])
 
   function limparContextoUrl() {
@@ -424,7 +428,9 @@ export default function Financeiro() {
   }, [carregarFinanceiro, carregarDocumentos, carregarVistaFaturamento])
 
   useEffect(() => {
-    void carregarDados()
+    queueMicrotask(() => {
+      void carregarDados()
+    })
   }, [carregarDados])
 
   useEffect(() => {
@@ -717,7 +723,9 @@ export default function Financeiro() {
     itensRelatorio.length > 0 ? Math.max(1, Math.ceil(itensRelatorio.length / pageSizeTab)) : 1
 
   useEffect(() => {
-    setPageTab(1)
+    queueMicrotask(() => {
+      setPageTab(1)
+    })
   }, [
     buscaDebounced,
     pageSizeTab,
@@ -731,7 +739,11 @@ export default function Financeiro() {
   ])
 
   useEffect(() => {
-    if (pageTab > totalPaginasFin) setPageTab(totalPaginasFin)
+    if (pageTab > totalPaginasFin) {
+      queueMicrotask(() => {
+        setPageTab(totalPaginasFin)
+      })
+    }
   }, [pageTab, totalPaginasFin])
 
   const totalLiberadas = useMemo(() => itens.length, [itens])

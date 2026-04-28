@@ -8,6 +8,7 @@ import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { limparSessionDraftKey, useCadastroFormDraft } from "../lib/useCadastroFormDraft";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 import { clienteEstaAtivo } from "../lib/brasilRegioes";
 
 type Cliente = {
@@ -161,6 +162,115 @@ function formatarCNPJ(valor: string) {
   return digitos.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d+)/, "$1.$2.$3/$4-$5");
 }
 
+function normalizarCnpjParaArmazenar(valor: string): string {
+  const digitos = String(valor || "").replace(/\D/g, "").slice(0, 14);
+  return formatarCNPJ(digitos);
+}
+
+function normalizarHeader(raw: unknown): string {
+  return String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function parseExcelDateToIso(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const d = XLSX.SSF.parse_date_code(value);
+    if (!d || !d.y || !d.m || !d.d) return null;
+    const yyyy = String(d.y).padStart(4, "0");
+    const mm = String(d.m).padStart(2, "0");
+    const dd = String(d.d).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  const s = String(value).trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  return null;
+}
+
+type ImportRow = Partial<{
+  nome: string;
+  razao_social: string;
+  cnpj: string;
+  status: string;
+  cep: string;
+  rua: string;
+  numero: string;
+  complemento: string;
+  bairro: string;
+  cidade: string;
+  estado: string;
+  endereco_coleta: string;
+  endereco_faturamento: string;
+  email_nf: string;
+  responsavel_nome: string;
+  telefone: string;
+  email: string;
+  tipo_residuo: string;
+  classificacao: string;
+  unidade_medida: string;
+  frequencia_coleta: string;
+  licenca_numero: string;
+  validade: string;
+  status_ativo_desde: string;
+  status_inativo_desde: string;
+}>;
+
+const IMPORT_MAX_BYTES = 2 * 1024 * 1024; // 2MB (mitigação)
+const IMPORT_MAX_ROWS = 2000;
+const IMPORT_MAX_COLS = 40;
+
+const IMPORT_HEADER_ALIASES: Record<string, keyof ImportRow> = {
+  nome: "nome",
+  "nome fantasia": "nome",
+  cliente: "nome",
+  "razao social": "razao_social",
+  razao_social: "razao_social",
+  cnpj: "cnpj",
+  status: "status",
+  situacao: "status",
+  cep: "cep",
+  rua: "rua",
+  numero: "numero",
+  complemento: "complemento",
+  bairro: "bairro",
+  cidade: "cidade",
+  estado: "estado",
+  uf: "estado",
+  "endereco coleta": "endereco_coleta",
+  endereco_coleta: "endereco_coleta",
+  "endereco faturamento": "endereco_faturamento",
+  endereco_faturamento: "endereco_faturamento",
+  "email nf": "email_nf",
+  email_nf: "email_nf",
+  responsavel: "responsavel_nome",
+  responsavel_nome: "responsavel_nome",
+  telefone: "telefone",
+  email: "email",
+  "tipo residuo": "tipo_residuo",
+  tipo_residuo: "tipo_residuo",
+  classificacao: "classificacao",
+  "unidade medida": "unidade_medida",
+  unidade_medida: "unidade_medida",
+  "frequencia coleta": "frequencia_coleta",
+  frequencia_coleta: "frequencia_coleta",
+  "licenca numero": "licenca_numero",
+  licenca_numero: "licenca_numero",
+  validade: "validade",
+  "status ativo desde": "status_ativo_desde",
+  status_ativo_desde: "status_ativo_desde",
+  "status inativo desde": "status_inativo_desde",
+  status_inativo_desde: "status_inativo_desde",
+};
+
 function dividirLista(valor?: string | null) {
   if (!valor) return [];
   return valor
@@ -227,6 +337,8 @@ export default function Clientes() {
   const [mostrarCadastro, setMostrarCadastro] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [gerandoRelatorio, setGerandoRelatorio] = useState(false);
+  const [importandoExcel, setImportandoExcel] = useState(false);
+  const [importResumo, setImportResumo] = useState("");
   const [sucesso, setSucesso] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [alternandoStatusId, setAlternandoStatusId] = useState<string | null>(null);
@@ -399,6 +511,238 @@ export default function Clientes() {
       setGerandoRelatorio(false);
     }
   }, [fetchClientesRelatorio, termoFiltro]);
+
+  const handleBaixarModeloExcel = useCallback(() => {
+    const headers = [
+      "nome",
+      "razao_social",
+      "cnpj",
+      "status",
+      "cidade",
+      "estado",
+      "email_nf",
+      "endereco_coleta",
+      "endereco_faturamento",
+      "responsavel_nome",
+      "telefone",
+      "email",
+      "tipo_residuo",
+      "classificacao",
+      "unidade_medida",
+      "frequencia_coleta",
+      "licenca_numero",
+      "validade",
+    ];
+
+    const exemplo = [
+      "Cliente Exemplo",
+      "Cliente Exemplo LTDA",
+      "00.000.000/0000-00",
+      "Ativo",
+      "São Paulo",
+      "SP",
+      "nf@cliente.com.br",
+      "",
+      "",
+      "Fulano",
+      "(11) 99999-9999",
+      "contato@cliente.com.br",
+      "Resíduo",
+      "Classe I",
+      "kg",
+      "semanal",
+      "",
+      "2026-12-31",
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, exemplo]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "clientes");
+    XLSX.writeFile(wb, "modelo_importacao_clientes.xlsx");
+  }, []);
+
+  const handleImportarExcel = useCallback(
+    async (file: File) => {
+      setImportResumo("");
+      if (!file) return;
+
+      if (!/\.xlsx$/i.test(file.name)) {
+        alert("Envie um arquivo .xlsx (Excel).");
+        return;
+      }
+
+      if (file.size > IMPORT_MAX_BYTES) {
+        alert(`Arquivo muito grande. Limite: ${(IMPORT_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB.`);
+        return;
+      }
+
+      setImportandoExcel(true);
+
+      try {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array", dense: true, cellDates: true });
+        const sheetName = wb.SheetNames?.[0];
+        if (!sheetName) throw new Error("A planilha não possui abas.");
+        const sheet = wb.Sheets[sheetName];
+
+        const aoa = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          blankrows: false,
+          raw: true,
+        }) as unknown[][];
+
+        if (!Array.isArray(aoa) || aoa.length < 2) {
+          throw new Error("Planilha vazia. Precisa ter cabeçalho e pelo menos 1 linha.");
+        }
+
+        if (aoa.length - 1 > IMPORT_MAX_ROWS) {
+          throw new Error(`Muitas linhas (${aoa.length - 1}). Limite: ${IMPORT_MAX_ROWS}.`);
+        }
+
+        const headerRow = aoa[0] ?? [];
+        if ((headerRow as unknown[]).length > IMPORT_MAX_COLS) {
+          throw new Error(`Muitas colunas (${(headerRow as unknown[]).length}). Limite: ${IMPORT_MAX_COLS}.`);
+        }
+
+        const colMap = new Map<number, keyof ImportRow>();
+        for (let c = 0; c < headerRow.length; c++) {
+          const h = normalizarHeader(headerRow[c]);
+          const mapped = IMPORT_HEADER_ALIASES[h];
+          if (mapped) colMap.set(c, mapped);
+        }
+
+        const required: Array<keyof ImportRow> = ["nome", "razao_social", "cnpj"];
+        const missing = required.filter((r) => !Array.from(colMap.values()).includes(r));
+        if (missing.length) {
+          throw new Error(`Cabeçalhos obrigatórios ausentes: ${missing.join(", ")}.`);
+        }
+
+        const rows: ImportRow[] = [];
+        const erros: string[] = [];
+
+        for (let r = 1; r < aoa.length; r++) {
+          const row = aoa[r] ?? [];
+          const obj: ImportRow = {};
+
+          for (const [idx, key] of colMap.entries()) {
+            const v = (row as unknown[])[idx];
+            if (key === "validade" || key === "status_ativo_desde" || key === "status_inativo_desde") {
+              const iso = parseExcelDateToIso(v);
+              if (iso) (obj as Record<keyof ImportRow, string | undefined>)[key] = iso;
+              continue;
+            }
+            const s = String(v ?? "").trim();
+            if (s) (obj as Record<keyof ImportRow, string | undefined>)[key] = s;
+          }
+
+          const nome = (obj.nome || "").trim();
+          const razao = (obj.razao_social || "").trim();
+          const cnpj = normalizarCnpjParaArmazenar(String(obj.cnpj || ""));
+
+          if (!nome || !razao || !cnpj || cnpj.replace(/\D/g, "").length !== 14) {
+            erros.push(`Linha ${r + 1}: nome/razão/CNPJ inválidos.`);
+            continue;
+          }
+
+          obj.nome = nome;
+          obj.razao_social = razao;
+          obj.cnpj = cnpj;
+          obj.status = (obj.status || "Ativo").trim() || "Ativo";
+
+          if (!obj.tipo_residuo) obj.tipo_residuo = "—";
+          if (!obj.classificacao) obj.classificacao = "—";
+
+          rows.push(obj);
+        }
+
+        if (rows.length === 0) {
+          throw new Error(
+            erros.length ? `Nenhuma linha válida.\n\n${erros.slice(0, 8).join("\n")}` : "Nenhuma linha válida."
+          );
+        }
+
+        const cnpjs = Array.from(new Set(rows.map((r) => r.cnpj!).filter(Boolean)));
+        const existingMap = new Map<string, string>();
+
+        for (let i = 0; i < cnpjs.length; i += 200) {
+          const chunk = cnpjs.slice(i, i + 200);
+          const { data, error } = await supabase.from("clientes").select("id, cnpj").in("cnpj", chunk);
+          if (error) throw error;
+          for (const item of (data as Array<{ id: string; cnpj: string | null }>) || []) {
+            if (item?.cnpj) existingMap.set(String(item.cnpj).trim(), item.id);
+          }
+        }
+
+        const inserts: Array<Record<string, unknown>> = [];
+        const updates: Array<{ id: string; payload: Record<string, unknown> }> = [];
+
+        for (const r of rows) {
+          const payload = {
+            nome: r.nome!,
+            razao_social: r.razao_social!,
+            cnpj: r.cnpj!,
+            status: (r.status || "Ativo").trim() || "Ativo",
+            cep: limparOuNull(r.cep || ""),
+            rua: limparOuNull(r.rua || ""),
+            numero: limparOuNull(r.numero || ""),
+            complemento: limparOuNull(r.complemento || ""),
+            bairro: limparOuNull(r.bairro || ""),
+            cidade: limparOuNull(r.cidade || ""),
+            estado: limparOuNull(r.estado || ""),
+            endereco_coleta: limparOuNull(r.endereco_coleta || ""),
+            endereco_faturamento: limparOuNull(r.endereco_faturamento || ""),
+            email_nf: limparOuNull(r.email_nf || ""),
+            responsavel_nome: limparOuNull(r.responsavel_nome || ""),
+            telefone: limparOuNull(r.telefone || ""),
+            email: limparOuNull(r.email || ""),
+            tipo_residuo: limparOuNull(r.tipo_residuo || ""),
+            classificacao: limparOuNull(r.classificacao || ""),
+            unidade_medida: limparOuNull(r.unidade_medida || ""),
+            frequencia_coleta: limparOuNull(r.frequencia_coleta || ""),
+            licenca_numero: limparOuNull(r.licenca_numero || ""),
+            validade: limparOuNull(r.validade || ""),
+            status_ativo_desde: limparOuNull(r.status_ativo_desde || ""),
+            status_inativo_desde: limparOuNull(r.status_inativo_desde || ""),
+          };
+
+          const id = existingMap.get(r.cnpj!);
+          if (id) updates.push({ id, payload });
+          else inserts.push(payload);
+        }
+
+        for (let i = 0; i < inserts.length; i += 200) {
+          const chunk = inserts.slice(i, i + 200);
+          const { error } = await supabase.from("clientes").insert(chunk);
+          if (error) throw error;
+        }
+
+        for (const u of updates) {
+          const { error } = await supabase.from("clientes").update(u.payload).eq("id", u.id);
+          if (error) throw error;
+        }
+
+        setImportResumo(
+          [
+            `Importação concluída.`,
+            `Linhas válidas: ${rows.length}.`,
+            `Novos: ${inserts.length}.`,
+            `Atualizados: ${updates.length}.`,
+            erros.length ? `Ignorados: ${erros.length} (ex.: ${erros[0]})` : "",
+          ]
+            .filter(Boolean)
+            .join(" ")
+        );
+
+        await fetchClientes();
+      } catch (err) {
+        console.error("Erro ao importar Excel:", err);
+        alert(err instanceof Error ? err.message : "Falha ao importar a planilha.");
+      } finally {
+        setImportandoExcel(false);
+      }
+    },
+    [fetchClientes]
+  );
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -770,6 +1114,58 @@ export default function Clientes() {
               {gerandoRelatorio ? "Gerando PDF..." : "Relatório (PDF)"}
             </button>
 
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "stretch" }}>
+              <input
+                type="file"
+                accept=".xlsx"
+                style={{ display: "none" }}
+                id="clientes-import-xlsx"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!f || importandoExcel) return;
+                  void handleImportarExcel(f);
+                }}
+              />
+              <button
+                type="button"
+                disabled={importandoExcel}
+                onClick={() => document.getElementById("clientes-import-xlsx")?.click()}
+                style={{
+                  background: "#ffffff",
+                  color: "#0f172a",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "12px",
+                  height: "50px",
+                  padding: "0 16px",
+                  fontWeight: 800,
+                  cursor: importandoExcel ? "not-allowed" : "pointer",
+                  alignSelf: "stretch",
+                }}
+                title="Importa clientes a partir de uma planilha .xlsx (valida e insere/atualiza por CNPJ)"
+              >
+                {importandoExcel ? "Importando..." : "Importar (Excel)"}
+              </button>
+              <button
+                type="button"
+                onClick={handleBaixarModeloExcel}
+                style={{
+                  background: "#0f172a",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "12px",
+                  height: "50px",
+                  padding: "0 14px",
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  alignSelf: "stretch",
+                }}
+                title="Baixa um modelo .xlsx com os cabeçalhos esperados"
+              >
+                Modelo
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={abrirCadastroNovo}
@@ -789,6 +1185,21 @@ export default function Clientes() {
             </button>
           </div>
         </div>
+
+        {importResumo ? (
+          <div
+            style={{
+              background: "#0ea5e9",
+              color: "#ffffff",
+              padding: "12px 16px",
+              borderRadius: "12px",
+              fontWeight: 700,
+              border: "1px solid rgba(255,255,255,0.18)",
+            }}
+          >
+            {importResumo}
+          </div>
+        ) : null}
 
         {mostrarCadastro && (
         <div

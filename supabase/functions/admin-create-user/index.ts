@@ -1,11 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Content-Type": "application/json",
-};
+import { corsHeadersFor, handleCorsOptions } from "../_shared/cors.ts";
 
 type CreateUserBody = {
   nome?: string;
@@ -14,20 +8,19 @@ type CreateUserBody = {
   cargo?: string;
 };
 
-function jsonResponse(status: number, body: Record<string, unknown>) {
+function jsonResponse(req: Request, status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: corsHeaders,
+    headers: corsHeadersFor(req),
   });
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  const corsEarly = handleCorsOptions(req);
+  if (corsEarly) return corsEarly;
 
   if (req.method !== "POST") {
-    return jsonResponse(405, {
+    return jsonResponse(req, 405, {
       error: "Método não permitido.",
     });
   }
@@ -38,7 +31,7 @@ Deno.serve(async (req: Request) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!supabaseUrl || !anonKey || !serviceRoleKey) {
-      return jsonResponse(500, {
+      return jsonResponse(req,500, {
         error: "Variáveis do Supabase não encontradas.",
       });
     }
@@ -46,7 +39,7 @@ Deno.serve(async (req: Request) => {
     const authHeader = req.headers.get("Authorization");
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return jsonResponse(401, {
+      return jsonResponse(req,401, {
         error: "Token de autorização não enviado.",
       });
     }
@@ -54,7 +47,7 @@ Deno.serve(async (req: Request) => {
     const token = authHeader.replace("Bearer ", "").trim();
 
     if (!token) {
-      return jsonResponse(401, {
+      return jsonResponse(req,401, {
         error: "Token inválido.",
       });
     }
@@ -64,7 +57,7 @@ Deno.serve(async (req: Request) => {
     try {
       body = await req.json();
     } catch {
-      return jsonResponse(400, {
+      return jsonResponse(req,400, {
         error: "Body inválido. Envie JSON válido.",
       });
     }
@@ -75,25 +68,25 @@ Deno.serve(async (req: Request) => {
     const cargo = String(body?.cargo || "").trim();
 
     if (!nome) {
-      return jsonResponse(400, { error: "Nome é obrigatório." });
+      return jsonResponse(req,400, { error: "Nome é obrigatório." });
     }
 
     if (!email) {
-      return jsonResponse(400, { error: "E-mail é obrigatório." });
+      return jsonResponse(req,400, { error: "E-mail é obrigatório." });
     }
 
     if (!senha) {
-      return jsonResponse(400, { error: "Senha é obrigatória." });
+      return jsonResponse(req,400, { error: "Senha é obrigatória." });
     }
 
     if (senha.length < 6) {
-      return jsonResponse(400, {
+      return jsonResponse(req,400, {
         error: "A senha precisa ter pelo menos 6 caracteres.",
       });
     }
 
     if (!cargo) {
-      return jsonResponse(400, { error: "Cargo é obrigatório." });
+      return jsonResponse(req,400, { error: "Cargo é obrigatório." });
     }
 
     const client = createClient(supabaseUrl, anonKey, {
@@ -112,7 +105,7 @@ Deno.serve(async (req: Request) => {
     } = await client.auth.getUser();
 
     if (userError || !usuarioLogado) {
-      return jsonResponse(401, {
+      return jsonResponse(req,401, {
         error: "Usuário não autenticado.",
         details: userError?.message || null,
       });
@@ -125,14 +118,14 @@ Deno.serve(async (req: Request) => {
       .single();
 
     if (perfilError || !perfilAdmin) {
-      return jsonResponse(403, {
+      return jsonResponse(req,403, {
         error: "Não foi possível validar o perfil do usuário logado.",
         details: perfilError?.message || null,
       });
     }
 
     if (perfilAdmin.cargo !== "Administrador") {
-      return jsonResponse(403, {
+      return jsonResponse(req,403, {
         error: "Apenas administradores podem criar usuários.",
       });
     }
@@ -144,7 +137,7 @@ Deno.serve(async (req: Request) => {
     );
 
     if (jaExisteNoAuth) {
-      return jsonResponse(400, {
+      return jsonResponse(req,400, {
         error: "Já existe um usuário com este e-mail no Auth.",
       });
     }
@@ -156,14 +149,14 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (buscaTabelaError) {
-      return jsonResponse(500, {
+      return jsonResponse(req,500, {
         error: "Erro ao validar e-mail na tabela usuarios.",
         details: buscaTabelaError.message,
       });
     }
 
     if (usuarioExistenteTabela) {
-      return jsonResponse(400, {
+      return jsonResponse(req,400, {
         error: "Já existe um usuário com este e-mail na tabela usuarios.",
       });
     }
@@ -183,7 +176,7 @@ Deno.serve(async (req: Request) => {
       });
 
     if (createAuthError || !authCriado?.user) {
-      return jsonResponse(400, {
+      return jsonResponse(req,400, {
         error: "Erro ao criar usuário no Auth.",
         details: createAuthError?.message || null,
       });
@@ -202,13 +195,13 @@ Deno.serve(async (req: Request) => {
     if (insertError) {
       await admin.auth.admin.deleteUser(novoUsuarioId);
 
-      return jsonResponse(400, {
+      return jsonResponse(req,400, {
         error: "Usuário criado no Auth, mas falhou ao salvar na tabela usuarios.",
         details: insertError.message,
       });
     }
 
-    return jsonResponse(200, {
+    return jsonResponse(req,200, {
       success: true,
       message: "Usuário criado com sucesso.",
       usuario: {
@@ -220,7 +213,7 @@ Deno.serve(async (req: Request) => {
       },
     });
   } catch (error) {
-    return jsonResponse(500, {
+    return jsonResponse(req,500, {
       error: "Erro interno na Edge Function.",
       details: error instanceof Error ? error.message : String(error),
     });

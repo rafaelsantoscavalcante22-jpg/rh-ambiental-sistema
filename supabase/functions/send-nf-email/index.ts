@@ -1,13 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Content-Type": "application/json",
-};
+import { corsHeadersFor, handleCorsOptions } from "../_shared/cors.ts";
 
 type Destinatario = {
   cliente_id: string;
@@ -17,10 +10,10 @@ type Destinatario = {
 
 type ProvedorEnvio = "gmail" | "resend";
 
-function jsonResponse(status: number, body: Record<string, unknown>) {
+function jsonResponse(req: Request, status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: corsHeaders,
+    headers: corsHeadersFor(req),
   });
 }
 
@@ -92,12 +85,11 @@ function resolverProvedor(): {
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  const corsEarly = handleCorsOptions(req);
+  if (corsEarly) return corsEarly;
 
   if (req.method !== "POST") {
-    return jsonResponse(405, { error: "Método não permitido." });
+    return jsonResponse(req, 405, { error: "Método não permitido." });
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -105,12 +97,12 @@ Deno.serve(async (req: Request) => {
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
   if (!supabaseUrl || !anonKey || !serviceRoleKey) {
-    return jsonResponse(500, { error: "Variáveis do Supabase não encontradas." });
+    return jsonResponse(req,500, { error: "Variáveis do Supabase não encontradas." });
   }
 
   const cfg = resolverProvedor();
   if (cfg.erroConfig) {
-    return jsonResponse(503, {
+    return jsonResponse(req,503, {
       error: cfg.erroConfig,
       code: "EMAIL_PROVIDER_NOT_CONFIGURED",
     });
@@ -118,12 +110,12 @@ Deno.serve(async (req: Request) => {
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
-    return jsonResponse(401, { error: "Token de autorização não enviado." });
+    return jsonResponse(req,401, { error: "Token de autorização não enviado." });
   }
 
   const token = authHeader.replace("Bearer ", "").trim();
   if (!token) {
-    return jsonResponse(401, { error: "Token inválido." });
+    return jsonResponse(req,401, { error: "Token inválido." });
   }
 
   let body: {
@@ -134,7 +126,7 @@ Deno.serve(async (req: Request) => {
   try {
     body = await req.json();
   } catch {
-    return jsonResponse(400, { error: "Body inválido. Envie JSON válido." });
+    return jsonResponse(req,400, { error: "Body inválido. Envie JSON válido." });
   }
 
   const destinatarios = Array.isArray(body?.destinatarios)
@@ -142,7 +134,7 @@ Deno.serve(async (req: Request) => {
     : [];
 
   if (destinatarios.length === 0) {
-    return jsonResponse(400, { error: "Informe ao menos um destinatário." });
+    return jsonResponse(req,400, { error: "Informe ao menos um destinatário." });
   }
 
   const supabaseUser = createClient(supabaseUrl, anonKey, {
@@ -151,7 +143,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: userData, error: userErr } = await supabaseUser.auth.getUser();
   if (userErr || !userData?.user?.id) {
-    return jsonResponse(401, { error: "Sessão inválida ou expirada." });
+    return jsonResponse(req,401, { error: "Sessão inválida ou expirada." });
   }
 
   const admin = createClient(supabaseUrl, serviceRoleKey);
@@ -162,11 +154,11 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (perfilErr) {
-    return jsonResponse(500, { error: perfilErr.message });
+    return jsonResponse(req,500, { error: perfilErr.message });
   }
 
   if (!podeEnviarNf(perfil?.cargo ?? null)) {
-    return jsonResponse(403, {
+    return jsonResponse(req,403, {
       error:
         "Sem permissão para envio de NF. Perfis: Administrador, Faturamento, Financeiro ou Diretoria.",
     });
@@ -202,7 +194,7 @@ Deno.serve(async (req: Request) => {
         },
       });
     } catch (e) {
-      return jsonResponse(500, {
+      return jsonResponse(req,500, {
         error: `Falha ao iniciar SMTP Gmail: ${
           e instanceof Error ? e.message : String(e)
         }`,
@@ -338,7 +330,7 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (logErr) {
-    return jsonResponse(500, {
+    return jsonResponse(req,500, {
       error: `E-mails processados, mas falhou o registo no histórico: ${logErr.message}`,
       resultados,
       okCount,
@@ -354,7 +346,7 @@ Deno.serve(async (req: Request) => {
     ? `${okCount} e-mail(ns) enviado(s) via Gmail.`
     : `${okCount} e-mail(ns) enviado(s) via Resend.`;
 
-  return jsonResponse(200, {
+  return jsonResponse(req,200, {
     message:
       failCount === 0
         ? msgOk

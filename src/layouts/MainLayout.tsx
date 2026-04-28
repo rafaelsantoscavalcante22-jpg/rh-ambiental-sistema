@@ -505,6 +505,23 @@ export default function MainLayout({ children }: MainLayoutProps) {
   }
 
   async function handleLogout() {
+    try {
+      if ('caches' in globalThis) {
+        const keys = await caches.keys()
+        await Promise.all(
+          keys
+            .filter(
+              (k) =>
+                k.startsWith('rg-') ||
+                k.startsWith('workbox-') ||
+                k.toLowerCase().includes('supabase'),
+            )
+            .map((k) => caches.delete(k)),
+        )
+      }
+    } catch {
+      /* ignorar falhas de Cache API */
+    }
     await supabase.auth.signOut()
     navigate('/')
   }
@@ -535,15 +552,17 @@ export default function MainLayout({ children }: MainLayoutProps) {
   useEffect(() => {
     const titulo = grupoTituloParaPathAtivo(location.pathname, menuGroupsVisiveis)
     if (!titulo) return
-    setOpenSections((prev) => {
-      const next: Record<string, boolean> = {}
-      for (const g of menuGroups) {
-        next[g.title] = g.title === titulo
-      }
-      const unchanged = menuGroups.every((g) => prev[g.title] === next[g.title])
-      if (unchanged) return prev
-      salvarSecoesSidebar(next)
-      return next
+    queueMicrotask(() => {
+      setOpenSections((prev) => {
+        const next: Record<string, boolean> = {}
+        for (const g of menuGroups) {
+          next[g.title] = g.title === titulo
+        }
+        const unchanged = menuGroups.every((g) => prev[g.title] === next[g.title])
+        if (unchanged) return prev
+        salvarSecoesSidebar(next)
+        return next
+      })
     })
   }, [location.pathname, menuGroupsVisiveis])
 

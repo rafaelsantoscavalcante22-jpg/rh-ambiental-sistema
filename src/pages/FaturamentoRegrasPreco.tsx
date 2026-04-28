@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import { supabase } from '../lib/supabase'
 import { limparSessionDraftKey, useCadastroFormDraft } from '../lib/useCadastroFormDraft'
 import { cargoPodeEmitirFaturamento } from '../lib/workflowPermissions'
 import type { RegraPrecoRow } from '../services/pricing'
+import { sanitizeIlikePattern } from '../lib/sanitizeIlike'
+import { useDebouncedValue } from '../lib/useDebouncedValue'
 
 type ClienteOpt = { id: string; nome: string; razao_social: string | null }
 
@@ -45,7 +47,6 @@ function parseNumeroOpcional(s: string): number | null {
 
 export default function FaturamentoRegrasPreco() {
   const [cargo, setCargo] = useState<string | null>(null)
-  const [clientes, setClientes] = useState<ClienteOpt[]>([])
   const [regras, setRegras] = useState<RegraPrecoRow[]>([])
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
@@ -55,6 +56,55 @@ export default function FaturamentoRegrasPreco() {
   const [form, setForm] = useState<FormState>(formInicial)
 
   const podeMutar = cargoPodeEmitirFaturamento(cargo)
+
+  const REGRAS_SELECT =
+    'id, cliente_id, tipo_residuo, tipo_servico, valor_por_kg, valor_minimo, valor_fixo, valor_transporte_por_kg, valor_tratamento_por_kg, taxa_adicional_fixa, ativo, updated_at'
+
+  // Upgrade performance: em vez de carregar milhares de clientes no combo, fazemos busca incremental.
+  const [clienteBusca, setClienteBusca] = useState('')
+  const clienteBuscaDebounced = useDebouncedValue(clienteBusca, 250)
+  const [clientesSugestoes, setClientesSugestoes] = useState<ClienteOpt[]>([])
+  const [carregandoSugestoes, setCarregandoSugestoes] = useState(false)
+  const [clientesNomePorId, setClientesNomePorId] = useState<Map<string, string>>(() => new Map())
+  const [mostrarDropdownClientes, setMostrarDropdownClientes] = useState(false)
+  const dropdownCloseTimerRef = useRef<number | null>(null)
+
+  const clienteSelecionadoLabel = useMemo(() => {
+    const id = form.cliente_id.trim()
+    if (!id) return ''
+    return clientesNomePorId.get(id) ?? ''
+  }, [form.cliente_id, clientesNomePorId])
+
+  const buscarClientesSugestoes = useCallback(async (term: string) => {
+    const t = term.trim()
+    if (!t) {
+      setClientesSugestoes([])
+      return
+    }
+    setCarregandoSugestoes(true)
+    try {
+      const s = sanitizeIlikePattern(t)
+      const { data, error } = await supabase
+        .from('clientes')
+        .select('id, nome, razao_social')
+        .or(`nome.ilike.%${s}%,razao_social.ilike.%${s}%`)
+        .order('nome', { ascending: true })
+        .limit(30)
+      if (error) throw error
+      setClientesSugestoes((data || []) as ClienteOpt[])
+    } catch (e) {
+      console.warn('[FaturamentoRegrasPreco] busca de clientes falhou', e)
+      setClientesSugestoes([])
+    } finally {
+      setCarregandoSugestoes(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void buscarClientesSugestoes(clienteBuscaDebounced)
+    })
+  }, [clienteBuscaDebounced, buscarClientesSugestoes])
 
   const regrasDraftData = useMemo(() => ({ form, editandoId }), [form, editandoId])
   useCadastroFormDraft({
@@ -72,28 +122,46 @@ export default function FaturamentoRegrasPreco() {
     setErro('')
     setOk('')
     try {
-      const [cliRes, regrasRes] = await Promise.all([
-        supabase.from('clientes').select('id, nome, razao_social').order('nome', { ascending: true }).limit(5000),
-        supabase.from('faturamento_precos_regras').select('*').order('updated_at', { ascending: false }).limit(500),
-      ])
+      const regrasRes = await supabase
+        .from('faturamento_precos_regras')
+        .select(REGRAS_SELECT)
+        .order('updated_at', { ascending: false })
+        .limit(500)
 
-      if (cliRes.error) throw cliRes.error
       if (regrasRes.error) throw regrasRes.error
 
-      setClientes((cliRes.data || []) as ClienteOpt[])
-      setRegras((regrasRes.data || []) as RegraPrecoRow[])
+      const regrasRows = (regrasRes.data || []) as RegraPrecoRow[]
+      setRegras(regrasRows)
+
+      const ids = [
+        ...new Set(regrasRows.map((r) => (r.cliente_id ? String(r.cliente_id) : '')).filter(Boolean)),
+      ] as string[]
+      const map = new Map<string, string>()
+      const IN_CHUNK = 300
+      for (let i = 0; i < ids.length; i += IN_CHUNK) {
+        const slice = ids.slice(i, i + IN_CHUNK)
+        const { data, error } = await supabase.from('clientes').select('id, nome, razao_social').in('id', slice)
+        if (error) throw error
+        for (const c of (data || []) as ClienteOpt[]) {
+          const rot = (c.razao_social || '').trim()
+          map.set(c.id, rot ? `${c.nome} · ${rot}` : c.nome)
+        }
+      }
+      setClientesNomePorId(map)
     } catch (e) {
       console.error(e)
       setErro(e instanceof Error ? e.message : 'Erro ao carregar regras de preço.')
-      setClientes([])
       setRegras([])
+      setClientesNomePorId(new Map())
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    void carregarTudo()
+    queueMicrotask(() => {
+      void carregarTudo()
+    })
   }, [carregarTudo])
 
   useEffect(() => {
@@ -113,15 +181,6 @@ export default function FaturamentoRegrasPreco() {
       cancelled = true
     }
   }, [])
-
-  const mapaClientes = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const c of clientes) {
-      const rot = (c.razao_social || '').trim()
-      m.set(c.id, rot ? `${c.nome} · ${rot}` : c.nome)
-    }
-    return m
-  }, [clientes])
 
   function iniciarNova() {
     limparSessionDraftKey(FATURAMENTO_REGRAS_DRAFT_KEY)
@@ -147,6 +206,26 @@ export default function FaturamentoRegrasPreco() {
     })
     setErro('')
     setOk('')
+  }
+
+  function handleBlurCliente() {
+    if (dropdownCloseTimerRef.current) window.clearTimeout(dropdownCloseTimerRef.current)
+    dropdownCloseTimerRef.current = window.setTimeout(() => {
+      setMostrarDropdownClientes(false)
+    }, 140)
+  }
+
+  function selecionarCliente(c: ClienteOpt) {
+    setForm((f) => ({ ...f, cliente_id: c.id }))
+    setClientesNomePorId((prev) => {
+      const next = new Map(prev)
+      const rot = (c.razao_social || '').trim()
+      next.set(c.id, rot ? `${c.nome} · ${rot}` : c.nome)
+      return next
+    })
+    setClienteBusca('')
+    setClientesSugestoes([])
+    setMostrarDropdownClientes(false)
   }
 
   async function salvar(e: FormEvent) {
@@ -303,28 +382,113 @@ export default function FaturamentoRegrasPreco() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <label style={{ fontSize: '12px', fontWeight: 700, color: '#64748b' }}>
                 Cliente (opcional — vazio = regra geral)
-                <select
-                  value={form.cliente_id}
-                  onChange={(e) => setForm((f) => ({ ...f, cliente_id: e.target.value }))}
-                  disabled={!podeMutar || loading}
-                  style={{
-                    marginTop: '6px',
-                    width: '100%',
-                    height: '42px',
-                    borderRadius: '10px',
-                    border: '1px solid #cbd5e1',
-                    padding: '0 12px',
-                    fontSize: '14px',
-                    background: '#fff',
-                  }}
-                >
-                  <option value="">— Geral (sem cliente) —</option>
-                  {clientes.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {mapaClientes.get(c.id) ?? c.nome}
-                    </option>
-                  ))}
-                </select>
+                <div style={{ position: 'relative', marginTop: '6px' }}>
+                  <input
+                    value={clienteBusca}
+                    onChange={(e) => setClienteBusca(e.target.value)}
+                    onFocus={() => setMostrarDropdownClientes(true)}
+                    onBlur={handleBlurCliente}
+                    disabled={!podeMutar || loading}
+                    placeholder={clienteSelecionadoLabel || 'Digite para buscar cliente… (vazio = regra geral)'}
+                    style={{
+                      width: '100%',
+                      height: '42px',
+                      borderRadius: '10px',
+                      border: '1px solid #cbd5e1',
+                      padding: '0 12px',
+                      fontSize: '14px',
+                      background: '#fff',
+                    }}
+                  />
+                  {form.cliente_id ? (
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => setForm((f) => ({ ...f, cliente_id: '' }))}
+                      disabled={!podeMutar}
+                      style={{
+                        position: 'absolute',
+                        right: 10,
+                        top: 9,
+                        height: 24,
+                        padding: '0 10px',
+                        borderRadius: 999,
+                        border: '1px solid #e2e8f0',
+                        background: '#fff',
+                        fontSize: 12,
+                        fontWeight: 800,
+                        color: '#0f172a',
+                        cursor: 'pointer',
+                      }}
+                      title="Remover cliente (regra geral)"
+                    >
+                      Geral
+                    </button>
+                  ) : null}
+                  {mostrarDropdownClientes && (clienteBuscaDebounced.trim() || clientesSugestoes.length > 0) ? (
+                    <div
+                      onMouseDown={(e) => e.preventDefault()}
+                      style={{
+                        position: 'absolute',
+                        zIndex: 20,
+                        left: 0,
+                        right: 0,
+                        top: 46,
+                        maxHeight: 280,
+                        overflow: 'auto',
+                        borderRadius: 12,
+                        border: '1px solid #e2e8f0',
+                        background: '#ffffff',
+                        boxShadow: '0 12px 28px rgba(15, 23, 42, 0.10)',
+                      }}
+                    >
+                      <div style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', fontSize: 12, color: '#64748b', fontWeight: 700 }}>
+                        {carregandoSugestoes ? 'A procurar…' : `Sugestões (${clientesSugestoes.length})`}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForm((f) => ({ ...f, cliente_id: '' }))
+                          setMostrarDropdownClientes(false)
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '10px 12px',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          fontWeight: 800,
+                          color: '#0f172a',
+                        }}
+                      >
+                        — Geral (sem cliente) —
+                      </button>
+                      {clientesSugestoes.map((c) => {
+                        const rot = (c.razao_social || '').trim()
+                        const label = rot ? `${c.nome} · ${rot}` : c.nome
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => selecionarCliente(c)}
+                            style={{
+                              width: '100%',
+                              textAlign: 'left',
+                              padding: '10px 12px',
+                              border: 'none',
+                              background: 'transparent',
+                              cursor: 'pointer',
+                              color: '#0f172a',
+                            }}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+                </div>
               </label>
 
               <label style={{ fontSize: '12px', fontWeight: 700, color: '#64748b' }}>
@@ -533,7 +697,7 @@ export default function FaturamentoRegrasPreco() {
                   ) : (
                     regras.map((r) => {
                       const cid = r.cliente_id ? String(r.cliente_id) : ''
-                      const cli = cid ? mapaClientes.get(cid) ?? '—' : 'Geral'
+                      const cli = cid ? clientesNomePorId.get(cid) ?? '—' : 'Geral'
                       return (
                         <tr key={r.id} style={{ borderBottom: '1px solid #eef2f7' }}>
                           <td style={td}>{r.ativo === false ? 'Não' : 'Sim'}</td>

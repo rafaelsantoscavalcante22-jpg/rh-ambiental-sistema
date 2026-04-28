@@ -23,7 +23,9 @@ export function useCadastroFormDraft<T extends object>(opts: {
   const { storageKey, open, data, onRestore } = opts;
   const restoredRef = useRef(false);
   const onRestoreRef = useRef(onRestore);
-  onRestoreRef.current = onRestore;
+  useEffect(() => {
+    onRestoreRef.current = onRestore;
+  }, [onRestore]);
 
   useEffect(() => {
     if (restoredRef.current) return;

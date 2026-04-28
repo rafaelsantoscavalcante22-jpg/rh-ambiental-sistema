@@ -387,10 +387,14 @@ export default function ComprovanteDescarteForm() {
   useEffect(() => {
     if (isNovo) return
     if (!idParam) {
-      setLoading(false)
+      queueMicrotask(() => {
+        setLoading(false)
+      })
       return
     }
-    void carregarId(idParam)
+    queueMicrotask(() => {
+      void carregarId(idParam)
+    })
   }, [idParam, isNovo, carregarId])
 
   useEffect(() => {

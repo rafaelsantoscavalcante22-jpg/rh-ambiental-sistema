@@ -16,14 +16,14 @@ if (!supabaseAnonKey) {
 }
 
 /**
- * Cliente único do Supabase. Sessão em `localStorage` (padrão) — adequado para reabrir a app
- * sem rede e alinhar com PWA. O service worker (produção) usa NetworkFirst em `/rest/v1/` para
- * reutilizar a última resposta GET quando offline; `/auth/v1/` permanece sempre em rede.
+ * Cliente único do Supabase. Sessão em `localStorage` (padrão).
+ * `detectSessionInUrl: false` — o login é só por palavra-passe; reduz superfície se tokens
+ * aparecerem na URL. O SW não cacheia `/rest/v1/` nem `/functions/v1/` (ver `vite.config.ts`).
  */
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: false,
   },
 });

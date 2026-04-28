@@ -3061,6 +3061,7 @@ img {
   border-radius: 50%;
   border: none;
   cursor: pointer;
+  touch-action: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3070,6 +3071,10 @@ img {
     0 4px 18px rgba(13, 148, 136, 0.5),
     0 2px 8px rgba(15, 23, 42, 0.2);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chat-float-fab:active {
+  cursor: grabbing;
 }
 
 .chat-float-fab:hover {

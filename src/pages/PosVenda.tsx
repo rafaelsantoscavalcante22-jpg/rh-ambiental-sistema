@@ -153,23 +153,42 @@ const POS_VENDA_SELECT_CANDIDATES = [
 async function carregarClientesPosVenda(): Promise<ClienteRow[]> {
   let lastMessage = ''
   for (const sel of POS_VENDA_SELECT_CANDIDATES) {
-    const { data, error } = await supabase
-      .from('clientes')
-      .select(sel)
-      .order('nome', { ascending: true })
-      .limit(20_000)
+    const PAGE_SIZE = 1000
+    const MAX_ROWS = 10_000
+    const acc: Record<string, unknown>[] = []
 
-    if (!error) {
+    for (let from = 0; from < MAX_ROWS; from += PAGE_SIZE) {
+      const to = Math.min(from + PAGE_SIZE - 1, MAX_ROWS - 1)
+      const { data, error } = await supabase
+        .from('clientes')
+        .select(sel)
+        .order('nome', { ascending: true })
+        .range(from, to)
+
+      if (error) {
+        lastMessage = error.message
+        console.warn('[Pós-venda] select clientes falhou:', sel.slice(0, 80), error.message)
+        acc.length = 0
+        break
+      }
+
       const rows = (data || []) as unknown as Record<string, unknown>[]
-      return rows.map((row) => ({
+      if (rows.length === 0) break
+      acc.push(...rows)
+      if (rows.length < PAGE_SIZE) break
+    }
+
+    if (acc.length > 0) {
+      if (acc.length >= MAX_ROWS) {
+        console.warn(`[Pós-venda] Cap de ${MAX_ROWS} clientes atingido; lista pode estar truncada.`)
+      }
+      return acc.map((row) => ({
         ...row,
         created_at: (row.created_at as string | null | undefined) ?? null,
         status_ativo_desde: (row.status_ativo_desde as string | null | undefined) ?? null,
         status_inativo_desde: (row.status_inativo_desde as string | null | undefined) ?? null,
       })) as ClienteRow[]
     }
-    lastMessage = error.message
-    console.warn('[Pós-venda] select clientes falhou:', sel.slice(0, 80), error.message)
   }
   throw new Error(
     lastMessage ||
@@ -437,7 +456,9 @@ export default function PosVenda() {
   }, [])
 
   useEffect(() => {
-    void carregar()
+    queueMicrotask(() => {
+      void carregar()
+    })
   }, [carregar])
 
   const hoje = useMemo(() => {

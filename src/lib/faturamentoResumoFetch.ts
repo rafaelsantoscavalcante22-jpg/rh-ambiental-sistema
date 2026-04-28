@@ -39,7 +39,10 @@ export async function fetchVwFaturamentoResumoPaginated(
     const from = page * PAGE_SIZE
     const to = from + PAGE_SIZE - 1
 
-    let qb = supabase.from('vw_faturamento_resumo').select('*')
+    const SEL =
+      'coleta_id, numero, numero_coleta, cliente_id, cliente_nome, cliente_razao_social, data_agendada, data_programacao, data_execucao, programacao_id, programacao_numero, programacao_observacoes, mtr_id, mtr_numero, mtr_observacoes, ticket_comprovante, peso_tara, peso_bruto, peso_liquido, motorista, placa, valor_coleta, status_pagamento, data_vencimento, referencia_nf, numero_nf_coleta, faturamento_referencia_nf, faturamento_registro_status, faturamento_registro_valor, confirmacao_recebimento, fluxo_status, etapa_operacional, status_processo, liberado_financeiro, coleta_observacoes, tipo_residuo, cidade, created_at, ultima_aprovacao_decisao, ultima_aprovacao_obs, ultima_aprovacao_em, conferencia_documentos_ok, conferencia_operacional_obs, conferencia_em, status_conferencia, pendencias_resumo, status_faturamento, conta_receber_nf_enviada_em, conta_receber_nf_envio_obs, conta_receber_valor_pago, conta_receber_valor_travado'
+
+    let qb = supabase.from('vw_faturamento_resumo').select(SEL)
     if (createdMin) qb = qb.gte('created_at', createdMin)
     if (orFilter) qb = qb.or(orFilter)
     const { data, error } = await qb

@@ -21,6 +21,26 @@ import { RgChatLogo } from './RgChatLogo'
 import { BRAND_LOGO_MARK } from '../../lib/brandLogo'
 
 const CHAT_HEAD_THEME_STORAGE_KEY = 'rg-chat-head-theme'
+const CHAT_FAB_POS_STORAGE_KEY = 'rg-chat-fab-pos-v1'
+
+type FabPos = { x: number; y: number }
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n))
+}
+
+function parseFabPos(raw: string | null): FabPos | null {
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw) as { x?: unknown; y?: unknown }
+    const x = Number(v.x)
+    const y = Number(v.y)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+    return { x, y }
+  } catch {
+    return null
+  }
+}
 
 export type ChatHeadThemeId = 'verde' | 'azul_escuro' | 'azul_claro' | 'rosa' | 'vermelho'
 
@@ -63,6 +83,20 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
   const { open, setOpen, pendingUserId, clearPendingUserId } = useChatFloat()
   const { isOnline } = usePresencaAoVivo()
 
+  const fabRef = useRef<HTMLButtonElement | null>(null)
+  const [fabPos, setFabPos] = useState<FabPos | null>(() => {
+    if (typeof window === 'undefined') return null
+    return parseFabPos(localStorage.getItem(CHAT_FAB_POS_STORAGE_KEY))
+  })
+  const dragRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    baseX: number
+    baseY: number
+    moved: boolean
+  } | null>(null)
+
   const [meuId, setMeuId] = useState<string | null>(null)
   const [erro, setErro] = useState('')
   const [tab, setTab] = useState<'conversas' | 'pessoas'>('conversas')
@@ -94,6 +128,102 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
       /* ignore */
     }
   }, [])
+
+  // Mantém o FAB dentro da viewport (resize/zoom).
+  useEffect(() => {
+    if (!fabPos) return
+    const handle = () => {
+      const el = fabRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const x = clamp(fabPos.x, 8, Math.max(8, vw - rect.width - 8))
+      const y = clamp(fabPos.y, 8, Math.max(8, vh - rect.height - 8))
+      if (x === fabPos.x && y === fabPos.y) return
+      setFabPos({ x, y })
+    }
+    window.addEventListener('resize', handle)
+    return () => window.removeEventListener('resize', handle)
+  }, [fabPos])
+
+  useEffect(() => {
+    if (!fabPos) return
+    try {
+      localStorage.setItem(CHAT_FAB_POS_STORAGE_KEY, JSON.stringify(fabPos))
+    } catch {
+      /* ignore */
+    }
+  }, [fabPos])
+
+  const handleFabPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (open) return
+      const el = fabRef.current
+      if (!el) return
+      // Botão primário / toque.
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+
+      const rect = el.getBoundingClientRect()
+      const base = fabPos ?? { x: rect.left, y: rect.top }
+      dragRef.current = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        baseX: base.x,
+        baseY: base.y,
+        moved: false,
+      }
+
+      try {
+        el.setPointerCapture(e.pointerId)
+      } catch {
+        /* ignore */
+      }
+    },
+    [fabPos, open]
+  )
+
+  const handleFabPointerMove = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    const st = dragRef.current
+    const el = fabRef.current
+    if (!st || !el) return
+    if (e.pointerId !== st.pointerId) return
+
+    const dx = e.clientX - st.startX
+    const dy = e.clientY - st.startY
+    if (!st.moved && Math.hypot(dx, dy) >= 6) st.moved = true
+
+    const rect = el.getBoundingClientRect()
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const nextX = clamp(st.baseX + dx, 8, Math.max(8, vw - rect.width - 8))
+    const nextY = clamp(st.baseY + dy, 8, Math.max(8, vh - rect.height - 8))
+    setFabPos({ x: nextX, y: nextY })
+  }, [])
+
+  const handleFabPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      const st = dragRef.current
+      const el = fabRef.current
+      if (!st || !el) return
+      if (e.pointerId !== st.pointerId) return
+
+      dragRef.current = null
+      try {
+        el.releasePointerCapture(e.pointerId)
+      } catch {
+        /* ignore */
+      }
+    },
+    []
+  )
+
+  const handleFabClick = useCallback(() => {
+    // Se houve arrasto, não abrir o chat no “click” final.
+    if (dragRef.current?.moved) return
+    setOpen(true)
+  }, [setOpen])
 
   useEffect(() => {
     if (!menuTemaAberto) return
@@ -426,6 +556,7 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
         <button
           type="button"
           className="chat-float-fab"
+          ref={fabRef}
           title="RG CHAT — abrir conversas"
           aria-label={
             naoLidasBadge > 0
@@ -434,7 +565,21 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
           }
           aria-expanded={false}
           aria-haspopup="dialog"
-          onClick={() => setOpen(true)}
+          style={
+            fabPos
+              ? ({
+                  left: `${fabPos.x}px`,
+                  top: `${fabPos.y}px`,
+                  right: 'auto',
+                  bottom: 'auto',
+                } as React.CSSProperties)
+              : undefined
+          }
+          onPointerDown={handleFabPointerDown}
+          onPointerMove={handleFabPointerMove}
+          onPointerUp={handleFabPointerUp}
+          onPointerCancel={handleFabPointerUp}
+          onClick={handleFabClick}
         >
           {naoLidasBadge > 0 ? (
             <span className="chat-float-fab__badge" aria-hidden>

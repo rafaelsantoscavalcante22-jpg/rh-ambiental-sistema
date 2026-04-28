@@ -188,7 +188,9 @@ export default function DashboardLegacy() {
   }, [carregarDashboard])
 
   useEffect(() => {
-    void carregarDados()
+    queueMicrotask(() => {
+      void carregarDados()
+    })
   }, [carregarDados])
 
   const totalColetas = useMemo(() => itens.length, [itens])
