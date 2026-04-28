@@ -38,7 +38,8 @@
     "functions:deploy:admin-all": "supabase functions deploy admin-create-user && supabase functions deploy admin-update-user && supabase functions deploy admin-delete-user && supabase functions deploy admin-set-user-pages",
     "functions:deploy:send-nf-email": "supabase functions deploy send-nf-email",
     "supabase:link": "supabase link",
-    "supabase:secrets:edge": "supabase secrets set --env-file supabase/.secrets.edge.env"
+    "supabase:secrets:edge": "supabase secrets set --env-file supabase/.secrets.edge.env",
+    "deploy:vercel": "node scripts/deploy-vercel.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.0",

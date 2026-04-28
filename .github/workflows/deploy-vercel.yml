@@ -1,0 +1,36 @@
+# Deploy manual para produção na Vercel (evita depender do browser / CLI interactivo).
+#
+# Configurar em GitHub → Settings → Secrets and variables → Actions:
+#   VERCEL_TOKEN        — https://vercel.com/account/tokens
+#   VERCEL_ORG_ID       — Vercel → Team/User → Settings, ou .vercel/project.json após `vercel link`
+#   VERCEL_PROJECT_ID   — Project → Settings → General → Project ID
+#
+# Se o projeto Vercel já está ligado ao repositório GitHub, cada push em main também dispara
+# deploy automático na Vercel — este workflow é um extra (ex.: só artefacto de build verificado).
+
+name: Deploy Vercel (production)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
+          working-directory: ./
