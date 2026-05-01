@@ -3,6 +3,8 @@
 
 /** Variáveis expostas ao cliente (prefixo VITE_). Documentadas em `.env.example`. */
 interface ImportMetaEnv {
+  /** Opcional: origem pública (por defeito use OFFICIAL_SITE_ORIGIN em src/lib/officialSiteUrl.ts). */
+  readonly VITE_APP_ORIGIN?: string
   readonly VITE_SUPABASE_URL: string
   readonly VITE_SUPABASE_ANON_KEY: string
   readonly VITE_SUPORTE_USER_ID?: string

@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase'
 import { cargoPodeEditarProgramacao } from '../lib/workflowPermissions'
 import { BRAND_LOGO_MARK } from '../lib/brandLogo'
 import { RgReportPdfIcon } from '../components/ui/RgReportPdfIcon'
+import { FloatingAlert } from '../components/ui/FloatingAlert'
 
 type ClienteOption = {
   id: string
@@ -511,6 +512,12 @@ export default function Programacao() {
 
   const podeMutarProgramacao = cargoPodeEditarProgramacao(usuarioCargo)
 
+  useEffect(() => {
+    if (!sucesso) return
+    const t = window.setTimeout(() => setSucesso(''), 4500)
+    return () => window.clearTimeout(t)
+  }, [sucesso])
+
   const itemContextoResolvido = useMemo(
     () =>
       resolverProgramacaoContexto(programacoes, {
@@ -975,7 +982,7 @@ export default function Programacao() {
           throw error
         }
 
-        setSucesso('Programação criada com sucesso.')
+        setSucesso('A programação foi criada com sucesso.')
       }
 
       limparFormulario()
@@ -1333,8 +1340,10 @@ export default function Programacao() {
         />
       </div>
 
-      {erro && <div style={erroStyle}>{erro}</div>}
-      {sucesso && <div style={sucessoStyle}>{sucesso}</div>}
+      {erro ? <FloatingAlert message={erro} variant="error" onClose={() => setErro('')} /> : null}
+      {sucesso ? (
+        <FloatingAlert message={sucesso} variant="success" onClose={() => setSucesso('')} />
+      ) : null}
 
       {temParametrosContexto && (
         <div
@@ -2515,26 +2524,6 @@ const checkboxLabelStyle: CSSProperties = {
   color: '#0f172a',
   fontWeight: 600,
   fontSize: '14px',
-}
-
-const erroStyle: CSSProperties = {
-  background: '#fef2f2',
-  color: '#b91c1c',
-  border: '1px solid #fecaca',
-  padding: '14px 16px',
-  borderRadius: '12px',
-  marginBottom: '16px',
-  fontWeight: 700,
-}
-
-const sucessoStyle: CSSProperties = {
-  background: '#f0fdf4',
-  color: '#166534',
-  border: '1px solid #bbf7d0',
-  padding: '14px 16px',
-  borderRadius: '12px',
-  marginBottom: '16px',
-  fontWeight: 700,
 }
 
 const calendarWeekHeaderStyle: CSSProperties = {

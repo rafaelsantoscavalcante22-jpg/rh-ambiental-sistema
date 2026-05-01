@@ -315,32 +315,15 @@ async function garantirTicketAposPesagem(params: {
   coletaId: string;
   numeroTicket: string;
   tipoTicket: "entrada" | "saida" | "frete";
+  /** Observação opcional do formulário de pesagem; não duplica empresa/resíduo/peso. */
   descricaoExtra?: string | null;
-  empresa: string;
-  residuo: string;
-  pesoLiquido: number | null;
 }): Promise<{ ok: true } | { ok: false; message: string }> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const pliquido =
-    params.pesoLiquido !== null && params.pesoLiquido !== undefined
-      ? Number(params.pesoLiquido).toLocaleString("pt-BR", {
-          minimumFractionDigits: 0,
-          maximumFractionDigits: 3,
-        })
-      : null;
-
-  const descricaoBase = [
-    params.empresa.trim() && `Empresa: ${params.empresa.trim()}`,
-    params.residuo.trim() && `Resíduo: ${params.residuo.trim()}`,
-    pliquido && `Peso líquido: ${pliquido} kg`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
   const descExtra = (params.descricaoExtra ?? "").trim();
-  const descricao = descExtra || descricaoBase;
+  const descricao = descExtra || null;
 
   const { data: existentes, error: errSel } = await supabase
     .from("tickets_operacionais")
@@ -360,7 +343,7 @@ async function garantirTicketAposPesagem(params: {
       .from("tickets_operacionais")
       .update({
         numero: params.numeroTicket.trim() || null,
-        descricao: descricao || null,
+        descricao,
         tipo_ticket: params.tipoTicket,
       })
       .eq("id", existente.id);
@@ -372,7 +355,7 @@ async function garantirTicketAposPesagem(params: {
   const { error } = await supabase.from("tickets_operacionais").insert({
     coleta_id: params.coletaId,
     numero: params.numeroTicket.trim() || null,
-    descricao: descricao || "Pesagem e Ticket.",
+    descricao,
     tipo_ticket: params.tipoTicket,
     created_by: user?.id ?? null,
   });
@@ -394,7 +377,7 @@ async function garantirTicketAposPesagem(params: {
         .from("tickets_operacionais")
         .update({
           numero: params.numeroTicket.trim() || null,
-          descricao: descricao || null,
+          descricao,
           tipo_ticket: params.tipoTicket,
         })
         .eq("id", retryRows[0].id);
@@ -651,6 +634,8 @@ export default function ControleMassa() {
     const temTicket = id ? Boolean(tipoTicketPorColeta.get(id)) : false;
     return { temSelecao, temPesagem, temTicket, prontoImprimir: temTicket };
   }, [form.coleta_id, mtrSemColetaSelecionado, ultimaPesagemPorColeta, tipoTicketPorColeta]);
+
+  const podeImprimirTicket = Boolean(form.coleta_id.trim() && estadoFluxo.prontoImprimir);
 
   const listaOperacao = useMemo(() => {
     const hojeIso = new Date().toISOString().slice(0, 10);
@@ -1414,29 +1399,84 @@ export default function ControleMassa() {
       return;
     }
 
+    const catalogIdNorm = form.residuo_catalogo_id.trim();
+    const rCatRow = catalogIdNorm ? catalogoResiduosPorId.get(catalogIdNorm) : undefined;
+    const textoDoCatalogo = rCatRow ? `${rCatRow.codigo} — ${rCatRow.nome}` : "";
+    const tipoResiduoColeta = (coletaVinculo?.tipo_residuo ?? "").trim();
+    const tipoResiduoMtr = (mtrLinha?.tipo_residuo != null ? String(mtrLinha.tipo_residuo) : "").trim();
+    const residuoParaInsert = (
+      form.residuo.trim() ||
+      textoDoCatalogo ||
+      tipoResiduoColeta ||
+      tipoResiduoMtr
+    ).trim();
+
+    if (!residuoParaInsert) {
+      setErroTela(
+        "Preencha o resíduo (texto ou catálogo) ou use uma coleta/MTR com tipo de resíduo definido."
+      );
+      return;
+    }
+
     setSalvando(true);
 
-    const payload = {
-      coleta_id: limparOuNull(coletaId),
-      numero_ticket: form.numero_ticket.trim(),
+    const numeroTicketTrim = form.numero_ticket.trim();
+    const payloadCampos = {
+      numero_ticket: numeroTicketTrim,
       data: form.data,
       empresa: empresaFinal,
-      residuo: limparOuNull(form.residuo),
+      residuo: residuoParaInsert,
       placa: limparOuNull(form.placa),
       motorista: limparOuNull(form.motorista),
       peso_liquido: pesoLiquidoNumero,
       status: form.status || "Pendente",
     };
 
-    const { error } = await supabase.from("controle_massa").insert([payload]);
+    const { data: cmExistenteRows, error: errBuscaCm } = await supabase
+      .from("controle_massa")
+      .select("id")
+      .eq("coleta_id", coletaId)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (errBuscaCm) {
+      console.error(errBuscaCm);
+      setErroTela(`Erro ao verificar pesagem existente: ${errBuscaCm.message}`);
+      setSalvando(false);
+      return;
+    }
+
+    const cmExistenteId = (cmExistenteRows?.[0] as { id?: string } | undefined)?.id;
+    let error: { message: string; details?: string; code?: string } | null = null;
+
+    if (cmExistenteId) {
+      const { error: upErr } = await supabase
+        .from("controle_massa")
+        .update(payloadCampos)
+        .eq("id", cmExistenteId);
+      error = upErr;
+    } else {
+      const { error: insErr } = await supabase.from("controle_massa").insert([
+        { coleta_id: limparOuNull(coletaId), ...payloadCampos },
+      ]);
+      error = insErr;
+    }
 
     if (error) {
       console.error("Erro ao salvar registro de massa:", error);
-      setErroTela(
-        `Erro ao salvar registro: ${error.message}${
-          error.details ? ` (${error.details})` : ""
-        }`
-      );
+      const msg = error.message || "";
+      const code = (error as { code?: string }).code;
+      if (
+        code === "23505" ||
+        msg.includes("controle_massa_numero_ticket") ||
+        (msg.toLowerCase().includes("duplicate") && msg.toLowerCase().includes("numero_ticket"))
+      ) {
+        setErroTela(
+          "Este número de ticket já está em uso em outra pesagem. Use um número novo ou salve de novo na mesma coleta para atualizar o registro já lançado."
+        );
+      } else {
+        setErroTela(`Erro ao salvar registro: ${msg}${error.details ? ` (${error.details})` : ""}`);
+      }
       setSalvando(false);
       return;
     }
@@ -1446,15 +1486,11 @@ export default function ControleMassa() {
       numeroTicket: form.numero_ticket,
       tipoTicket: form.tipo_ticket,
       descricaoExtra: form.descricao_ticket,
-      empresa: empresaFinal,
-      residuo: form.residuo,
-      pesoLiquido: pesoLiquidoNumero,
     });
 
     const fluxoPosPesagem = ticketAuto.ok ? "TICKET_GERADO" : "CONTROLE_PESAGEM_LANCADO";
 
-    const tipoResGravar =
-      (form.residuo.trim() || coletaVinculo?.tipo_residuo || "—").trim() || "—";
+    const tipoResGravar = residuoParaInsert;
     const resCatGravar = form.residuo_catalogo_id.trim() || null;
 
     const { error: errorColeta } = await supabase
@@ -1479,7 +1515,7 @@ export default function ControleMassa() {
       );
     } else if (!ticketAuto.ok) {
       setErroTela(
-        `Pesagem gravada, mas o ticket automático falhou (${ticketAuto.message}). Ajuste os dados e use «Gravar ticket» abaixo.`
+        `Pesagem gravada, mas o ticket automático falhou (${ticketAuto.message}). Abra «Mais opções do ticket» e use «Gravar ticket».`
       );
     } else {
       setErroTela("");
@@ -1494,9 +1530,9 @@ export default function ControleMassa() {
     setSalvando(false);
 
     setTimeout(() => {
-      document.getElementById("ticket-operacional-anchor")?.scrollIntoView({
+      document.getElementById("massa-finalizar-anchor")?.scrollIntoView({
         behavior: "smooth",
-        block: "start",
+        block: "center",
       });
     }, 150);
 
@@ -1504,8 +1540,8 @@ export default function ControleMassa() {
       errorColeta
         ? "Pesagem registrada; verifique o aviso em vermelho sobre a etapa da coleta."
         : !ticketAuto.ok
-          ? "Pesagem registrada. Verifique o aviso sobre o ticket e complete os dados abaixo se necessário."
-          : "Pesagem registrada e ticket gerado. Use «Imprimir ticket» no bloco logo abaixo."
+          ? "Pesagem registrada. Abra «Mais opções do ticket» em baixo para gravar o ticket manualmente."
+          : "Pesagem e ticket guardados. Use «Imprimir ticket» no passo 4."
     );
     setTimeout(() => {
       setSucesso("");
@@ -1666,10 +1702,10 @@ export default function ControleMassa() {
             >
               Pesagem, MTR e ticket no mesmo ecrã
             </h1>
-            <p className="page-header__lead" style={{ margin: "6px 0 0", maxWidth: "640px" }}>
-              Escolha a <strong>MTR</strong>, lance a pesagem e use o bloco <strong>Ticket operacional</strong> abaixo
-              para classificar o ticket (<strong>Entrada</strong>, <strong>Saída</strong> ou <strong>Frete</strong>).
-              Antes disto: Programação e MTR; depois: aprovação e faturamento no menu.
+            <p className="page-header__lead" style={{ margin: "6px 0 0", maxWidth: "720px" }}>
+              <strong>Resumo:</strong> escolha a coleta → preencha a pesagem → defina o ticket (tipo e número) →{' '}
+              <strong>Salvar</strong> → <strong>Imprimir ticket</strong>. Opções de correção e aprovação ficam em «Mais
+              opções», abaixo do formulário.
             </p>
             {usuarioCargo ? (
               <p
@@ -2326,8 +2362,8 @@ export default function ControleMassa() {
               </div>
               <p style={{ margin: "6px 0 0", fontSize: "13px", color: "#64748b", lineHeight: 1.45 }}>
                 {secaoPesagemAberta
-                  ? "Ao salvar, o ticket é gerado automaticamente — use «Imprimir ticket» em seguida."
-                  : "Abra para MTR, pesos e ticket. Pode fechar este bloco para ver mais da lista em Auditoria."}
+                  ? "Preencha os passos 1–4 e salve. Depois use Imprimir ticket (passo 4) quando o ticket estiver gerado."
+                  : "Abra para lançar pesagem e ticket. Pode fechar para ver mais da lista em Auditoria."}
               </p>
             </div>
             <span style={{ flexShrink: 0, fontSize: "12px", color: "#64748b" }} aria-hidden>
@@ -2720,9 +2756,10 @@ export default function ControleMassa() {
               >
                 <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
                   <div>
-                    <div style={{ fontWeight: 900, color: "#0f172a", fontSize: "14px" }}>3. Ticket</div>
+                    <div style={{ fontWeight: 900, color: "#0f172a", fontSize: "14px" }}>3. Dados do ticket</div>
                     <div style={{ marginTop: 4, fontSize: "12px", color: "#64748b", fontWeight: 600 }}>
-                      Defina o tipo e o número. A descrição pode ser automática ou manual.
+                      Tipo (entrada / saída / frete), número do ticket e, se quiser, uma nota curta. Isto é o que vai para
+                      o documento impresso.
                     </div>
                   </div>
                 </div>
@@ -2788,7 +2825,7 @@ export default function ControleMassa() {
 
                   <div style={{ gridColumn: "span 12" }} className="field">
                     <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>
-                      Descrição (opcional)
+                      Nota no ticket (opcional)
                     </label>
                     <textarea
                       name="descricao_ticket"
@@ -2797,7 +2834,7 @@ export default function ControleMassa() {
                         setForm((prev) => ({ ...prev, descricao_ticket: e.target.value }))
                       }
                       rows={2}
-                      placeholder="Se vazio, o sistema monta uma descrição automática (empresa, resíduo, peso)."
+                      placeholder="Ex.: observação interna que deve aparecer no ticket impresso. Deixe vazio se não precisar."
                       style={{
                         width: "100%",
                         borderRadius: "12px",
@@ -2815,6 +2852,7 @@ export default function ControleMassa() {
 
               {/* CARD 4 — AÇÃO FINAL */}
               <div
+                id="massa-finalizar-anchor"
                 style={{
                   border: "1px solid #bbf7d0",
                   background: "linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%)",
@@ -2829,39 +2867,15 @@ export default function ControleMassa() {
                 }}
               >
                 <div style={{ minWidth: 260 }}>
-                  <div style={{ fontWeight: 900, color: "#065f46" }}>4. Finalizar</div>
+                  <div style={{ fontWeight: 900, color: "#065f46" }}>4. Guardar e imprimir</div>
                   <div style={{ marginTop: 4, fontSize: "12px", color: "#047857", fontWeight: 700 }}>
                     {form.coleta_id.trim()
-                      ? "Ticket pronto para impressão após salvar."
-                      : "Selecione uma MTR/coleta e registre a pesagem para gerar o ticket."}
+                      ? "Primeiro «Salvar». Quando o passo Ticket estiver concluído no fluxo, use «Imprimir ticket»."
+                      : "Selecione uma MTR ou coleta no passo 1 antes de salvar."}
                   </div>
                 </div>
 
                 <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      document.getElementById("ticket-operacional-anchor")?.scrollIntoView({
-                        behavior: "smooth",
-                        block: "start",
-                      });
-                    }}
-                    disabled={!form.coleta_id.trim()}
-                    style={{
-                      height: "44px",
-                      padding: "0 18px",
-                      borderRadius: "12px",
-                      border: "1px solid #16a34a",
-                      background: form.coleta_id.trim() ? "#16a34a" : "#dcfce7",
-                      color: form.coleta_id.trim() ? "#ffffff" : "#166534",
-                      fontWeight: 900,
-                      cursor: form.coleta_id.trim() ? "pointer" : "not-allowed",
-                      boxShadow: form.coleta_id.trim() ? "0 10px 24px rgba(22, 163, 74, 0.18)" : "none",
-                    }}
-                  >
-                    Imprimir Ticket
-                  </button>
-
                   <button
                     type="submit"
                     disabled={salvando || !podeMutarMassa}
@@ -2878,7 +2892,31 @@ export default function ControleMassa() {
                       opacity: salvando || !podeMutarMassa ? 0.7 : 1,
                     }}
                   >
-                    {salvando ? "Salvando…" : "Salvar e continuar"}
+                    {salvando ? "Salvando…" : "Salvar pesagem e ticket"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    disabled={!podeImprimirTicket}
+                    title={
+                      podeImprimirTicket
+                        ? "Abre a janela de impressão com o layout do ticket (papel térmico / A4)."
+                        : "Guarde primeiro com «Salvar». O botão ativa quando o ticket estiver gerado no fluxo."
+                    }
+                    style={{
+                      height: "44px",
+                      padding: "0 18px",
+                      borderRadius: "12px",
+                      border: "1px solid #16a34a",
+                      background: podeImprimirTicket ? "#16a34a" : "#dcfce7",
+                      color: podeImprimirTicket ? "#ffffff" : "#166534",
+                      fontWeight: 900,
+                      cursor: podeImprimirTicket ? "pointer" : "not-allowed",
+                      boxShadow: podeImprimirTicket ? "0 8px 20px rgba(22, 163, 74, 0.2)" : "none",
+                    }}
+                  >
+                    Imprimir ticket
                   </button>
 
                   <button
@@ -2908,48 +2946,67 @@ export default function ControleMassa() {
               style={{
                 marginTop: "10px",
                 borderTop: "1px solid #e5e7eb",
-                padding: "18px 20px 20px",
-                background: "linear-gradient(180deg, #fafbfc 0%, #ffffff 100%)",
+                padding: "12px 16px 16px",
+                background: "#f8fafc",
+                borderRadius: "0 0 16px 16px",
               }}
             >
-              <details style={{ borderRadius: "14px" }}>
-                <summary style={{ cursor: "pointer", fontWeight: 900, color: "#0f172a", fontSize: "14px" }}>
-                  Impressão e ajustes avançados do ticket{" "}
-                  <span style={{ color: "#64748b", fontWeight: 800 }}>(opcional)</span>
+              <details
+                style={{
+                  borderRadius: "12px",
+                  border: "1px solid #e2e8f0",
+                  background: "#ffffff",
+                  padding: "10px 14px",
+                }}
+              >
+                <summary
+                  style={{
+                    cursor: "pointer",
+                    fontWeight: 800,
+                    color: "#334155",
+                    fontSize: "13px",
+                    listStyle: "none",
+                  }}
+                >
+                  Mais opções do ticket — corrigir dados, gravar de novo ou enviar para aprovação
+                  <span style={{ color: "#94a3b8", fontWeight: 700, marginLeft: "8px" }}>(clique para expandir)</span>
                 </summary>
-                <div style={{ marginTop: "12px" }}>
-                  <TicketOperacionalPanel
-                    variant="embedded"
-                    coletaAtiva={coletaTicketSnapshot}
-                    cargo={usuarioCargo}
-                    coletasOpcoes={coletasTicketOpcoes}
-                    carregandoColetas={loadingVinculo}
-                    ocultarSeletorColeta={Boolean(form.coleta_id.trim())}
-                    onTrocarColeta={(id) => {
-                      void (async () => {
-                        if (!id) {
-                          setMtrSemColetaSelecionado(null);
-                          setForm((prev) => ({ ...prev, coleta_id: "" }));
-                          return;
+                <p style={{ margin: "10px 0 12px", fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                  Use apenas se precisar alterar o ticket depois de salvar, se o sistema avisar falha ao gerar o ticket, ou
+                  para enviar a coleta à aprovação. O fluxo normal é: preencher o passo 3 acima, salvar e imprimir.
+                </p>
+                <TicketOperacionalPanel
+                  variant="embedded"
+                  simplifyEmbedded
+                  coletaAtiva={coletaTicketSnapshot}
+                  cargo={usuarioCargo}
+                  coletasOpcoes={coletasTicketOpcoes}
+                  carregandoColetas={loadingVinculo}
+                  ocultarSeletorColeta={Boolean(form.coleta_id.trim())}
+                  onTrocarColeta={(id) => {
+                    void (async () => {
+                      if (!id) {
+                        setMtrSemColetaSelecionado(null);
+                        setForm((prev) => ({ ...prev, coleta_id: "" }));
+                        return;
+                      }
+                      let c = todasColetas.find((x) => x.id === id);
+                      if (!c) {
+                        const extra = await buscarColetasPorIds([id]);
+                        c = extra[0];
+                        if (c) {
+                          setTodasColetas((prev) =>
+                            prev.some((x) => x.id === c!.id) ? prev : [...prev, c!]
+                          );
                         }
-                        let c = todasColetas.find((x) => x.id === id);
-                        if (!c) {
-                          const extra = await buscarColetasPorIds([id]);
-                          c = extra[0];
-                          if (c) {
-                            setTodasColetas((prev) =>
-                              prev.some((x) => x.id === c!.id) ? prev : [...prev, c!]
-                            );
-                          }
-                        }
-                        if (c) aplicarColetaNoForm(c);
-                      })();
-                    }}
-                    onEtapaColetaAlterada={() => {
-                      void fetchMtrsEColetas();
-                    }}
-                  />
-                </div>
+                      }
+                      if (c) aplicarColetaNoForm(c);
+                    })();
+                  }}
+                  onEtapaColetaAlterada={() => {
+                    void fetchMtrsEColetas();
+                  }}
+                />
               </details>
             </div>
             </>

@@ -4771,6 +4771,12 @@ a.rg-btn {
     margin: 2.5mm;
   }
 
+  .pwa-install-fab,
+  .pwa-install-help,
+  .pwa-update-bar {
+    display: none !important;
+  }
+
   body:has(#comprovante-descarte-print-root) .layout-sidebar,
   body:has(#comprovante-descarte-print-root) .layout-header,
   body:has(#comprovante-descarte-print-root) .chat-float-layer,
@@ -5202,7 +5208,7 @@ a.rg-btn {
   }
 }
 
-/* —— PWA: atualização, instalação, iOS —— */
+/* —— PWA: atualização e instalação —— */
 
 .pwa-update-bar {
   position: fixed;
@@ -5240,88 +5246,126 @@ a.rg-btn {
   min-height: 40px;
 }
 
-.pwa-install-strip,
-.pwa-ios-hint {
+/* Botão fixo: canto inferior esquerdo (evita o FAB do chat à direita) */
+.pwa-install-fab {
   position: fixed;
-  z-index: 10042;
-  left: max(12px, var(--safe-left));
-  right: max(12px, var(--safe-right));
-  bottom: calc(12px + var(--safe-bottom));
-  display: flex;
+  z-index: 10048;
+  left: max(14px, var(--safe-left));
+  bottom: calc(14px + var(--safe-bottom));
+  display: inline-flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
-  font-size: 13px;
-  color: #334155;
-  max-width: min(560px, calc(100vw - 24px - var(--safe-left) - var(--safe-right)));
-  margin-left: auto;
-  margin-right: auto;
+  padding: 12px 16px 12px 14px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(145deg, #0f766e, #0d9488);
+  box-shadow:
+    0 4px 18px rgba(13, 148, 136, 0.45),
+    0 2px 8px rgba(15, 23, 42, 0.18);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  max-width: calc(100vw - 28px - var(--safe-left) - var(--safe-right));
 }
 
-@media (min-width: 641px) {
-  .pwa-install-strip {
-    right: calc(100px + var(--safe-right));
-    max-width: min(480px, calc(100vw - 120px - var(--safe-left)));
+.pwa-install-fab:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 6px 22px rgba(13, 148, 136, 0.5),
+    0 4px 12px rgba(15, 23, 42, 0.15);
+}
+
+.pwa-install-fab__icon {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.pwa-install-fab__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 420px) {
+  .pwa-install-fab__label {
+    font-size: 13px;
   }
 }
 
-.pwa-install-strip__text {
-  flex: 1;
-  min-width: 140px;
-  line-height: 1.45;
-}
-
-.pwa-install-strip__primary {
-  flex-shrink: 0;
-  border: none;
-  border-radius: 10px;
-  padding: 10px 16px;
-  font-weight: 700;
-  font-size: 13px;
-  cursor: pointer;
-  background: #16a34a;
-  color: #fff;
-  min-height: 44px;
-}
-
-.pwa-install-strip__dismiss,
-.pwa-ios-hint__close {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #f8fafc;
-  color: #64748b;
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  display: inline-flex;
+.pwa-install-help {
+  position: fixed;
+  inset: 0;
+  z-index: 10070;
+  display: flex;
   align-items: center;
   justify-content: center;
+  padding: max(16px, var(--safe-top)) max(16px, var(--safe-right)) max(16px, var(--safe-bottom))
+    max(16px, var(--safe-left));
 }
 
-.pwa-ios-hint {
-  background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
-  border-color: rgba(22, 163, 74, 0.28);
+.pwa-install-help__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: rgba(15, 23, 42, 0.45);
+  cursor: pointer;
 }
 
-.pwa-ios-hint__text {
-  flex: 1;
-  min-width: 0;
-  line-height: 1.45;
-  font-size: 12px;
-  color: #475569;
+.pwa-install-help__panel {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  padding: 22px 22px 18px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.22);
 }
 
-.pwa-ios-hint__text strong {
+.pwa-install-help__title {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 800;
   color: #0f172a;
+}
+
+.pwa-install-help__text {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.pwa-install-help__text strong {
+  color: #0f172a;
+}
+
+.pwa-install-help__note {
+  margin: 0 0 18px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+.pwa-install-help__close {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 16px;
   font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  background: #0f766e;
+  color: #fff;
+  min-height: 48px;
+}
+
+.pwa-install-help__close:hover {
+  background: #0d9488;
 }
 
 @media (max-width: 640px) {

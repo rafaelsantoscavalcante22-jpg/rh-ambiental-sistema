@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-
-const LS_IOS = 'rg-pwa-ios-hint-dismissed'
-const LS_INSTALL = 'rg-pwa-install-strip-dismissed'
+import { OFFICIAL_SITE_ORIGIN } from '../../lib/officialSiteUrl'
 
 function isStandalone(): boolean {
   if (typeof window === 'undefined') return false
@@ -21,9 +19,10 @@ function isIOS(): boolean {
   )
 }
 
+type HelpKind = 'ios' | 'browser'
+
 /**
- * Camada PWA: atualização de versão, instalação (Chrome/Android) e dica discreta para iOS.
- * Montada uma única vez em App — não altera layouts das páginas.
+ * PWA: atualização, botão fixo para instalar (produção) e diálogo de ajuda quando o browser não expõe prompt nativo.
  */
 export function PwaPremiumShell() {
   const {
@@ -33,51 +32,29 @@ export function PwaPremiumShell() {
     immediate: true,
   })
 
-  const [installDismissed, setInstallDismissed] = useState(() => {
-    try {
-      return localStorage.getItem(LS_INSTALL) === '1'
-    } catch {
-      return false
-    }
-  })
-  const [iosDismissed, setIosDismissed] = useState(() => {
-    try {
-      return localStorage.getItem(LS_IOS) === '1'
-    } catch {
-      return false
-    }
-  })
-
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null)
+  const [helpOpen, setHelpOpen] = useState<HelpKind | null>(null)
+
+  const showInstallEntry = import.meta.env.PROD && !isStandalone()
 
   useEffect(() => {
-    if (isStandalone()) return
+    if (!showInstallEntry) return
     const onBip = (e: Event) => {
       e.preventDefault()
       setDeferred(e as BeforeInstallPromptEvent)
     }
     window.addEventListener('beforeinstallprompt', onBip)
     return () => window.removeEventListener('beforeinstallprompt', onBip)
-  }, [])
+  }, [showInstallEntry])
 
-  const dismissInstall = useCallback(() => {
-    setDeferred(null)
-    setInstallDismissed(true)
-    try {
-      localStorage.setItem(LS_INSTALL, '1')
-    } catch {
-      /* ignore */
+  useEffect(() => {
+    if (!helpOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setHelpOpen(null)
     }
-  }, [])
-
-  const dismissIos = useCallback(() => {
-    setIosDismissed(true)
-    try {
-      localStorage.setItem(LS_IOS, '1')
-    } catch {
-      /* ignore */
-    }
-  }, [])
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [helpOpen])
 
   const runInstall = useCallback(async () => {
     if (!deferred) return
@@ -86,10 +63,17 @@ export function PwaPremiumShell() {
     setDeferred(null)
   }, [deferred])
 
-  const standalone = isStandalone()
-  const showAndroidInstall =
-    !standalone && !installDismissed && deferred !== null && !isIOS()
-  const showIosHint = isIOS() && !standalone && !iosDismissed
+  const onInstallClick = useCallback(() => {
+    if (deferred) {
+      void runInstall()
+      return
+    }
+    if (isIOS()) {
+      setHelpOpen('ios')
+      return
+    }
+    setHelpOpen('browser')
+  }, [deferred, runInstall])
 
   return (
     <>
@@ -106,27 +90,56 @@ export function PwaPremiumShell() {
         </div>
       ) : null}
 
-      {showAndroidInstall ? (
-        <div className="pwa-install-strip" role="region" aria-label="Instalar aplicativo">
-          <span className="pwa-install-strip__text">Acesso rápido como aplicativo no seu dispositivo.</span>
-          <button type="button" className="pwa-install-strip__primary" onClick={() => void runInstall()}>
-            Instalar app
-          </button>
-          <button type="button" className="pwa-install-strip__dismiss" onClick={dismissInstall} aria-label="Dispensar">
-            ×
-          </button>
-        </div>
+      {showInstallEntry ? (
+        <button
+          type="button"
+          className="pwa-install-fab"
+          onClick={onInstallClick}
+          title={`Adiciona RG Ambiental ao dispositivo como aplicativo (via navegador). Acesso oficial: ${OFFICIAL_SITE_ORIGIN}`}
+          aria-label="Baixar ou instalar RG Ambiental no dispositivo"
+        >
+          <span className="pwa-install-fab__icon" aria-hidden>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </span>
+          <span className="pwa-install-fab__label">Baixar aplicativo</span>
+        </button>
       ) : null}
 
-      {showIosHint ? (
-        <div className="pwa-ios-hint" role="region" aria-label="Adicionar à tela inicial">
-          <span className="pwa-ios-hint__text">
-            Para instalar: toque em <strong>Compartilhar</strong> e depois{' '}
-            <strong>Adicionar à Tela de Início</strong>.
-          </span>
-          <button type="button" className="pwa-ios-hint__close" onClick={dismissIos} aria-label="Fechar dica">
-            ×
-          </button>
+      {helpOpen ? (
+        <div className="pwa-install-help" role="dialog" aria-modal="true" aria-labelledby="pwa-install-help-title">
+          <button
+            type="button"
+            className="pwa-install-help__backdrop"
+            aria-label="Fechar"
+            onClick={() => setHelpOpen(null)}
+          />
+          <div className="pwa-install-help__panel">
+            <h2 id="pwa-install-help-title" className="pwa-install-help__title">
+              {helpOpen === 'ios' ? 'Adicionar à tela inicial' : 'Instalar no computador'}
+            </h2>
+            {helpOpen === 'ios' ? (
+              <p className="pwa-install-help__text">
+                No Safari, toque em <strong>Compartilhar</strong> e depois em <strong>Adicionar à Tela de Início</strong>.
+              </p>
+            ) : (
+              <>
+                <p className="pwa-install-help__text">
+                  No <strong>Chrome</strong> ou <strong>Edge</strong>, procure o ícone de instalação na barra de endereços (por exemplo ⊕ ou monitor com seta) ou abra o menu{' '}
+                  <strong>⋮</strong> e escolha <strong>Instalar RG Ambiental</strong> / <strong>Instalar como aplicativo</strong>.
+                </p>
+                <p className="pwa-install-help__note">
+                  Não é feito download de um ficheiro instalável (.exe): o navegador cria um atalho que abre o sistema como aplicativo.
+                </p>
+              </>
+            )}
+            <button type="button" className="pwa-install-help__close" onClick={() => setHelpOpen(null)}>
+              Entendi
+            </button>
+          </div>
         </div>
       ) : null}
     </>

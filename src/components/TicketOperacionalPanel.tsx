@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import {
@@ -85,6 +86,8 @@ export type TicketOperacionalPanelProps = {
   onEtapaColetaAlterada?: () => void
   /** Esconde o select de coleta (fluxo integrado ao formulário de pesagem). */
   ocultarSeletorColeta?: boolean
+  /** Em Controle de Massa: omite faixa «Ticket gerado» e título duplicados (dados já estão no passo 3). */
+  simplifyEmbedded?: boolean
 }
 
 export function TicketOperacionalPanel({
@@ -96,10 +99,10 @@ export function TicketOperacionalPanel({
   onTrocarColeta,
   onEtapaColetaAlterada,
   ocultarSeletorColeta = false,
+  simplifyEmbedded = false,
 }: TicketOperacionalPanelProps) {
   const [ticketId, setTicketId] = useState<string | null>(null)
   const [numero, setNumero] = useState('')
-  const [descricao, setDescricao] = useState('')
   const [tipoTicket, setTipoTicket] = useState<TipoTicketOperacional>('saida')
   const [criadoEm, setCriadoEm] = useState<string | null>(null)
 
@@ -213,7 +216,6 @@ export function TicketOperacionalPanel({
     type LinhaTicketDb = {
       id: string
       numero: string | null
-      descricao: string | null
       tipo_ticket?: string | null
       created_at?: string | null
     }
@@ -221,7 +223,6 @@ export function TicketOperacionalPanel({
     const aplicarLinha = (data: LinhaTicketDb) => {
       setTicketId(data.id)
       setNumero(data.numero ?? '')
-      setDescricao(data.descricao ?? '')
       setTipoTicket(normalizarTipoTicket(data.tipo_ticket as string | null))
       setCriadoEm(data.created_at ?? null)
     }
@@ -231,7 +232,7 @@ export function TicketOperacionalPanel({
 
     const q1 = await supabase
       .from('tickets_operacionais')
-      .select('id, numero, descricao, tipo_ticket, created_at')
+      .select('id, numero, tipo_ticket, created_at')
       .eq('coleta_id', coletaId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -239,7 +240,7 @@ export function TicketOperacionalPanel({
     if (q1.error) {
       const q2 = await supabase
         .from('tickets_operacionais')
-        .select('id, numero, descricao, tipo_ticket, created_at')
+        .select('id, numero, tipo_ticket, created_at')
         .eq('coleta_id', coletaId)
         .limit(1)
       rows = (q2.data as LinhaTicketDb[] | undefined) ?? null
@@ -254,7 +255,6 @@ export function TicketOperacionalPanel({
       setErro('Não foi possível carregar o ticket.')
       setTicketId(null)
       setNumero('')
-      setDescricao('')
       setTipoTicket('saida')
       setCriadoEm(null)
       setCarregandoTicket(false)
@@ -268,7 +268,6 @@ export function TicketOperacionalPanel({
     } else {
       setTicketId(null)
       setNumero('')
-      setDescricao('')
       setTipoTicket('saida')
       setCriadoEm(null)
     }
@@ -288,7 +287,6 @@ export function TicketOperacionalPanel({
       queueMicrotask(() => {
         setTicketId(null)
         setNumero('')
-        setDescricao('')
         setTipoTicket('saida')
         setCriadoEm(null)
       })
@@ -300,9 +298,8 @@ export function TicketOperacionalPanel({
     if (!coletaAtiva || !podeEditarFormulario) return
 
     const n = numero.trim()
-    const d = descricao.trim()
-    if (!n && !d) {
-      setErro('Indique pelo menos o número ou a descrição do ticket.')
+    if (!n) {
+      setErro('Indique o número do ticket.')
       return
     }
 
@@ -338,7 +335,6 @@ export function TicketOperacionalPanel({
 
       const payloadTicket = {
         numero: n || null,
-        descricao: d || null,
         tipo_ticket: tipoTicket,
         created_by: user?.id ?? null,
       }
@@ -453,10 +449,6 @@ export function TicketOperacionalPanel({
     !carregandoTicket &&
     variant === 'page'
 
-  function handleImprimirTicket() {
-    window.print()
-  }
-
   const dataTicketBr = criadoEm
     ? new Date(criadoEm).toLocaleDateString('pt-BR')
     : new Date().toLocaleDateString('pt-BR')
@@ -548,8 +540,8 @@ export function TicketOperacionalPanel({
         }
       `}</style>
 
-      <div id="ticket-operacional-anchor" className="ticket-no-print">
-        {variant === 'embedded' && coletaAtiva && ticketId ? (
+      <div className="ticket-no-print">
+        {variant === 'embedded' && coletaAtiva && ticketId && !simplifyEmbedded ? (
           <div
             style={{
               marginBottom: '18px',
@@ -561,7 +553,7 @@ export function TicketOperacionalPanel({
               display: 'flex',
               flexWrap: 'wrap',
               alignItems: 'center',
-              justifyContent: 'space-between',
+              justifyContent: 'flex-start',
               gap: '16px',
             }}
           >
@@ -576,7 +568,7 @@ export function TicketOperacionalPanel({
                   marginBottom: '6px',
                 }}
               >
-                Ticket pronto para impressão
+                Ticket gerado
               </div>
               <div style={{ fontSize: '17px', fontWeight: 800, color: '#0f172a', lineHeight: 1.3 }}>
                 {numero.trim() ? `N.º ${numero.trim()}` : `Coleta ${coletaAtiva.numero}`}
@@ -584,27 +576,9 @@ export function TicketOperacionalPanel({
                 {coletaAtiva.cliente || '—'}
               </div>
               <div style={{ fontSize: '12px', color: '#047857', marginTop: '6px', fontWeight: 600 }}>
-                {labelTipoTicket[tipoTicket]} · Revise os dados abaixo se precisar e imprima
+                {labelTipoTicket[tipoTicket]} · Consulte os dados abaixo se precisar
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleImprimirTicket}
-              style={{
-                padding: '14px 26px',
-                borderRadius: '14px',
-                border: 'none',
-                background: 'linear-gradient(180deg, #10b981 0%, #059669 100%)',
-                color: '#fff',
-                fontWeight: 800,
-                fontSize: '15px',
-                cursor: 'pointer',
-                boxShadow: '0 6px 20px rgba(5, 150, 105, 0.4)',
-                flexShrink: 0,
-              }}
-            >
-              Imprimir ticket
-            </button>
           </div>
         ) : null}
 
@@ -628,25 +602,8 @@ export function TicketOperacionalPanel({
                 <strong>ticket interno</strong> (distinto da MTR). Depois siga para faturamento/financeiro no menu.
               </p>
             </div>
-            {coletaAtiva && ticketId ? (
-              <button
-                type="button"
-                onClick={handleImprimirTicket}
-                style={{
-                  padding: '10px 18px',
-                  borderRadius: '10px',
-                  border: '1px solid #cbd5e1',
-                  background: '#fff',
-                  fontWeight: 700,
-                  fontSize: '14px',
-                  cursor: 'pointer',
-                }}
-              >
-                Imprimir ticket
-              </button>
-            ) : null}
           </div>
-        ) : (
+        ) : simplifyEmbedded && ocultarSeletorColeta ? null : (
           <div style={{ marginBottom: '14px' }}>
             <h2
               style={{
@@ -661,14 +618,13 @@ export function TicketOperacionalPanel({
             <p style={{ margin: '6px 0 0', fontSize: '13px', color: '#64748b', lineHeight: 1.45 }}>
               {ocultarSeletorColeta ? (
                 <>
-                  Após salvar a pesagem, o ticket é gerado automaticamente. Ajuste <strong>tipo</strong>,{' '}
-                  <strong>número</strong> ou <strong>descrição</strong> se precisar e use{' '}
-                  <strong>Gravar ticket</strong> antes de imprimir.
+                  Após salvar a pesagem, o ticket é gerado automaticamente. Ajuste <strong>tipo</strong> ou{' '}
+                  <strong>número</strong> se precisar e use <strong>Gravar ticket</strong> para concluir.
                 </>
               ) : (
                 <>
                   Escolha a coleta abaixo, defina o <strong>tipo</strong> (<strong>saída</strong> ou{' '}
-                  <strong>frete</strong>), preencha os dados e grave — gera o ticket para impressão e segue o
+                  <strong>frete</strong>), preencha os dados e grave — gera o ticket e segue o
                   fluxo até aprovação e faturamento.
                 </>
               )}
@@ -794,8 +750,8 @@ export function TicketOperacionalPanel({
               </div>
             ) : (
               <p style={{ margin: '12px 0 0', fontSize: '13px', color: '#64748b', lineHeight: 1.45 }}>
-                Depois de escolher a coleta, defina <strong>tipo</strong> (saída / frete), número e texto e use{' '}
-                <strong>Gravar ticket</strong>.
+                Depois de escolher a coleta, defina <strong>tipo</strong> (saída / frete), o{' '}
+                <strong>número</strong> e use <strong>Gravar ticket</strong>.
               </p>
             )}
           </div>
@@ -812,11 +768,6 @@ export function TicketOperacionalPanel({
                 {numero ? (
                   <p style={{ margin: '8px 0 0', fontSize: '14px', color: '#334155' }}>
                     <strong>Número:</strong> {numero}
-                  </p>
-                ) : null}
-                {descricao ? (
-                  <p style={{ margin: '10px 0 0', fontSize: '14px', color: '#334155', whiteSpace: 'pre-wrap' }}>
-                    <strong>Descrição:</strong> {descricao}
                   </p>
                 ) : null}
                 {criadoEm ? (
@@ -940,7 +891,7 @@ export function TicketOperacionalPanel({
 
                   <div style={{ marginBottom: '12px' }}>
                     <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', marginBottom: '6px' }}>
-                      Número (opcional)
+                      Número
                     </div>
                     <input
                       type="text"
@@ -955,29 +906,6 @@ export function TicketOperacionalPanel({
                         borderRadius: '10px',
                         border: '1px solid #cbd5e1',
                         fontSize: '14px',
-                        opacity: podeEditarFormulario ? 1 : 0.85,
-                      }}
-                    />
-                  </div>
-
-                  <div style={{ marginBottom: '12px' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', marginBottom: '6px' }}>
-                      Descrição
-                    </div>
-                    <textarea
-                      value={descricao}
-                      onChange={(e) => (podeEditarFormulario ? setDescricao(e.target.value) : undefined)}
-                      readOnly={!podeEditarFormulario}
-                      rows={4}
-                      placeholder="Resumo do pedido, volumes, observações relevantes…"
-                      style={{
-                        width: '100%',
-                        maxWidth: 560,
-                        padding: '10px 12px',
-                        borderRadius: '10px',
-                        border: '1px solid #cbd5e1',
-                        fontSize: '14px',
-                        resize: 'vertical',
                         opacity: podeEditarFormulario ? 1 : 0.85,
                       }}
                     />
@@ -1026,63 +954,64 @@ export function TicketOperacionalPanel({
         ) : null}
       </div>
 
-      {coletaAtiva && ticketId ? (
-        <div className="ticket-print-root">
-          <div
-            className="ticket-print-col"
-            style={{
-              maxWidth: '82mm',
-              width: 'min(82mm, 100%)',
-              margin: '0 auto',
-              fontFamily: 'Consolas, ui-monospace, monospace',
-              fontSize: '11px',
-              lineHeight: 1.45,
-              color: '#000',
-            }}
-          >
-            <div style={{ marginBottom: '8px', width: '100%' }}>
-              <img
-                src={BRAND_LOGO_MARK}
-                alt=""
+      {coletaAtiva && ticketId && typeof document !== 'undefined'
+        ? createPortal(
+            <div className="ticket-print-root">
+              <div
+                className="ticket-print-col"
                 style={{
-                  height: '24px',
-                  width: 'auto',
-                  maxWidth: '100%',
-                  display: 'block',
-                  marginLeft: 'auto',
-                  marginRight: 'auto',
+                  maxWidth: '82mm',
+                  width: 'min(82mm, 100%)',
+                  margin: '0 auto',
+                  fontFamily: 'Consolas, ui-monospace, monospace',
+                  fontSize: '11px',
+                  lineHeight: 1.45,
+                  color: '#000',
                 }}
-              />
-            </div>
-            <div style={{ textAlign: 'center', fontWeight: 800, fontSize: '18px', letterSpacing: '0.12em' }}>
-              {tituloImpressao}
-            </div>
-            <div style={{ marginTop: '12px', borderTop: '1px dashed #999', paddingTop: '8px' }} />
-            <LinhaTicket k="Nº Ticket" v={numero.trim() || coletaAtiva.numero} />
-            <LinhaTicket k="Data" v={dataTicketBr} />
-            <LinhaTicket k="MTR" v={mtrNumeroImpressao || '—'} />
-            <div style={{ marginTop: '10px', fontWeight: 700 }}>EMPRESA</div>
-            <div>{coletaAtiva.cliente || '—'}</div>
-            <div style={{ marginTop: '10px', fontWeight: 700 }}>RESIDUO</div>
-            <div>{coletaAtiva.tipo_residuo || '—'}</div>
-            <div style={{ marginTop: '12px', borderTop: '1px dashed #999', paddingTop: '8px' }} />
-            <LinhaTicket k="Peso Bruto" v={formatPesoBr(coletaAtiva.peso_bruto)} />
-            <LinhaTicket k="Tara" v={formatPesoBr(coletaAtiva.peso_tara)} />
-            <LinhaTicket k="Peso Liquido" v={formatPesoBr(coletaAtiva.peso_liquido)} />
-            <div style={{ marginTop: '12px', borderTop: '1px dashed #999', paddingTop: '8px' }} />
-            <LinhaTicket k="Balanceiro" v={balanceiroImpressao} />
-            <LinhaTicket k="Motorista" v={coletaAtiva.motorista || '—'} />
-            <LinhaTicket k="PLACA" v={coletaAtiva.placa || '—'} />
-            <div style={{ marginTop: '10px', fontWeight: 700 }}>EMPRESA</div>
-            <div>{empresaTransporteImpressao}</div>
-            <div style={{ marginTop: '10px', fontWeight: 700 }}>Obs.</div>
-            <div style={{ whiteSpace: 'pre-wrap', minHeight: '36px' }}>{descricao.trim() || '—'}</div>
-            <div style={{ marginTop: '12px', borderTop: '1px dashed #999', paddingTop: '8px' }} />
-            <LinhaTicket k="Hora Entrada" v={horaEntradaImpressao} />
-            <LinhaTicket k="Hora Saída" v={horaSaidaImpressao} />
-          </div>
-        </div>
-      ) : null}
+              >
+                <div style={{ marginBottom: '8px', width: '100%' }}>
+                  <img
+                    src={BRAND_LOGO_MARK}
+                    alt=""
+                    style={{
+                      height: '24px',
+                      width: 'auto',
+                      maxWidth: '100%',
+                      display: 'block',
+                      marginLeft: 'auto',
+                      marginRight: 'auto',
+                    }}
+                  />
+                </div>
+                <div style={{ textAlign: 'center', fontWeight: 800, fontSize: '18px', letterSpacing: '0.12em' }}>
+                  {tituloImpressao}
+                </div>
+                <div style={{ marginTop: '12px', borderTop: '1px dashed #999', paddingTop: '8px' }} />
+                <LinhaTicket k="Nº Ticket" v={numero.trim() || coletaAtiva.numero} />
+                <LinhaTicket k="Data" v={dataTicketBr} />
+                <LinhaTicket k="MTR" v={mtrNumeroImpressao || '—'} />
+                <div style={{ marginTop: '10px', fontWeight: 700 }}>EMPRESA</div>
+                <div>{coletaAtiva.cliente || '—'}</div>
+                <div style={{ marginTop: '10px', fontWeight: 700 }}>RESIDUO</div>
+                <div>{coletaAtiva.tipo_residuo || '—'}</div>
+                <div style={{ marginTop: '12px', borderTop: '1px dashed #999', paddingTop: '8px' }} />
+                <LinhaTicket k="Peso Bruto" v={formatPesoBr(coletaAtiva.peso_bruto)} />
+                <LinhaTicket k="Tara" v={formatPesoBr(coletaAtiva.peso_tara)} />
+                <LinhaTicket k="Peso Liquido" v={formatPesoBr(coletaAtiva.peso_liquido)} />
+                <div style={{ marginTop: '12px', borderTop: '1px dashed #999', paddingTop: '8px' }} />
+                <LinhaTicket k="Balanceiro" v={balanceiroImpressao} />
+                <LinhaTicket k="Motorista" v={coletaAtiva.motorista || '—'} />
+                <LinhaTicket k="PLACA" v={coletaAtiva.placa || '—'} />
+                <div style={{ marginTop: '10px', fontWeight: 700 }}>EMPRESA</div>
+                <div>{empresaTransporteImpressao}</div>
+                <div style={{ marginTop: '12px', borderTop: '1px dashed #999', paddingTop: '8px' }} />
+                <LinhaTicket k="Hora Entrada" v={horaEntradaImpressao} />
+                <LinhaTicket k="Hora Saída" v={horaSaidaImpressao} />
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </>
   )
 }
