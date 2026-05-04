@@ -1,6 +1,5 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App-NEXUS";
 /** Folha completa (inclui `.welcome-nexus`, PWA, etc.) — alinhada ao deploy Vercel. */
 import "./index-NEXUS.css";
 
@@ -134,6 +133,60 @@ class ErrorBoundary extends React.Component<
   }
 }
 
+/** Evita ecrã em branco: `supabase.ts` rebenta no import se `.env` não existir. */
+function FaltaConfiguracaoSupabase() {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#f1f5f9",
+        padding: 24,
+        fontFamily: "system-ui, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 560,
+          background: "#fff",
+          borderRadius: 16,
+          padding: "28px 32px",
+          border: "1px solid #e2e8f0",
+          boxShadow: "0 12px 40px rgba(15,23,42,0.08)",
+        }}
+      >
+        <h1 style={{ margin: "0 0 12px", fontSize: 22, color: "#0f172a" }}>
+          Falta o ficheiro de ambiente
+        </h1>
+        <p style={{ margin: "0 0 16px", color: "#475569", lineHeight: 1.55 }}>
+          O cliente Supabase precisa de{" "}
+          <code style={{ background: "#f1f5f9", padding: "2px 6px", borderRadius: 6 }}>
+            VITE_SUPABASE_URL
+          </code>{" "}
+          e{" "}
+          <code style={{ background: "#f1f5f9", padding: "2px 6px", borderRadius: 6 }}>
+            VITE_SUPABASE_ANON_KEY
+          </code>{" "}
+          (definidos no <code>.env</code> na raiz do projecto).
+        </p>
+        <ol style={{ margin: "0 0 20px", paddingLeft: 22, color: "#334155", lineHeight: 1.7 }}>
+          <li>
+            Copie <code>.env.example</code> para <code>.env</code> na mesma pasta que o{" "}
+            <code>package.json</code>.
+          </li>
+          <li>Preencha as variáveis com os valores do teu projecto Supabase.</li>
+          <li>Reinicia o servidor (<code>npm run dev</code>) e recarrega esta página.</li>
+        </ol>
+        <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
+          Sem isto, a app não arranca — o erro acontecia antes do React e aparecia só um ecrã branco.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 window.addEventListener("error", (event) => {
   console.error("Erro global:", event.error || event.message);
 });
@@ -170,8 +223,53 @@ if (!rootElement) {
   throw new Error('Elemento root não encontrado em index.html');
 }
 
-ReactDOM.createRoot(rootElement).render(
-  <ErrorBoundary>
-    <App />
-  </ErrorBoundary>
-);
+const root = ReactDOM.createRoot(rootElement);
+const supabaseUrl = String(import.meta.env.VITE_SUPABASE_URL ?? "").trim();
+const supabaseAnon = String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
+
+if (!supabaseUrl || !supabaseAnon) {
+  root.render(<FaltaConfiguracaoSupabase />);
+} else {
+  void import("./App-NEXUS")
+    .then(({ default: App }) => {
+      root.render(
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
+      );
+    })
+    .catch((reason: unknown) => {
+      console.error("Falha ao carregar a aplicação:", reason);
+      const msg =
+        reason instanceof Error ? reason.message : String(reason ?? "Erro desconhecido");
+      root.render(
+        <div
+          style={{
+            minHeight: "100vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+            fontFamily: "system-ui, sans-serif",
+            background: "#fef2f2",
+          }}
+        >
+          <div style={{ maxWidth: 520, color: "#991b1b" }}>
+            <h1 style={{ marginTop: 0 }}>Não foi possível carregar o módulo principal</h1>
+            <pre
+              style={{
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                background: "#fff",
+                padding: 16,
+                borderRadius: 12,
+                border: "1px solid #fecaca",
+              }}
+            >
+              {msg}
+            </pre>
+          </div>
+        </div>
+      );
+    });
+}
