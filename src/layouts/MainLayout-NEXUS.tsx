@@ -685,6 +685,12 @@ export default function MainLayout({ children }: MainLayoutProps) {
             </span>
             Suporte técnico
           </button>
+          <p
+            className="layout-sidebar-version"
+            aria-label={`Versão do sistema ${import.meta.env.VITE_APP_VERSION}`}
+          >
+            v{import.meta.env.VITE_APP_VERSION}
+          </p>
         </div>
       </aside>
 

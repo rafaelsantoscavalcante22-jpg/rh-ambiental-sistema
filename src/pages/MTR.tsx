@@ -1434,6 +1434,11 @@ export default function MTR() {
           padding: 18px;
         }
 
+        /* Manifesto estilo planilha: aproveitar altura útil (pré-visualização). */
+        .document-wrapper--mtr-excel {
+          min-height: min(1100px, calc(100dvh - 240px));
+        }
+
         .document-empty {
           min-height: 720px;
           display: flex;
@@ -1696,8 +1701,8 @@ export default function MTR() {
           margin: 0 auto;
           font-family: Arial, Helvetica, sans-serif;
           color: #000;
-          font-size: 11px;
-          line-height: 1.15;
+          font-size: 12px;
+          line-height: 1.35;
           background: #fff;
         }
 
@@ -1737,8 +1742,18 @@ export default function MTR() {
 
         .mtr-excel__table td {
           border: 1px solid #111;
-          padding: 3px 5px;
+          padding: 7px 9px;
           vertical-align: top;
+        }
+
+        /* Área neutra no fim da folha: preenche espaço sem alterar o conteúdo legal acima. */
+        td.mtr-excel__stretch {
+          border: 1px solid #111;
+          border-top: none;
+          min-height: clamp(72px, 14vh, 200px);
+          padding: clamp(16px, 3.5vh, 48px) 10px !important;
+          vertical-align: top;
+          background: #ffffff;
         }
 
         .mtr-excel__sec {
@@ -1766,10 +1781,12 @@ export default function MTR() {
         }
 
         .mtr-excel__signrow {
-          margin-top: 10px;
+          margin-top: 14px;
           display: grid;
           grid-template-columns: 1fr 1.2fr 0.6fr;
-          gap: 10px;
+          gap: 12px;
+          min-height: 52px;
+          align-items: end;
         }
 
         .mtr-mp-header {
@@ -2212,8 +2229,13 @@ export default function MTR() {
 
           .mtr-excel__table td {
             border: 1px solid #111 !important;
-            padding: 3px 5px !important;
+            padding: 5px 7px !important;
             vertical-align: top !important;
+          }
+
+          td.mtr-excel__stretch {
+            min-height: 28mm !important;
+            padding: 10mm 6px !important;
           }
 
           .mtr-excel__sec {
@@ -2665,7 +2687,9 @@ export default function MTR() {
                 </div>
               )}
 
-              <div className="document-wrapper print-area">
+              <div
+                className={`document-wrapper print-area${selectedMTR ? ' document-wrapper--mtr-excel' : ''}`}
+              >
                 {selectedMTR ? (
                   <div className="document-shell mtr-modelo-pdf-shell">
                     <div className="document-green-bar" />
@@ -2890,6 +2914,9 @@ export default function MTR() {
                                         <span>Data: ____/____/_____</span>
                                       </div>
                                     </td>
+                                  </tr>
+                                  <tr aria-hidden="true">
+                                    <td className="mtr-excel__stretch" colSpan={6} />
                                   </tr>
                                 </tbody>
                               </table>

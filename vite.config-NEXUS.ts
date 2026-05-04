@@ -1,4 +1,6 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
+import { getAppVersionDisplayString } from './scripts/build-app-version.ts'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import type { RuntimeCaching } from 'workbox-build'
@@ -47,8 +49,13 @@ function runtimeCachingSupabase(supabaseUrlRaw: string): RuntimeCaching[] {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const supabaseCaching = runtimeCachingSupabase(env.VITE_SUPABASE_URL || '')
+  const pkgPath = fileURLToPath(new URL('./package-NEXUS.json', import.meta.url))
+  const appVersion = getAppVersionDisplayString(pkgPath, env)
 
   return {
+  define: {
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
+  },
   plugins: [
     react(),
     VitePWA({

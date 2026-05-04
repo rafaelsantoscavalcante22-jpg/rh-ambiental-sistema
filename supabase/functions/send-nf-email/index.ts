@@ -8,6 +8,21 @@ type Destinatario = {
   email: string;
 };
 
+type AnexoPayload = {
+  filename?: string;
+  contentType?: string | null;
+  contentBase64?: string;
+};
+
+type AnexoNormalizado = {
+  filename: string;
+  contentType: string;
+  contentBase64: string;
+};
+
+const MAX_ANEXOS = 5;
+const MAX_BYTES_POR_ANEXO = 4 * 1024 * 1024; // 4 MiB (decodificado)
+
 type ProvedorEnvio = "gmail" | "resend";
 
 function jsonResponse(req: Request, status: number, body: Record<string, unknown>) {
@@ -36,6 +51,50 @@ function podeEnviarNf(cargo: string | null | undefined): boolean {
     c.includes("financeiro") ||
     c.includes("diretoria")
   );
+}
+
+function nomeAnexoSeguro(name: string): string {
+  const base = String(name || "")
+    .replace(/[/\\]/g, "_")
+    .replace(/\.\./g, "_")
+    .trim();
+  return base.slice(0, 200) || "anexo";
+}
+
+function validarAnexos(raw: unknown): AnexoNormalizado[] {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error("Campo anexos inválido: deve ser uma lista.");
+  }
+  if (raw.length > MAX_ANEXOS) {
+    throw new Error(`No máximo ${MAX_ANEXOS} anexos por envio.`);
+  }
+  const out: AnexoNormalizado[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as AnexoPayload;
+    const b64 = String(o.contentBase64 ?? "").replace(/\s/g, "");
+    const filename = nomeAnexoSeguro(String(o.filename ?? "anexo"));
+    const contentType = String(o.contentType ?? "").trim() ||
+      "application/octet-stream";
+    if (!b64) {
+      throw new Error(`Anexo "${filename}" sem conteúdo (contentBase64).`);
+    }
+    let size = 0;
+    try {
+      const bin = atob(b64);
+      size = bin.length;
+    } catch {
+      throw new Error(`Anexo "${filename}": Base64 inválido.`);
+    }
+    if (size > MAX_BYTES_POR_ANEXO) {
+      throw new Error(
+        `Anexo "${filename}" excede ${MAX_BYTES_POR_ANEXO / (1024 * 1024)} MiB.`,
+      );
+    }
+    out.push({ filename, contentType, contentBase64: b64 });
+  }
+  return out;
 }
 
 function montarHtmlCorpo(nome: string, observacaoUser: string): string {
@@ -122,6 +181,7 @@ Deno.serve(async (req: Request) => {
     destinatarios?: Destinatario[];
     observacao?: string | null;
     assunto?: string | null;
+    anexos?: AnexoPayload[];
   };
   try {
     body = await req.json();
@@ -164,6 +224,15 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  let anexos: AnexoNormalizado[] = [];
+  try {
+    anexos = validarAnexos(body.anexos);
+  } catch (e) {
+    return jsonResponse(req, 400, {
+      error: e instanceof Error ? e.message : "Anexos inválidos.",
+    });
+  }
+
   const observacaoUser = body.observacao != null
     ? String(body.observacao).trim()
     : "";
@@ -203,6 +272,25 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  const denomailerAttachments = anexos.length > 0
+    ? anexos.map((a) => ({
+      filename: a.filename,
+      contentType: a.contentType,
+      encoding: "base64" as const,
+      content: a.contentBase64,
+    }))
+    : undefined;
+
+  const resendAttachments = anexos.length > 0
+    ? anexos.map((a) => ({
+      filename: a.filename,
+      content: a.contentBase64,
+      ...(a.contentType && a.contentType !== "application/octet-stream"
+        ? { content_type: a.contentType }
+        : {}),
+    }))
+    : undefined;
+
   try {
     for (const d of destinatarios) {
       const email = String(d.email || "").trim();
@@ -227,6 +315,9 @@ Deno.serve(async (req: Request) => {
             to: email,
             subject: assunto,
             html,
+            ...(denomailerAttachments
+              ? { attachments: denomailerAttachments }
+              : {}),
           });
           resultados.push({
             cliente_id: String(d.cliente_id || ""),
@@ -259,6 +350,7 @@ Deno.serve(async (req: Request) => {
               to: [email],
               subject: assunto,
               html,
+              ...(resendAttachments ? { attachments: resendAttachments } : {}),
             }),
           });
 
@@ -315,7 +407,10 @@ Deno.serve(async (req: Request) => {
   const linhaResumo = provedor === "gmail"
     ? `[Gmail] enviados: ${okCount} · falhas: ${failCount}`
     : `[Resend] enviados: ${okCount} · falhas: ${failCount}`;
-  const observacaoLog = [observacaoUser, linhaResumo].filter(Boolean).join("\n");
+  const linhaAnexos = anexos.length > 0
+    ? `Anexos: ${anexos.map((a) => a.filename).join(", ")}`
+    : "";
+  const observacaoLog = [observacaoUser, linhaAnexos, linhaResumo].filter(Boolean).join("\n");
 
   const { data: logInsert, error: logErr } = await admin
     .from("nf_envios_log")

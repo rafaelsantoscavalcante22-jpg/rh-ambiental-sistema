@@ -180,6 +180,14 @@ function getMonthInputValue(date = new Date()) {
   return `${year}-${month}`
 }
 
+/** `yyyyMm` = `YYYY-MM`; avança ou recua meses (calendário). */
+function addMonthsYyyyMm(yyyyMm: string, deltaMonths: number): string {
+  const [y, m] = yyyyMm.split('-').map(Number)
+  if (!y || !m) return yyyyMm
+  const d = new Date(y, m - 1 + deltaMonths, 1)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`
+}
+
 function pad2(n: number) {
   return String(n).padStart(2, '0')
 }
@@ -497,7 +505,6 @@ export default function Programacao() {
 
   const prevContextoUrlKeyRef = useRef<string>('')
   const prevScrollKeyRef = useRef<string>('')
-  const formNovaProgramacaoRef = useRef<HTMLDivElement>(null)
 
   const [clientes, setClientes] = useState<ClienteOption[]>([])
   const [programacoes, setProgramacoes] = useState<ProgramacaoItem[]>([])
@@ -512,6 +519,7 @@ export default function Programacao() {
   const [contextoDestaqueId, setContextoDestaqueId] = useState<string | null>(null)
   const [usuarioCargo, setUsuarioCargo] = useState<string | null>(null)
   const [diaPainelCalendario, setDiaPainelCalendario] = useState<string | null>(null)
+  const [modalNovaProgramacaoAberto, setModalNovaProgramacaoAberto] = useState(false)
   const [relatorioAberto, setRelatorioAberto] = useState(false)
   const [relatorioFiltro, setRelatorioFiltro] = useState<RelatorioFiltro>('dia')
   const [relatorioDiaRef, setRelatorioDiaRef] = useState(() => todayIsoLocal())
@@ -782,25 +790,35 @@ export default function Programacao() {
     setForm(initialFormState)
   }
 
-  function iniciarNovaProgramacaoNoDia(isoDate: string) {
+  function fecharModalNovaProgramacao() {
+    setModalNovaProgramacaoAberto(false)
+    limparFormulario()
+    setErro('')
+  }
+
+  /** Abre o formulário flutuante; `isoDate` opcional (defeito: hoje). */
+  function abrirModalNovaProgramacao(isoDate?: string) {
     if (!podeMutarProgramacao) {
       setErro('Seu perfil não pode criar programações. Apenas operacional ou administrador.')
       return
     }
-    const mesDoDia = isoDate.slice(0, 7)
+    const data = isoDate ?? todayIsoLocal()
+    const mesDoDia = data.slice(0, 7)
     if (mesDoDia !== mesSelecionado) {
       setMesSelecionado(mesDoDia)
     }
     setDiaPainelCalendario(null)
     setForm({
       ...initialFormState,
-      dataProgramada: isoDate,
+      dataProgramada: data,
     })
     setErro('')
     setSucesso('')
-    window.requestAnimationFrame(() => {
-      formNovaProgramacaoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
+    setModalNovaProgramacaoAberto(true)
+  }
+
+  function iniciarNovaProgramacaoNoDia(isoDate: string) {
+    abrirModalNovaProgramacao(isoDate)
   }
 
   function fecharModalEdicao() {
@@ -852,6 +870,7 @@ export default function Programacao() {
 
       if (form.id === id) {
         limparFormulario()
+        setModalNovaProgramacaoAberto(false)
       }
       if (formEdicaoModal?.id === id) {
         setFormEdicaoModal(null)
@@ -1015,6 +1034,7 @@ export default function Programacao() {
       }
 
       limparFormulario()
+      setModalNovaProgramacaoAberto(false)
       await carregarDados()
     } catch (error) {
       setErro(getSupabaseErrorMessage(error))
@@ -1351,7 +1371,7 @@ export default function Programacao() {
         </button>
       </div>
 
-      <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+      <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
         <button
           type="button"
           className="rg-btn rg-btn--outline"
@@ -1360,6 +1380,17 @@ export default function Programacao() {
         >
           {loading ? 'Atualizando...' : 'Atualizar'}
         </button>
+
+        {podeMutarProgramacao ? (
+          <button
+            type="button"
+            className="rg-btn rg-btn--primary"
+            onClick={() => abrirModalNovaProgramacao()}
+            title="Abrir formulário de nova programação (data inicial = hoje)"
+          >
+            + Nova programação
+          </button>
+        ) : null}
 
         <input
           type="month"
@@ -1468,45 +1499,6 @@ export default function Programacao() {
       </div>
 
       <div style={layoutPrincipalStyle}>
-        <div ref={formNovaProgramacaoRef} style={cardPrincipalStyle}>
-          <h2 style={cardTituloStyle}>Nova programação</h2>
-          <p style={cardDescricaoStyle}>
-            Cliente, data e tipo de serviço — depois salve para aparecer no calendário. Para alterar uma
-            visita já agendada, use <strong>Editar</strong> no calendário ou na agenda.
-          </p>
-
-          <form onSubmit={salvarProgramacao} style={{ display: 'grid', gap: '16px' }}>
-            {renderFormFields(form, atualizarCampo)}
-
-            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-              <button
-                type="submit"
-                className="rg-btn rg-btn--primary"
-                style={{
-                  opacity: salvando || !podeMutarProgramacao ? 0.55 : 1,
-                  cursor: salvando || !podeMutarProgramacao ? 'not-allowed' : 'pointer',
-                }}
-                disabled={salvando || !podeMutarProgramacao}
-                title={
-                  !podeMutarProgramacao
-                    ? 'Apenas operacional ou administrador pode salvar.'
-                    : undefined
-                }
-              >
-                {salvando ? 'Salvando...' : 'Criar programação'}
-              </button>
-
-              <button
-                type="button"
-                className="rg-btn rg-btn--outline"
-                onClick={limparFormulario}
-              >
-                Limpar
-              </button>
-            </div>
-          </form>
-        </div>
-
         <div style={{ display: 'grid', gap: '20px' }}>
           <div style={cardPrincipalStyle}>
             <h2 style={cardTituloStyle}>Calendário do mês</h2>
@@ -1530,22 +1522,85 @@ export default function Programacao() {
                   fontSize: '11px',
                   fontWeight: 800,
                   color: '#047857',
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
                 }}
               >
-                Mês do calendário
+                Calendário de Programações
               </div>
               <div
                 style={{
-                  fontSize: 'clamp(20px, 2.8vw, 26px)',
-                  fontWeight: 900,
-                  color: '#064e3b',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '10px',
                   marginTop: '6px',
                   lineHeight: 1.15,
                 }}
               >
-                {formatMonthLabelTitulo(mesSelecionado)}
+                <button
+                  type="button"
+                  aria-label="Mês anterior"
+                  title="Mês anterior"
+                  onClick={() =>
+                    setMesSelecionado((prev) => addMonthsYyyyMm(prev, -1))
+                  }
+                  style={{
+                    flexShrink: 0,
+                    width: 40,
+                    height: 40,
+                    borderRadius: 12,
+                    border: '1px solid #6ee7b7',
+                    background: 'rgba(255,255,255,0.65)',
+                    color: '#064e3b',
+                    fontSize: 22,
+                    fontWeight: 700,
+                    lineHeight: 1,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  ‹
+                </button>
+                <div
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    textAlign: 'center',
+                    fontSize: 'clamp(20px, 2.8vw, 26px)',
+                    fontWeight: 900,
+                    color: '#064e3b',
+                  }}
+                >
+                  {formatMonthLabelTitulo(mesSelecionado)}
+                </div>
+                <button
+                  type="button"
+                  aria-label="Próximo mês"
+                  title="Próximo mês"
+                  onClick={() =>
+                    setMesSelecionado((prev) => addMonthsYyyyMm(prev, 1))
+                  }
+                  style={{
+                    flexShrink: 0,
+                    width: 40,
+                    height: 40,
+                    borderRadius: 12,
+                    border: '1px solid #6ee7b7',
+                    background: 'rgba(255,255,255,0.65)',
+                    color: '#064e3b',
+                    fontSize: 22,
+                    fontWeight: 700,
+                    lineHeight: 1,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  ›
+                </button>
               </div>
             </div>
 
@@ -1985,13 +2040,42 @@ export default function Programacao() {
             {itensDiaPainelCalendario.length === 0 ? (
               <div
                 style={{
-                  ...estadoVazioStyle,
-                  padding: '20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px',
+                  alignItems: 'stretch',
                 }}
               >
-                Nenhuma programação neste dia.
+                <div
+                  style={{
+                    ...estadoVazioStyle,
+                    padding: '20px',
+                  }}
+                >
+                  Nenhuma programação neste dia.
+                </div>
+                <button
+                  type="button"
+                  className="rg-btn rg-btn--primary"
+                  onClick={() => iniciarNovaProgramacaoNoDia(diaPainelCalendario)}
+                  disabled={!podeMutarProgramacao}
+                  title={
+                    podeMutarProgramacao
+                      ? 'Preencher o formulário «Nova programação» com esta data'
+                      : 'Apenas operacional ou administrador pode criar programações.'
+                  }
+                  style={{
+                    width: '100%',
+                    justifyContent: 'center',
+                    opacity: podeMutarProgramacao ? 1 : 0.55,
+                    cursor: podeMutarProgramacao ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  + Nova programação
+                </button>
               </div>
             ) : (
+              <>
               <div
                 style={{
                   display: 'flex',
@@ -2163,7 +2247,113 @@ export default function Programacao() {
                   )
                 })}
               </div>
+              <button
+                type="button"
+                className="rg-btn rg-btn--outline"
+                onClick={() => iniciarNovaProgramacaoNoDia(diaPainelCalendario)}
+                disabled={!podeMutarProgramacao}
+                title={
+                  podeMutarProgramacao
+                    ? 'Incluir outra programação nesta data'
+                    : 'Apenas operacional ou administrador pode criar programações.'
+                }
+                style={{
+                  width: '100%',
+                  marginTop: '4px',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  borderStyle: 'dashed',
+                  borderColor: '#0f766e',
+                  color: '#0f766e',
+                  opacity: podeMutarProgramacao ? 1 : 0.55,
+                  cursor: podeMutarProgramacao ? 'pointer' : 'not-allowed',
+                }}
+              >
+                + Nova programação neste dia
+              </button>
+              </>
             )}
+          </div>
+        </div>
+      ) : null}
+
+      {modalNovaProgramacaoAberto ? (
+        <div
+          style={novaProgramacaoModalOverlayStyle}
+          onClick={fecharModalNovaProgramacao}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="nova-programacao-titulo"
+            style={{ ...calendarPainelModalStyle, maxWidth: '520px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: '12px',
+                marginBottom: '16px',
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <h2 id="nova-programacao-titulo" style={cardTituloStyle}>
+                  Nova programação
+                </h2>
+                <p style={{ ...cardDescricaoStyle, marginBottom: 0 }}>
+                  Cliente, data e tipo de serviço — depois salve para aparecer no calendário. Para alterar uma
+                  visita já agendada, use <strong>Editar</strong> no calendário ou na agenda.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={fecharModalNovaProgramacao}
+                style={calendarPainelFecharStyle}
+                aria-label="Fechar"
+              >
+                ×
+              </button>
+            </div>
+
+            <div
+              style={{
+                overflowY: 'auto',
+                flex: 1,
+                minHeight: 0,
+                paddingRight: '4px',
+              }}
+            >
+              <form onSubmit={salvarProgramacao} style={{ display: 'grid', gap: '16px' }}>
+                {renderFormFields(form, atualizarCampo)}
+
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  <button
+                    type="submit"
+                    className="rg-btn rg-btn--primary"
+                    style={{
+                      opacity: salvando || !podeMutarProgramacao ? 0.55 : 1,
+                      cursor: salvando || !podeMutarProgramacao ? 'not-allowed' : 'pointer',
+                    }}
+                    disabled={salvando || !podeMutarProgramacao}
+                    title={
+                      !podeMutarProgramacao
+                        ? 'Apenas operacional ou administrador pode salvar.'
+                        : undefined
+                    }
+                  >
+                    {salvando ? 'Salvando...' : 'Criar programação'}
+                  </button>
+
+                  <button type="button" className="rg-btn rg-btn--outline" onClick={limparFormulario}>
+                    Limpar
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       ) : null}
@@ -2546,7 +2736,7 @@ const cardResumoValorStyle: CSSProperties = {
 
 const layoutPrincipalStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '380px minmax(0, 1fr)',
+  gridTemplateColumns: 'minmax(0, 1fr)',
   gap: '22px',
   alignItems: 'start',
 }
@@ -2724,6 +2914,11 @@ const calendarPainelModalStyle: CSSProperties = {
   boxShadow: '0 24px 48px rgba(15, 23, 42, 0.2)',
   padding: '22px 20px 20px',
   border: '1px solid #e2e8f0',
+}
+
+const novaProgramacaoModalOverlayStyle: CSSProperties = {
+  ...calendarPainelOverlayStyle,
+  zIndex: 2050,
 }
 
 const calendarPainelFecharStyle: CSSProperties = {

@@ -766,6 +766,16 @@ a.rg-btn {
   background: var(--sidebar-bg);
 }
 
+.layout-sidebar-version {
+  margin: 12px 0 0;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--sidebar-section);
+  user-select: none;
+}
+
 .layout-main {
   flex: 1;
   min-width: 0;
@@ -5246,12 +5256,12 @@ a.rg-btn {
   min-height: 40px;
 }
 
-/* Botão fixo: canto inferior esquerdo (evita o FAB do chat à direita) */
+/* Botão fixo: canto inferior da *área de conteúdo* (evita sidebar à esquerda e o chat à direita). */
 .pwa-install-fab {
   position: fixed;
   z-index: 10048;
-  left: max(14px, var(--safe-left));
-  bottom: calc(14px + var(--safe-bottom));
+  left: max(14px, calc(var(--sidebar-width) + 16px));
+  bottom: calc(18px + var(--safe-bottom));
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -5267,7 +5277,7 @@ a.rg-btn {
     0 4px 18px rgba(13, 148, 136, 0.45),
     0 2px 8px rgba(15, 23, 42, 0.18);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
-  max-width: calc(100vw - 28px - var(--safe-left) - var(--safe-right));
+  max-width: min(360px, calc(100vw - var(--sidebar-width) - 32px - var(--safe-left) - var(--safe-right)));
 }
 
 .pwa-install-fab:hover {

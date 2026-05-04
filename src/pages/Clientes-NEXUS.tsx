@@ -324,6 +324,18 @@ const CLIENTES_SELECT_LIST =
 const CLIENTES_SELECT_FULL =
   CLIENTES_SELECT_LIST + ", status_ativo_desde, status_inativo_desde";
 
+/** Migração `20260427140000_clientes_status_datas.sql` ainda não aplicada no Supabase. */
+function isMissingClientesStatusDateColumnsError(
+  error: { message?: string } | null | undefined
+): boolean {
+  const msg = (error?.message ?? "").toLowerCase();
+  if (!msg) return false;
+  return (
+    (msg.includes("status_ativo_desde") || msg.includes("status_inativo_desde")) &&
+    (msg.includes("schema cache") || msg.includes("could not find"))
+  );
+}
+
 /** Rascunho do cadastro: evita perder dados se a aba for recarregada ou descartada pelo navegador. */
 const CLIENTES_CADASTRO_DRAFT_KEY = "rg-ambiental-clientes-cadastro-draft";
 
@@ -822,11 +834,21 @@ export default function Clientes() {
   }
 
   async function handleEditar(cliente: Cliente) {
-    const { data: fullRow, error } = await supabase
+    let fullRes = await supabase
       .from("clientes")
       .select(CLIENTES_SELECT_FULL)
       .eq("id", cliente.id)
       .maybeSingle();
+
+    if (fullRes.error && isMissingClientesStatusDateColumnsError(fullRes.error)) {
+      fullRes = await supabase
+        .from("clientes")
+        .select(CLIENTES_SELECT_LIST)
+        .eq("id", cliente.id)
+        .maybeSingle();
+    }
+
+    const { data: fullRow, error } = fullRes;
 
     let row: Cliente = cliente
     if (!error && fullRow && typeof fullRow === "object" && fullRow !== null && "id" in fullRow) {
@@ -898,7 +920,7 @@ export default function Clientes() {
 
     const residuosSerializados = serializarResiduos(residuosValidos);
 
-    const payload = {
+    const payloadBase = {
       nome: form.nome.trim(),
       razao_social: form.razao_social.trim(),
       cnpj: form.cnpj.trim(),
@@ -922,23 +944,25 @@ export default function Clientes() {
       licenca_numero: limparOuNull(form.licenca_numero),
       validade: limparOuNull(form.validade),
       status: form.status?.trim() || "Ativo",
+    };
+
+    const payloadWithStatusDatas = {
+      ...payloadBase,
       status_ativo_desde: limparOuNull(form.status_ativo_desde),
       status_inativo_desde: limparOuNull(form.status_inativo_desde),
     };
 
-    let error: PostgrestError | null = null;
+    let response = editingId
+      ? await supabase.from("clientes").update(payloadWithStatusDatas).eq("id", editingId)
+      : await supabase.from("clientes").insert([payloadWithStatusDatas]);
 
-    if (editingId) {
-      const response = await supabase
-        .from("clientes")
-        .update(payload)
-        .eq("id", editingId);
-
-      error = response.error;
-    } else {
-      const response = await supabase.from("clientes").insert([payload]);
-      error = response.error;
+    if (response.error && isMissingClientesStatusDateColumnsError(response.error)) {
+      response = editingId
+        ? await supabase.from("clientes").update(payloadBase).eq("id", editingId)
+        : await supabase.from("clientes").insert([payloadBase]);
     }
+
+    const error: PostgrestError | null = response.error;
 
     if (error) {
       console.error("Erro ao salvar cliente:", {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
-import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import MainLayout from '../layouts/MainLayout'
@@ -768,9 +768,9 @@ export default function PosVenda() {
                   <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#64748b' }}>
                     Proporção de clientes ativos e inativos no cadastro.
                   </p>
-                  <div style={{ position: 'relative', width: '100%', height: 220 }}>
+                  <div style={{ position: 'relative', width: '100%', height: 200 }}>
                     <ResponsiveContainer width="100%" height="100%">
-                      <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+                      <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
                         <defs>
                           <linearGradient id={`${chartUid}-ativo`} x1="0" y1="0" x2="1" y2="1">
                             <stop offset="0%" stopColor="#4ade80" />
@@ -778,7 +778,7 @@ export default function PosVenda() {
                           </linearGradient>
                           <linearGradient id={`${chartUid}-inativo`} x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#e2e8f0" />
-                            <stop offset="100%" stopColor="#64748b" />
+                            <stop offset="100%" stopColor="#94a3b8" />
                           </linearGradient>
                         </defs>
                         <Pie
@@ -786,11 +786,11 @@ export default function PosVenda() {
                           dataKey="value"
                           nameKey="name"
                           cx="50%"
-                          cy="48%"
-                          innerRadius="42%"
-                          outerRadius="72%"
-                          paddingAngle={3}
-                          cornerRadius={4}
+                          cy="50%"
+                          innerRadius="54%"
+                          outerRadius="78%"
+                          paddingAngle={2}
+                          cornerRadius={5}
                           stroke="#ffffff"
                           strokeWidth={2}
                         >
@@ -810,37 +810,104 @@ export default function PosVenda() {
                             boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
                           }}
                         />
-                        <Legend
-                          verticalAlign="bottom"
-                          height={28}
-                          formatter={(value) => (
-                            <span style={{ color: '#475569', fontWeight: 600, fontSize: '13px' }}>
-                              {value}
-                            </span>
-                          )}
-                        />
                       </PieChart>
                     </ResponsiveContainer>
                     <div
                       style={{
                         position: 'absolute',
-                        left: '50%',
-                        top: '44%',
-                        transform: 'translate(-50%, -50%)',
-                        textAlign: 'center',
+                        inset: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                         pointerEvents: 'none',
-                        lineHeight: 1.15,
+                        paddingBottom: '4px',
                       }}
                     >
-                      <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a' }}>
-                        {pctAtivos}%
+                      <div
+                        style={{
+                          textAlign: 'center',
+                          maxWidth: '42%',
+                          lineHeight: 1.05,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 'clamp(26px, 7vw, 34px)',
+                            fontWeight: 800,
+                            letterSpacing: '-0.04em',
+                            color: '#0f172a',
+                            textShadow:
+                              '0 0 20px rgba(255,255,255,1), 0 0 8px rgba(255,255,255,0.95), 0 1px 0 rgba(255,255,255,1)',
+                          }}
+                        >
+                          {pctAtivos}%
+                        </div>
+                        <div
+                          style={{
+                            marginTop: '6px',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            color: '#64748b',
+                            letterSpacing: '0.06em',
+                            textTransform: 'uppercase',
+                            textShadow: '0 0 12px rgba(255,255,255,1), 0 1px 0 rgba(255,255,255,1)',
+                          }}
+                        >
+                          ativos
+                        </div>
                       </div>
-                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b' }}>
-                        ativos
-                      </div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
-                        {pctInativos}% inativos
-                      </div>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'center',
+                      flexWrap: 'wrap',
+                      gap: '10px',
+                      marginTop: '14px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 14px',
+                        borderRadius: '999px',
+                        background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                        border: '1px solid #a7f3d0',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        color: '#14532d',
+                        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+                      }}
+                    >
+                      <span style={{ opacity: 0.85 }}>{pctAtivos}%</span>
+                      <span style={{ width: 1, height: 14, background: '#6ee7b7', borderRadius: 1 }} />
+                      <span>
+                        {kpis.ativos} ativo{kpis.ativos === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 14px',
+                        borderRadius: '999px',
+                        background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
+                        border: '1px solid #e2e8f0',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        color: '#475569',
+                        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+                      }}
+                    >
+                      <span style={{ color: '#64748b' }}>{pctInativos}%</span>
+                      <span style={{ width: 1, height: 14, background: '#cbd5e1', borderRadius: 1 }} />
+                      <span>
+                        {kpis.inativos} inativo{kpis.inativos === 1 ? '' : 's'}
+                      </span>
                     </div>
                   </div>
                   <div

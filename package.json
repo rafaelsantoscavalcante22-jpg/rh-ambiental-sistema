@@ -1,7 +1,7 @@
 {
   "name": "rg-ambiental-sistema",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "engines": {
     "node": ">=20.19.0"
@@ -39,7 +39,11 @@
     "functions:deploy:send-nf-email": "supabase functions deploy send-nf-email",
     "supabase:link": "supabase link",
     "supabase:secrets:edge": "supabase secrets set --env-file supabase/.secrets.edge.env",
-    "deploy:vercel": "node scripts/deploy-vercel.mjs"
+    "deploy:vercel": "node scripts/deploy-vercel.mjs",
+    "deploy:vercel:r": "node scripts/deploy-vercel.mjs --author R",
+    "deploy:vercel:v": "node scripts/deploy-vercel.mjs --author V",
+    "admin:create-pateta": "tsx scripts/create-admin-user.ts --name Pateta --email pateta@empresa.local --cargo administrador",
+    "admin:create-teste": "tsx scripts/create-admin-user.ts --name Teste --email teste@rgambiental.com --cargo administrador"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.0",

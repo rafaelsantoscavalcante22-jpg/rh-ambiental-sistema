@@ -174,10 +174,14 @@ function FaltaConfiguracaoSupabase() {
         <ol style={{ margin: "0 0 20px", paddingLeft: 22, color: "#334155", lineHeight: 1.7 }}>
           <li>
             Copie <code>.env.example</code> para <code>.env</code> na mesma pasta que o{" "}
-            <code>package.json</code>.
+            <code>package.json</code> (se ainda não existir).
           </li>
-          <li>Preencha as variáveis com os valores do teu projecto Supabase.</li>
-          <li>Reinicia o servidor (<code>npm run dev</code>) e recarrega esta página.</li>
+          <li>
+            No Supabase: <strong>Project Settings → API</strong>, copie a <strong>Project URL</strong> para{" "}
+            <code>VITE_SUPABASE_URL</code> e a chave <strong>anon</strong> / <strong>public</strong> para{" "}
+            <code>VITE_SUPABASE_ANON_KEY</code> (substitua <code>SEU_PROJETO</code> e o texto de exemplo da chave).
+          </li>
+          <li>Guarda o ficheiro, reinicia o servidor (<code>npm run dev</code>) e recarrega esta página.</li>
         </ol>
         <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
           Sem isto, a app não arranca — o erro acontecia antes do React e aparecia só um ecrã branco.
@@ -227,7 +231,15 @@ const root = ReactDOM.createRoot(rootElement);
 const supabaseUrl = String(import.meta.env.VITE_SUPABASE_URL ?? "").trim();
 const supabaseAnon = String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
 
-if (!supabaseUrl || !supabaseAnon) {
+/** Valores do `.env.example` ainda não substituídos — tratar como não configurado. */
+function supabaseEnvPareceSoExemplo(url: string, anon: string): boolean {
+  if (!url || !anon) return true;
+  if (/SEU_PROJETO/i.test(url)) return true;
+  if (/sua_chave_anon/i.test(anon) || /^sua_chave/i.test(anon)) return true;
+  return false;
+}
+
+if (!supabaseUrl || !supabaseAnon || supabaseEnvPareceSoExemplo(supabaseUrl, supabaseAnon)) {
   root.render(<FaltaConfiguracaoSupabase />);
 } else {
   void import("./App-NEXUS")

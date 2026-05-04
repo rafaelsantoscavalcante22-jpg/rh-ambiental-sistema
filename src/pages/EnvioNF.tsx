@@ -35,6 +35,28 @@ type EnvioLogRow = {
   destinatarios: unknown
 }
 
+const MAX_ANEXOS = 5
+const MAX_BYTES_ANEXO = 4 * 1024 * 1024 // 4 MiB
+
+function formatarTamanho(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const r = reader.result as string
+      const i = r.indexOf(',')
+      resolve(i >= 0 ? r.slice(i + 1) : r)
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('Falha ao ler ficheiro.'))
+    reader.readAsDataURL(file)
+  })
+}
+
 function formatarDataHora(iso: string) {
   try {
     const d = new Date(iso)
@@ -65,6 +87,7 @@ export default function EnvioNF() {
   const [somenteComEmail, setSomenteComEmail] = useState(true)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [observacao, setObservacao] = useState('')
+  const [anexoFiles, setAnexoFiles] = useState<File[]>([])
   const [enviando, setEnviando] = useState(false)
   const [envioModo, setEnvioModo] = useState<'simulacao' | 'email' | null>(null)
   const [mensagem, setMensagem] = useState('')
@@ -281,6 +304,39 @@ export default function EnvioNF() {
     return clientes.filter((c) => selecionados.has(c.id) && !(c.email_nf ?? '').trim())
   }, [clientes, selecionados])
 
+  function onEscolherAnexos(files: FileList | null) {
+    if (!files?.length) return
+    const picked = Array.from(files)
+    setAnexoFiles((prev) => {
+      const next = [...prev]
+      const avisos: string[] = []
+      for (const f of picked) {
+        if (next.length >= MAX_ANEXOS) {
+          avisos.push(`No máximo ${MAX_ANEXOS} anexos por envio.`)
+          break
+        }
+        if (f.size > MAX_BYTES_ANEXO) {
+          avisos.push(`"${f.name}" ultrapassa ${formatarTamanho(MAX_BYTES_ANEXO)}.`)
+          continue
+        }
+        const dup = next.some((x) => x.name === f.name && x.size === f.size)
+        if (!dup) next.push(f)
+      }
+      if (avisos.length > 0) {
+        queueMicrotask(() => setErro(avisos[0]))
+      }
+      return next
+    })
+  }
+
+  function removerAnexo(index: number) {
+    setAnexoFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function limparAnexos() {
+    setAnexoFiles([])
+  }
+
   function toggleColetaConta(id: string) {
     setColetasComContaMarcadas((prev) => {
       const next = new Set(prev)
@@ -330,6 +386,13 @@ export default function EnvioNF() {
       email: (c.email_nf ?? '').trim(),
     }))
 
+    const obsComAnexos =
+      anexoFiles.length > 0
+        ? [observacao.trim(), `Anexos (simulação, não enviados): ${anexoFiles.map((f) => f.name).join(', ')}`]
+            .filter(Boolean)
+            .join('\n')
+        : observacao.trim()
+
     setEnviando(true)
     setEnvioModo('simulacao')
     try {
@@ -343,7 +406,7 @@ export default function EnvioNF() {
           modo: 'simulacao',
           destinatarios,
           total_destinatarios: destinatarios.length,
-          observacao: observacao.trim() || null,
+          observacao: obsComAnexos || null,
           created_by: user?.id ?? null,
         })
         .select('id')
@@ -355,12 +418,13 @@ export default function EnvioNF() {
         logRow && typeof logRow === 'object' && 'id' in logRow && logRow.id
           ? String(logRow.id)
           : null
-      await aplicarEnvioNasContasMarcadas('simulacao', observacao, logId)
+      await aplicarEnvioNasContasMarcadas('simulacao', obsComAnexos, logId)
 
       setMensagem(
         `Simulação concluída: ${destinatarios.length} destinatário(s). Nenhum e-mail foi enviado.`
       )
       setObservacao('')
+      limparAnexos()
       setSelecionados(new Set())
       await carregarLogs()
     } catch (e) {
@@ -389,6 +453,19 @@ export default function EnvioNF() {
       email: (c.email_nf ?? '').trim(),
     }))
 
+    let anexos:
+      | { filename: string; contentType: string; contentBase64: string }[]
+      | undefined
+    if (anexoFiles.length > 0) {
+      anexos = await Promise.all(
+        anexoFiles.map(async (f) => ({
+          filename: f.name,
+          contentType: f.type || 'application/octet-stream',
+          contentBase64: await fileToBase64(f),
+        }))
+      )
+    }
+
     setEnviando(true)
     setEnvioModo('email')
     try {
@@ -397,6 +474,7 @@ export default function EnvioNF() {
         body: {
           destinatarios,
           observacao: observacao.trim() || null,
+          ...(anexos && anexos.length > 0 ? { anexos } : {}),
         },
         headers: headersJwtSessao(sessao),
       })
@@ -434,6 +512,7 @@ export default function EnvioNF() {
           : 'Pedido concluído.'
       setMensagem(msg)
       setObservacao('')
+      limparAnexos()
       setSelecionados(new Set())
       await carregarLogs()
     } catch (e) {
@@ -778,6 +857,104 @@ export default function EnvioNF() {
                   boxSizing: 'border-box',
                 }}
               />
+            </div>
+
+            <div style={{ marginTop: '20px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#64748b', marginBottom: '8px' }}>
+                Anexar Nota Fiscal
+              </div>
+              <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#64748b', maxWidth: '720px' }}>
+                PDF, XML ou imagens. Até {MAX_ANEXOS} ficheiros, {formatarTamanho(MAX_BYTES_ANEXO)} cada. Os anexos são
+                enviados no e-mail real; na <strong>simulação</strong> só ficam registados os nomes no log.
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 16px',
+                    borderRadius: '10px',
+                    border: '1px solid #cbd5e1',
+                    background: podeDisparar ? '#f8fafc' : '#e2e8f0',
+                    fontSize: '14px',
+                    fontWeight: 700,
+                    color: '#334155',
+                    cursor: podeDisparar ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  <input
+                    type="file"
+                    multiple
+                    accept=".pdf,.xml,.zip,application/pdf,application/xml,image/*"
+                    disabled={!podeDisparar || anexoFiles.length >= MAX_ANEXOS}
+                    onChange={(e) => {
+                      onEscolherAnexos(e.target.files)
+                      e.target.value = ''
+                    }}
+                    style={{ display: 'none' }}
+                  />
+                  Anexar Nota Fiscal
+                </label>
+                {anexoFiles.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={limparAnexos}
+                    disabled={!podeDisparar}
+                    style={{
+                      background: '#ffffff',
+                      color: '#64748b',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '10px',
+                      padding: '10px 14px',
+                      fontWeight: 700,
+                      fontSize: '13px',
+                      cursor: podeDisparar ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    Limpar anexos
+                  </button>
+                ) : null}
+              </div>
+              {anexoFiles.length > 0 ? (
+                <ul
+                  style={{
+                    margin: '12px 0 0',
+                    padding: '0 0 0 18px',
+                    fontSize: '13px',
+                    color: '#334155',
+                    maxWidth: '560px',
+                  }}
+                >
+                  {anexoFiles.map((f, i) => (
+                    <li key={`${f.name}-${f.size}-${i}`} style={{ marginBottom: '4px' }}>
+                      <span style={{ fontWeight: 600 }}>{f.name}</span>
+                      <span style={{ color: '#94a3b8' }}> · {formatarTamanho(f.size)}</span>
+                      {podeDisparar ? (
+                        <>
+                          {' '}
+                          <button
+                            type="button"
+                            onClick={() => removerAnexo(i)}
+                            style={{
+                              marginLeft: '6px',
+                              border: 'none',
+                              background: 'none',
+                              color: '#b91c1c',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              padding: 0,
+                              fontSize: '12px',
+                            }}
+                          >
+                            remover
+                          </button>
+                        </>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
 
             <div style={{ marginTop: '20px', display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
