@@ -1,11 +1,18 @@
 /** Mensagem legível a partir de erro PostgREST / desconhecido (UI e toasts). */
-export function mensagemErroSupabase(err: unknown): string {
-  if (err && typeof err === 'object' && 'message' in err) {
-    const m = String((err as { message?: unknown }).message ?? '').trim()
+export function mensagemErroSupabase(err: unknown, fallback = 'Erro desconhecido'): string {
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    const o = err as { message?: string; details?: string; hint?: string; code?: string }
+    const parts = [o.message, o.details, o.hint].filter(Boolean)
+    if (parts.length) return parts.join(' — ')
+  }
+  if (err instanceof Error) {
+    const m = err.message?.trim()
     if (m) return m
   }
-  if (err instanceof Error) return err.message || 'Erro desconhecido'
-  return String(err ?? 'Erro desconhecido')
+  if (err == null) return fallback
+  const s = String(err).trim()
+  if (s) return s
+  return fallback
 }
 
 /**
@@ -22,15 +29,4 @@ export function isBenignSupabaseFetchError(
   if (msg.includes('Lock broken')) return true
   if (/aborted/i.test(msg)) return true
   return false
-}
-
-/** PostgREST devolve objeto com `message`, nem sempre `instanceof Error`. */
-export function mensagemErroSupabase(err: unknown, fallback: string): string {
-  if (err instanceof Error) return err.message
-  if (typeof err === 'object' && err !== null && 'message' in err) {
-    const o = err as { message?: string; details?: string; hint?: string; code?: string }
-    const parts = [o.message, o.details, o.hint].filter(Boolean)
-    if (parts.length) return parts.join(' — ')
-  }
-  return fallback
 }
