@@ -1,6 +1,6 @@
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
-import { getAppVersionDisplayString } from './scripts/build-app-version.ts'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import type { RuntimeCaching } from 'workbox-build'
@@ -50,7 +50,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const supabaseCaching = runtimeCachingSupabase(env.VITE_SUPABASE_URL || '')
   const pkgPath = fileURLToPath(new URL('./package.json', import.meta.url))
-  const appVersion = getAppVersionDisplayString(pkgPath, env)
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version?: string }
+  const appVersion =
+    typeof pkg.version === 'string' ? pkg.version : '0.0.0'
 
   return {
   define: {

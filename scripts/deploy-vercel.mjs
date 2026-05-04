@@ -8,37 +8,12 @@
  * Opcional no `.env` se não quiseres `link`: VERCEL_ORG_ID e VERCEL_PROJECT_ID
  * (Vercel → Project → Settings → General).
  *
- * Uso:
- *   npm run deploy:vercel
- *   npm run deploy:vercel:r   → build com sufixo R (Rafael) na versão do UI
- *   npm run deploy:vercel:v   → build com sufixo V (Vinicius)
- *
- * Ou: node scripts/deploy-vercel.mjs --author R
- * A Vercel recebe --build-env APP_VERSION_AUTHOR=… para o `vite build` remoto.
+ * Uso: npm run deploy:vercel
  */
 
 import { existsSync, readFileSync } from 'fs'
 import { spawnSync } from 'child_process'
 import { resolve } from 'path'
-
-/** @returns {'R' | 'V' | null} */
-function parseAuthorArgv(argv) {
-  const fromEnv = (process.env.DEPLOY_VERSION_AUTHOR ?? '').trim().toUpperCase()
-  if (fromEnv === 'R' || fromEnv === 'V') return fromEnv
-
-  for (let i = 2; i < argv.length; i++) {
-    const a = argv[i]
-    if (a === '--author' && argv[i + 1]) {
-      const m = String(argv[i + 1]).trim().toUpperCase().slice(0, 1)
-      if (m === 'R' || m === 'V') return m
-    }
-    if (a.startsWith('--author=')) {
-      const m = a.slice('--author='.length).trim().toUpperCase().slice(0, 1)
-      if (m === 'R' || m === 'V') return m
-    }
-  }
-  return null
-}
 
 /**
  * @param {string} relPath
@@ -93,12 +68,7 @@ if (!process.env.VERCEL_TOKEN?.trim()) {
   process.exit(1)
 }
 
-const author = parseAuthorArgv(process.argv)
 const args = ['vercel', 'deploy', '--prod', '--yes']
-if (author) {
-  args.push('--build-env', `APP_VERSION_AUTHOR=${author}`)
-  console.log(`Build remota: APP_VERSION_AUTHOR=${author} (versão no UI com sufixo ${author})\n`)
-}
 
 const r = spawnSync('npx', args, {
   stdio: 'inherit',
