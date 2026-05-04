@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -49,14 +47,8 @@ function runtimeCachingSupabase(supabaseUrlRaw: string): RuntimeCaching[] {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const supabaseCaching = runtimeCachingSupabase(env.VITE_SUPABASE_URL || '')
-  const pkgPath = fileURLToPath(new URL('./package.json', import.meta.url))
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version?: string }
-  const appVersion = typeof pkg.version === 'string' ? pkg.version : '0.0.0'
 
   return {
-  define: {
-    'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
-  },
   plugins: [
     react(),
     VitePWA({

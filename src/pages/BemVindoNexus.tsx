@@ -98,6 +98,11 @@ export default function BemVindoNexus() {
             ) : null}
           </div>
 
+          <p className="welcome-nexus__version" role="status">
+            Versão do sistema: <strong>{import.meta.env.VITE_APP_VERSION}</strong>
+            {import.meta.env.DEV ? <span className="welcome-nexus__version-env"> · desenvolvimento</span> : null}
+          </p>
+
           <div className="welcome-nexus__nexus-footer">
             <div className="welcome-nexus__by-nexus">
               <span className="welcome-nexus__by-tiny">BY</span>

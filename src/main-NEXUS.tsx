@@ -1,8 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App-NEXUS";
-/** Folha completa (inclui `.welcome-nexus`, PWA, etc.) — alinhada ao deploy Vercel. */
-import "./index-NEXUS.css";
+import App from "./App";
+import "./index.css";
 
 type ErrorBoundaryProps = {
   children: React.ReactNode;
@@ -141,28 +140,6 @@ window.addEventListener("error", (event) => {
 window.addEventListener("unhandledrejection", (event) => {
   console.error("Promise rejeitada sem tratamento:", event.reason);
 });
-
-/**
- * Em localhost (dev ou `vite preview`), SW/caches de builds antigos fazem ver UI desactualizada.
- * Em preview `import.meta.env.DEV` é false — por isso não basta limpar só em dev.
- */
-const hostname =
-  typeof window !== "undefined" ? window.location.hostname : "";
-const isLocalMachine =
-  hostname === "localhost" || hostname === "127.0.0.1";
-
-if (import.meta.env.DEV || isLocalMachine) {
-  if ("serviceWorker" in navigator) {
-    void navigator.serviceWorker.getRegistrations().then((regs) => {
-      for (const r of regs) void r.unregister();
-    });
-  }
-  if ("caches" in window) {
-    void caches.keys().then((keys) =>
-      Promise.all(keys.map((key) => caches.delete(key)))
-    );
-  }
-}
 
 const rootElement = document.getElementById("root");
 

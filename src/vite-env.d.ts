@@ -11,6 +11,8 @@ interface ImportMetaEnv {
   readonly VITE_SUPORTE_EMAIL?: string
   readonly VITE_PAGINAS_BYPASS_EMAILS?: string
   readonly VITE_FATURAMENTO_RESUMO_DESDE_DIAS?: string
+  /** Injetado em build (vite.config) a partir de `package.json`. */
+  readonly VITE_APP_VERSION: string
 }
 
 interface ImportMeta {

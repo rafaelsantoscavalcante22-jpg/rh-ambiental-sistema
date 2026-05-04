@@ -138,13 +138,6 @@ function formatMonthLabel(value: string) {
   }).format(date)
 }
 
-/** Mês por extenso com inicial maiúscula (cabeçalho do calendário). */
-function formatMonthLabelTitulo(value: string) {
-  const s = formatMonthLabel(value)
-  if (!s || s === '-') return s
-  return s.charAt(0).toLocaleUpperCase('pt-BR') + s.slice(1)
-}
-
 function iniciaisNomeCliente(nome: string) {
   const base = (nome || '').trim()
   if (!base) return '?'
@@ -497,7 +490,6 @@ export default function Programacao() {
 
   const prevContextoUrlKeyRef = useRef<string>('')
   const prevScrollKeyRef = useRef<string>('')
-  const formNovaProgramacaoRef = useRef<HTMLDivElement>(null)
 
   const [clientes, setClientes] = useState<ClienteOption[]>([])
   const [programacoes, setProgramacoes] = useState<ProgramacaoItem[]>([])
@@ -780,27 +772,6 @@ export default function Programacao() {
 
   function limparFormulario() {
     setForm(initialFormState)
-  }
-
-  function iniciarNovaProgramacaoNoDia(isoDate: string) {
-    if (!podeMutarProgramacao) {
-      setErro('Seu perfil não pode criar programações. Apenas operacional ou administrador.')
-      return
-    }
-    const mesDoDia = isoDate.slice(0, 7)
-    if (mesDoDia !== mesSelecionado) {
-      setMesSelecionado(mesDoDia)
-    }
-    setDiaPainelCalendario(null)
-    setForm({
-      ...initialFormState,
-      dataProgramada: isoDate,
-    })
-    setErro('')
-    setSucesso('')
-    window.requestAnimationFrame(() => {
-      formNovaProgramacaoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
   }
 
   function fecharModalEdicao() {
@@ -1468,7 +1439,7 @@ export default function Programacao() {
       </div>
 
       <div style={layoutPrincipalStyle}>
-        <div ref={formNovaProgramacaoRef} style={cardPrincipalStyle}>
+        <div style={cardPrincipalStyle}>
           <h2 style={cardTituloStyle}>Nova programação</h2>
           <p style={cardDescricaoStyle}>
             Cliente, data e tipo de serviço — depois salve para aparecer no calendário. Para alterar uma
@@ -1514,40 +1485,6 @@ export default function Programacao() {
               Cores por status; número no canto = total do dia. Dias acinzentados são do mês anterior ou
               seguinte — ao clicar, o mês acima acompanha. Clique para abrir a lista e atalhos.
             </p>
-
-            <div
-              style={{
-                textAlign: 'center',
-                marginBottom: '16px',
-                padding: '14px 18px',
-                borderRadius: '16px',
-                background: 'linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%)',
-                border: '1px solid #6ee7b7',
-              }}
-            >
-              <div
-                style={{
-                  fontSize: '11px',
-                  fontWeight: 800,
-                  color: '#047857',
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                Mês do calendário
-              </div>
-              <div
-                style={{
-                  fontSize: 'clamp(20px, 2.8vw, 26px)',
-                  fontWeight: 900,
-                  color: '#064e3b',
-                  marginTop: '6px',
-                  lineHeight: 1.15,
-                }}
-              >
-                {formatMonthLabelTitulo(mesSelecionado)}
-              </div>
-            </div>
 
             <div style={calendarWeekHeaderStyle}>
               {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map((day) => (
@@ -1688,38 +1625,6 @@ export default function Programacao() {
                           </div>
                         )}
                       </div>
-
-                      {cell.date ? (
-                        <div style={{ marginTop: 'auto', paddingTop: '4px' }}>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              iniciarNovaProgramacaoNoDia(cell.date!)
-                            }}
-                            disabled={!podeMutarProgramacao}
-                            title={
-                              podeMutarProgramacao
-                                ? 'Preencher o formulário «Nova programação» com esta data'
-                                : 'Apenas operacional ou administrador pode criar programações.'
-                            }
-                            style={{
-                              width: '100%',
-                              fontSize: '10px',
-                              fontWeight: 800,
-                              padding: '6px 4px',
-                              borderRadius: '8px',
-                              border: '1px dashed #0f766e',
-                              background: '#ffffff',
-                              color: '#0f766e',
-                              cursor: podeMutarProgramacao ? 'pointer' : 'not-allowed',
-                              opacity: podeMutarProgramacao ? 1 : 0.5,
-                            }}
-                          >
-                            + Nova programação
-                          </button>
-                        </div>
-                      ) : null}
                     </>
                   ) : null}
                 </div>
@@ -2644,7 +2549,7 @@ const calendarGridStyle: CSSProperties = {
 }
 
 const calendarCellStyle: CSSProperties = {
-  minHeight: '128px',
+  minHeight: '108px',
   border: '1px solid #e2e8f0',
   borderRadius: '16px',
   background: '#f8fafc',

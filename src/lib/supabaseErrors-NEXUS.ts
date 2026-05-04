@@ -1,13 +1,3 @@
-/** Mensagem legível a partir de erro PostgREST / desconhecido (UI e toasts). */
-export function mensagemErroSupabase(err: unknown): string {
-  if (err && typeof err === 'object' && 'message' in err) {
-    const m = String((err as { message?: unknown }).message ?? '').trim()
-    if (m) return m
-  }
-  if (err instanceof Error) return err.message || 'Erro desconhecido'
-  return String(err ?? 'Erro desconhecido')
-}
-
 /**
  * Erros transitórios do cliente Supabase (abort, Web Locks "steal", etc.).
  * Não devem bloquear a UI com alert nem ser tratados como falha definitiva.
