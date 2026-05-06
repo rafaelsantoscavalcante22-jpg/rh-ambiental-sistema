@@ -47,6 +47,7 @@ const CARGOS = [
   'Diretoria',
   'Faturamento',
   'Financeiro',
+  'Comercial',
   'Visualizador',
 ]
 

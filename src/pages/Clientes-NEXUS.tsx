@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import MainLayout from "../layouts/MainLayout";
@@ -44,6 +45,8 @@ type Cliente = {
   validade: string | null;
   status_ativo_desde: string | null;
   status_inativo_desde: string | null;
+
+  representante_rg_id?: string | null;
 };
 
 type ResiduoForm = {
@@ -79,6 +82,8 @@ type FormCliente = {
   validade: string;
   status_ativo_desde: string;
   status_inativo_desde: string;
+
+  representante_rg_id: string;
 
   residuos: ResiduoForm[];
 };
@@ -116,6 +121,8 @@ const formInicial: FormCliente = {
   validade: "",
   status_ativo_desde: "",
   status_inativo_desde: "",
+
+  representante_rg_id: "",
 
   residuos: [{ ...residuoInicial }],
 };
@@ -317,12 +324,17 @@ function montarResiduosDoCliente(cliente: Cliente): ResiduoForm[] {
   }));
 }
 
-/** Listagem / relatório: sem colunas opcionais recentes, para não falhar se a migração ainda não foi aplicada. */
-const CLIENTES_SELECT_LIST =
+/** Listagem / relatório — base sem colunas opcionais recentes. */
+const CLIENTES_SELECT_LIST_BASE =
   "id, nome, razao_social, cnpj, status, cep, rua, numero, complemento, bairro, cidade, estado, endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade";
 
-const CLIENTES_SELECT_FULL =
-  CLIENTES_SELECT_LIST + ", status_ativo_desde, status_inativo_desde";
+const CLIENTES_SELECT_LIST_WITH_REP = CLIENTES_SELECT_LIST_BASE + ", representante_rg_id";
+
+const CLIENTES_SELECT_FULL_BASE =
+  CLIENTES_SELECT_LIST_BASE + ", status_ativo_desde, status_inativo_desde";
+
+const CLIENTES_SELECT_FULL_WITH_REP =
+  CLIENTES_SELECT_LIST_WITH_REP + ", status_ativo_desde, status_inativo_desde";
 
 /** Migração `20260427140000_clientes_status_datas.sql` ainda não aplicada no Supabase. */
 function isMissingClientesStatusDateColumnsError(
@@ -332,6 +344,17 @@ function isMissingClientesStatusDateColumnsError(
   if (!msg) return false;
   return (
     (msg.includes("status_ativo_desde") || msg.includes("status_inativo_desde")) &&
+    (msg.includes("schema cache") || msg.includes("could not find"))
+  );
+}
+
+function isMissingRepresentanteRgColumnError(
+  error: { message?: string } | null | undefined
+): boolean {
+  const msg = (error?.message ?? "").toLowerCase();
+  if (!msg) return false;
+  return (
+    msg.includes("representante_rg_id") &&
     (msg.includes("schema cache") || msg.includes("could not find"))
   );
 }
@@ -351,11 +374,21 @@ export default function Clientes() {
   const [salvando, setSalvando] = useState(false);
   const [gerandoRelatorio, setGerandoRelatorio] = useState(false);
   const [importandoExcel, setImportandoExcel] = useState(false);
+  const [exportandoExcel, setExportandoExcel] = useState(false);
   const [importResumo, setImportResumo] = useState("");
   const [sucesso, setSucesso] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [alternandoStatusId, setAlternandoStatusId] = useState<string | null>(null);
   const [form, setForm] = useState<FormCliente>(formInicial);
+  /** Painel de detalhes (portal no body — evita sobreposição do layout e garante clique visível). */
+  const [painelDetalheCliente, setPainelDetalheCliente] = useState<Cliente | null>(null);
+  const cadastroPainelRef = useRef<HTMLDivElement | null>(null);
+  /** Migração `20260508120000_clientes_representante_rg_id.sql` ainda não aplicada no Supabase. */
+  const representanteRgColDisponivelRef = useRef(true);
+  const [mostrarSelectRepresentanteRg, setMostrarSelectRepresentanteRg] = useState(true);
+
+  type RepresentanteRgOpcao = { id: string; nome: string };
+  const [representantesRg, setRepresentantesRg] = useState<RepresentanteRgOpcao[]>([]);
 
   const termoFiltro = useMemo(() => buscaDebounced.trim(), [buscaDebounced]);
 
@@ -371,26 +404,136 @@ export default function Clientes() {
     },
   });
 
+  const abrirPainelDetalhesCliente = useCallback((c: Cliente) => {
+    setPainelDetalheCliente(c);
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      const { data, error } = await supabase
+        .from("representantes_rg")
+        .select("id, nome")
+        .order("nome", { ascending: true });
+      if (error) {
+        console.warn("Erro ao listar Representantes RG:", error);
+        return;
+      }
+      setRepresentantesRg(
+        ((data as Array<{ id: string; nome: string }> | null) ?? []).map((r) => ({
+          id: r.id,
+          nome: r.nome,
+        }))
+      );
+    })();
+  }, []);
+
+  const rotuloRepresentanteRgCliente = useCallback(
+    (c: Cliente) => {
+      const rid = c.representante_rg_id;
+      if (!rid) return "—";
+      const hit = representantesRg.find((r) => r.id === rid);
+      if (hit) return hit.nome;
+      return "Representante (indisponível na lista)";
+    },
+    [representantesRg]
+  );
+
+  useEffect(() => {
+    const id = painelDetalheCliente?.id;
+    if (!id) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const usarRep = representanteRgColDisponivelRef.current;
+        const fullPick = usarRep ? CLIENTES_SELECT_FULL_WITH_REP : CLIENTES_SELECT_FULL_BASE;
+        const listPick = usarRep ? CLIENTES_SELECT_LIST_WITH_REP : CLIENTES_SELECT_LIST_BASE;
+
+        let fullRes = await supabase.from("clientes").select(fullPick).eq("id", id).maybeSingle();
+
+        if (fullRes.error && isMissingRepresentanteRgColumnError(fullRes.error)) {
+          representanteRgColDisponivelRef.current = false;
+          setMostrarSelectRepresentanteRg(false);
+          fullRes = await supabase
+            .from("clientes")
+            .select(CLIENTES_SELECT_FULL_BASE)
+            .eq("id", id)
+            .maybeSingle();
+        }
+
+        if (fullRes.error && isMissingClientesStatusDateColumnsError(fullRes.error)) {
+          fullRes = await supabase.from("clientes").select(listPick).eq("id", id).maybeSingle();
+        }
+
+        if (fullRes.error && isMissingRepresentanteRgColumnError(fullRes.error)) {
+          representanteRgColDisponivelRef.current = false;
+          setMostrarSelectRepresentanteRg(false);
+          fullRes = await supabase
+            .from("clientes")
+            .select(CLIENTES_SELECT_LIST_BASE)
+            .eq("id", id)
+            .maybeSingle();
+        }
+
+        const row = fullRes.data as Cliente | null;
+        if (!cancelled && row?.id) setPainelDetalheCliente(row);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [painelDetalheCliente?.id]);
+
+  useEffect(() => {
+    if (!painelDetalheCliente) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPainelDetalheCliente(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [painelDetalheCliente]);
+
   const fetchClientes = useCallback(async () => {
     setLoading(true);
 
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
-    let countQ = supabase.from("clientes").select("id", { count: "exact", head: true });
-    let dataQ = supabase.from("clientes").select(CLIENTES_SELECT_LIST).order("nome", { ascending: true });
+    const montarQueries = (listStr: string) => {
+      let countQ = supabase.from("clientes").select("id", { count: "exact", head: true });
+      let dataQ = supabase.from("clientes").select(listStr).order("nome", { ascending: true });
 
-    if (termoFiltro) {
-      const s = sanitizeIlikePattern(termoFiltro);
-      const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
-      countQ = countQ.or(orFilter);
-      dataQ = dataQ.or(orFilter);
-    }
+      if (termoFiltro) {
+        const s = sanitizeIlikePattern(termoFiltro);
+        const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
+        countQ = countQ.or(orFilter);
+        dataQ = dataQ.or(orFilter);
+      }
+      return { countQ, dataQ };
+    };
 
-    const [{ count, error: errCount }, { data, error }] = await Promise.all([
+    let usarRep = representanteRgColDisponivelRef.current;
+    let listStr = usarRep ? CLIENTES_SELECT_LIST_WITH_REP : CLIENTES_SELECT_LIST_BASE;
+    let { countQ, dataQ } = montarQueries(listStr);
+
+    let [{ count, error: errCount }, { data, error }] = await Promise.all([
       countQ,
       dataQ.range(from, to),
     ]);
+
+    if (error && usarRep && isMissingRepresentanteRgColumnError(error)) {
+      representanteRgColDisponivelRef.current = false;
+      setMostrarSelectRepresentanteRg(false);
+      usarRep = false;
+      listStr = CLIENTES_SELECT_LIST_BASE;
+      const q2 = montarQueries(listStr);
+      ({ countQ, dataQ } = q2);
+      [{ count, error: errCount }, { data, error }] = await Promise.all([
+        countQ,
+        dataQ.range(from, to),
+      ]);
+    }
 
     if (errCount) {
       console.error("Erro ao contar clientes:", errCount);
@@ -411,18 +554,32 @@ export default function Clientes() {
 
   const fetchClientesRelatorio = useCallback(async (): Promise<Cliente[]> => {
     const PAGE = 1000;
-    let dataQ = supabase.from("clientes").select(CLIENTES_SELECT_LIST).order("nome", { ascending: true });
+    const montarDataQ = (listStr: string) => {
+      let dataQ = supabase.from("clientes").select(listStr).order("nome", { ascending: true });
+      if (termoFiltro) {
+        const s = sanitizeIlikePattern(termoFiltro);
+        const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
+        dataQ = dataQ.or(orFilter);
+      }
+      return dataQ;
+    };
 
-    if (termoFiltro) {
-      const s = sanitizeIlikePattern(termoFiltro);
-      const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
-      dataQ = dataQ.or(orFilter);
-    }
+    let usarRep = representanteRgColDisponivelRef.current;
+    let listStr = usarRep ? CLIENTES_SELECT_LIST_WITH_REP : CLIENTES_SELECT_LIST_BASE;
+    let dataQ = montarDataQ(listStr);
 
     const out: Cliente[] = [];
     for (let from = 0; ; from += PAGE) {
       const to = from + PAGE - 1;
-      const { data, error } = await dataQ.range(from, to);
+      let { data, error } = await dataQ.range(from, to);
+      if (error && usarRep && isMissingRepresentanteRgColumnError(error)) {
+        representanteRgColDisponivelRef.current = false;
+        setMostrarSelectRepresentanteRg(false);
+        usarRep = false;
+        listStr = CLIENTES_SELECT_LIST_BASE;
+        dataQ = montarDataQ(listStr);
+        ({ data, error } = await dataQ.range(from, to));
+      }
       if (error) throw error;
       const chunk = ((data as Cliente[]) || []).filter(Boolean);
       out.push(...chunk);
@@ -573,6 +730,55 @@ export default function Clientes() {
     XLSX.utils.book_append_sheet(wb, ws, "clientes");
     XLSX.writeFile(wb, "modelo_importacao_clientes.xlsx");
   }, []);
+
+  const handleExportarExcel = useCallback(async () => {
+    try {
+      setExportandoExcel(true);
+      const linhas = await fetchClientesRelatorio();
+
+      const headers = [
+        "nome",
+        "razao_social",
+        "cnpj",
+        "status",
+        "endereco_coleta",
+        "email_nf",
+        "tipo_residuo",
+        "classificacao",
+        "licenca_numero",
+        "validade",
+      ];
+
+      const aoa = [
+        headers,
+        ...linhas.map((c) => [
+          c.nome ?? "",
+          c.razao_social ?? "",
+          c.cnpj ?? "",
+          c.status ?? "Ativo",
+          c.endereco_coleta ?? "",
+          c.email_nf ?? "",
+          c.tipo_residuo ?? "",
+          c.classificacao ?? "",
+          c.licenca_numero ?? "",
+          c.validade ?? "",
+        ]),
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "clientes");
+
+      const iso = new Date().toISOString().slice(0, 10);
+      const sufixo = termoFiltro ? `_filtro-${termoFiltro.trim().slice(0, 40)}` : "";
+      XLSX.writeFile(wb, `clientes_${iso}${sufixo}.xlsx`);
+    } catch (err) {
+      console.error("Erro ao exportar Excel:", err);
+      alert("Não foi possível exportar em Excel. Tente novamente.");
+    } finally {
+      setExportandoExcel(false);
+    }
+  }, [fetchClientesRelatorio, termoFiltro]);
 
   const handleImportarExcel = useCallback(
     async (file: File) => {
@@ -833,28 +1039,7 @@ export default function Clientes() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function handleEditar(cliente: Cliente) {
-    let fullRes = await supabase
-      .from("clientes")
-      .select(CLIENTES_SELECT_FULL)
-      .eq("id", cliente.id)
-      .maybeSingle();
-
-    if (fullRes.error && isMissingClientesStatusDateColumnsError(fullRes.error)) {
-      fullRes = await supabase
-        .from("clientes")
-        .select(CLIENTES_SELECT_LIST)
-        .eq("id", cliente.id)
-        .maybeSingle();
-    }
-
-    const { data: fullRow, error } = fullRes;
-
-    let row: Cliente = cliente
-    if (!error && fullRow && typeof fullRow === "object" && fullRow !== null && "id" in fullRow) {
-      row = fullRow as Cliente
-    }
-
+  function aplicarClienteNoFormulario(row: Cliente) {
     setForm({
       nome: row.nome || "",
       razao_social: row.razao_social || "",
@@ -877,6 +1062,8 @@ export default function Clientes() {
       telefone: row.telefone || "",
       email: row.email || "",
 
+      representante_rg_id: row.representante_rg_id ?? "",
+
       licenca_numero: row.licenca_numero || "",
       validade: row.validade || "",
       status_ativo_desde: row.status_ativo_desde ?? "",
@@ -884,11 +1071,75 @@ export default function Clientes() {
 
       residuos: montarResiduosDoCliente(row),
     });
+  }
 
+  /** Após o React pintar o painel de cadastro, leva o utilizador ao formulário (sem animação lenta). */
+  function rolarFormularioCadastroAoTopo() {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const el = cadastroPainelRef.current;
+        if (el) {
+          el.scrollIntoView({ block: "start", behavior: "auto" });
+        } else {
+          window.scrollTo({ top: 0, behavior: "auto" });
+        }
+      });
+    });
+  }
+
+  /** Abre o formulário de edição já preenchido — síncrono, para resposta imediata ao clicar. */
+  function abrirEdicaoClienteImediato(cliente: Cliente) {
     setEditingId(cliente.id);
     setMostrarCadastro(true);
     setSucesso("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    aplicarClienteNoFormulario(cliente);
+    rolarFormularioCadastroAoTopo();
+  }
+
+  async function sincronizarClienteRemotoNoFormulario(clienteId: string) {
+    try {
+      const usarRep = representanteRgColDisponivelRef.current;
+      const fullPick = usarRep ? CLIENTES_SELECT_FULL_WITH_REP : CLIENTES_SELECT_FULL_BASE;
+      const listPick = usarRep ? CLIENTES_SELECT_LIST_WITH_REP : CLIENTES_SELECT_LIST_BASE;
+
+      let fullRes = await supabase.from("clientes").select(fullPick).eq("id", clienteId).maybeSingle();
+
+      if (fullRes.error && isMissingRepresentanteRgColumnError(fullRes.error)) {
+        representanteRgColDisponivelRef.current = false;
+        setMostrarSelectRepresentanteRg(false);
+        fullRes = await supabase
+          .from("clientes")
+          .select(CLIENTES_SELECT_FULL_BASE)
+          .eq("id", clienteId)
+          .maybeSingle();
+      }
+
+      if (fullRes.error && isMissingClientesStatusDateColumnsError(fullRes.error)) {
+        fullRes = await supabase.from("clientes").select(listPick).eq("id", clienteId).maybeSingle();
+      }
+
+      if (fullRes.error && isMissingRepresentanteRgColumnError(fullRes.error)) {
+        representanteRgColDisponivelRef.current = false;
+        setMostrarSelectRepresentanteRg(false);
+        fullRes = await supabase
+          .from("clientes")
+          .select(CLIENTES_SELECT_LIST_BASE)
+          .eq("id", clienteId)
+          .maybeSingle();
+      }
+
+      const { data: fullRow, error } = fullRes;
+      if (!error && fullRow && typeof fullRow === "object" && fullRow !== null && "id" in fullRow) {
+        aplicarClienteNoFormulario(fullRow as Cliente);
+      }
+    } catch (e) {
+      console.warn("Falha ao carregar cliente completo:", e);
+    }
+  }
+
+  async function handleEditar(cliente: Cliente) {
+    abrirEdicaoClienteImediato(cliente);
+    await sincronizarClienteRemotoNoFormulario(cliente.id);
   }
 
   async function handleSalvarCliente(e: React.FormEvent<HTMLFormElement>) {
@@ -920,7 +1171,7 @@ export default function Clientes() {
 
     const residuosSerializados = serializarResiduos(residuosValidos);
 
-    const payloadBase = {
+    const payloadCamposPrincipais = {
       nome: form.nome.trim(),
       razao_social: form.razao_social.trim(),
       cnpj: form.cnpj.trim(),
@@ -946,20 +1197,49 @@ export default function Clientes() {
       status: form.status?.trim() || "Ativo",
     };
 
-    const payloadWithStatusDatas = {
-      ...payloadBase,
+    const statusDatasExtras = {
       status_ativo_desde: limparOuNull(form.status_ativo_desde),
       status_inativo_desde: limparOuNull(form.status_inativo_desde),
     };
 
-    let response = editingId
-      ? await supabase.from("clientes").update(payloadWithStatusDatas).eq("id", editingId)
-      : await supabase.from("clientes").insert([payloadWithStatusDatas]);
+    let usarRepresentante = representanteRgColDisponivelRef.current;
+    let usarStatusDatas = true;
 
-    if (response.error && isMissingClientesStatusDateColumnsError(response.error)) {
-      response = editingId
-        ? await supabase.from("clientes").update(payloadBase).eq("id", editingId)
-        : await supabase.from("clientes").insert([payloadBase]);
+    const montarPayloadSalvar = (): Record<string, unknown> => {
+      const comRep = usarRepresentante
+        ? {
+            ...payloadCamposPrincipais,
+            representante_rg_id: form.representante_rg_id.trim() || null,
+          }
+        : payloadCamposPrincipais;
+      return usarStatusDatas ? { ...comRep, ...statusDatasExtras } : comRep;
+    };
+
+    const executarSalvar = (payload: Record<string, unknown>) =>
+      editingId
+        ? supabase.from("clientes").update(payload).eq("id", editingId)
+        : supabase.from("clientes").insert([payload]);
+
+    let response = await executarSalvar(montarPayloadSalvar());
+
+    if (response.error && usarRepresentante && isMissingRepresentanteRgColumnError(response.error)) {
+      representanteRgColDisponivelRef.current = false;
+      setMostrarSelectRepresentanteRg(false);
+      usarRepresentante = false;
+      response = await executarSalvar(montarPayloadSalvar());
+    }
+
+    if (response.error && usarStatusDatas && isMissingClientesStatusDateColumnsError(response.error)) {
+      usarStatusDatas = false;
+      usarRepresentante = representanteRgColDisponivelRef.current;
+      response = await executarSalvar(montarPayloadSalvar());
+    }
+
+    if (response.error && usarRepresentante && isMissingRepresentanteRgColumnError(response.error)) {
+      representanteRgColDisponivelRef.current = false;
+      setMostrarSelectRepresentanteRg(false);
+      usarRepresentante = false;
+      response = await executarSalvar(montarPayloadSalvar());
     }
 
     const error: PostgrestError | null = response.error;
@@ -1129,6 +1409,15 @@ export default function Clientes() {
               <button
                 type="button"
                 className="rg-btn rg-btn--outline"
+                disabled={exportandoExcel}
+                onClick={() => void handleExportarExcel()}
+                title="Exporta os clientes em .xlsx conforme o filtro atual"
+              >
+                {exportandoExcel ? "Exportando…" : "Exportar (Excel)"}
+              </button>
+              <button
+                type="button"
+                className="rg-btn rg-btn--outline"
                 onClick={handleBaixarModeloExcel}
                 title="Baixa um modelo .xlsx com os cabeçalhos esperados"
               >
@@ -1159,6 +1448,8 @@ export default function Clientes() {
 
         {mostrarCadastro && (
         <div
+          ref={cadastroPainelRef}
+          id="clientes-formulario-cadastro"
           style={{
             background: "#ffffff",
             border: "1px solid #e5e7eb",
@@ -1449,6 +1740,40 @@ export default function Clientes() {
                     style={inputStyle}
                   />
                 </div>
+
+                {mostrarSelectRepresentanteRg ? (
+                  <div style={{ marginTop: "16px" }}>
+                    <label
+                      htmlFor="cliente-representante-rg"
+                      style={{
+                        display: "block",
+                        fontSize: "13px",
+                        fontWeight: 700,
+                        color: "#475569",
+                        marginBottom: "8px",
+                      }}
+                    >
+                      Representante RG
+                    </label>
+                    <select
+                      id="cliente-representante-rg"
+                      name="representante_rg_id"
+                      value={form.representante_rg_id}
+                      onChange={handleInputChange}
+                      style={selectStyle}
+                    >
+                      <option value="">— Nenhum —</option>
+                      {representantesRg.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.nome}
+                        </option>
+                      ))}
+                    </select>
+                    <p style={{ margin: "8px 0 0", fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                      Cadastro em <strong>Cadastros → Representante RG</strong>.
+                    </p>
+                  </div>
+                ) : null}
               </div>
 
               <div>
@@ -1847,10 +2172,25 @@ export default function Clientes() {
                           const idx = nomeBruto.indexOf(sep);
                           const parteNome = idx >= 0 ? nomeBruto.slice(0, idx) : nomeBruto;
                           const parteSufixo = idx >= 0 ? nomeBruto.slice(idx) : "";
-                          const labelEdicao =
-                            parteNome || cliente.razao_social?.trim() || "cliente";
+                          const tituloLinha =
+                            (parteNome || cliente.razao_social?.trim() || "").trim() || "Cliente";
                           return (
-                            <>
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                abrirPainelDetalhesCliente(cliente);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  abrirPainelDetalhesCliente(cliente);
+                                }
+                              }}
+                              title="Clique para ver detalhes do cliente"
+                              style={{ cursor: "pointer" }}
+                            >
                               <div
                                 style={{
                                   fontWeight: 700,
@@ -1861,37 +2201,25 @@ export default function Clientes() {
                               >
                                 {parteNome ? (
                                   <>
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleEditar(cliente)}
-                                      style={nomeClienteEditarBtnStyle}
-                                      title="Abrir cadastro para edição"
-                                      aria-label={`Editar ${labelEdicao}`}
-                                    >
-                                      {parteNome}
-                                    </button>
+                                    <span style={nomeClienteLinkStyle}>{parteNome}</span>
                                     {parteSufixo ? (
                                       <span style={{ fontWeight: 700, color: "#0f172a" }}>{parteSufixo}</span>
                                     ) : null}
                                   </>
                                 ) : cliente.razao_social?.trim() ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleEditar(cliente)}
-                                    style={nomeClienteEditarBtnStyle}
-                                    title="Abrir cadastro para edição"
-                                    aria-label={`Editar ${cliente.razao_social.trim()}`}
-                                  >
-                                    {cliente.razao_social.trim()}
-                                  </button>
+                                  <span style={nomeClienteLinkStyle}>{cliente.razao_social.trim()}</span>
                                 ) : (
                                   <span style={{ color: "#64748b" }}>—</span>
                                 )}
                               </div>
-                              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>
+                              <div
+                                style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}
+                                aria-hidden
+                              >
                                 {[cliente.cidade, cliente.estado].filter(Boolean).join(" · ") || "—"}
                               </div>
-                            </>
+                              <span className="cd-visually-hidden">Abrir detalhes: {tituloLinha}</span>
+                            </div>
                           );
                         })()}
                       </td>
@@ -2069,6 +2397,189 @@ export default function Clientes() {
         </div>
       </div>
       </div>
+
+      {painelDetalheCliente
+        ? createPortal(
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Detalhes do cliente"
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 40000,
+                background: "rgba(15, 23, 42, 0.45)",
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "center",
+                padding: "24px 16px",
+                overflowY: "auto",
+                pointerEvents: "auto",
+              }}
+              onClick={() => setPainelDetalheCliente(null)}
+            >
+              <div
+                style={{
+                  width: "100%",
+                  maxWidth: 760,
+                  background: "#ffffff",
+                  borderRadius: "18px",
+                  boxShadow: "0 24px 64px rgba(15, 23, 42, 0.22)",
+                  border: "1px solid #e2e8f0",
+                  marginTop: 32,
+                  marginBottom: 32,
+                  pointerEvents: "auto",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div
+                  style={{
+                    padding: "20px 22px",
+                    borderBottom: "1px solid #e5e7eb",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: "18px", fontWeight: 800, color: "#0f172a" }}>
+                      Detalhes do cliente
+                    </div>
+                    <div style={{ fontSize: "16px", fontWeight: 800, color: "#15803d", marginTop: 8 }}>
+                      {painelDetalheCliente.nome?.trim() || painelDetalheCliente.razao_social?.trim() || "—"}
+                    </div>
+                    <div style={{ fontSize: "13px", color: "#64748b", marginTop: 4 }}>
+                      {painelDetalheCliente.razao_social?.trim() || "—"}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="rg-btn rg-btn--outline"
+                    onClick={() => setPainelDetalheCliente(null)}
+                    style={{ minHeight: 40 }}
+                  >
+                    Fechar
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    padding: "18px 22px",
+                    display: "grid",
+                    gridTemplateColumns: "160px 1fr",
+                    gap: "10px 16px",
+                    fontSize: "14px",
+                    alignItems: "start",
+                  }}
+                >
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>CNPJ</div>
+                  <div style={{ color: "#0f172a", wordBreak: "break-word" }}>
+                    {painelDetalheCliente.cnpj || "—"}
+                  </div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Status</div>
+                  <div style={{ color: "#0f172a" }}>{painelDetalheCliente.status || "Ativo"}</div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Local</div>
+                  <div style={{ color: "#0f172a" }}>
+                    {[painelDetalheCliente.cidade, painelDetalheCliente.estado].filter(Boolean).join(" / ") || "—"}
+                  </div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Endereço</div>
+                  <div style={{ color: "#0f172a", lineHeight: 1.45, wordBreak: "break-word" }}>
+                    {formatarEnderecoRelatorio(painelDetalheCliente)}
+                  </div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Endereço coleta (texto)</div>
+                  <div style={{ color: "#0f172a", lineHeight: 1.45, wordBreak: "break-word" }}>
+                    {painelDetalheCliente.endereco_coleta?.trim() || "—"}
+                  </div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Endereço faturamento</div>
+                  <div style={{ color: "#0f172a", lineHeight: 1.45, wordBreak: "break-word" }}>
+                    {painelDetalheCliente.endereco_faturamento?.trim() || "—"}
+                  </div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>E-mail</div>
+                  <div style={{ wordBreak: "break-all" }}>{painelDetalheCliente.email?.trim() || "—"}</div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>E-mail NF</div>
+                  <div style={{ wordBreak: "break-all" }}>{painelDetalheCliente.email_nf?.trim() || "—"}</div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Telefone</div>
+                  <div>{painelDetalheCliente.telefone?.trim() || "—"}</div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Responsável</div>
+                  <div>{painelDetalheCliente.responsavel_nome?.trim() || "—"}</div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Representante RG</div>
+                  <div>{rotuloRepresentanteRgCliente(painelDetalheCliente)}</div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Resíduo / classe</div>
+                  <div style={{ lineHeight: 1.45, wordBreak: "break-word" }}>
+                    {painelDetalheCliente.tipo_residuo?.trim() || "—"}
+                    <br />
+                    <span style={{ color: "#64748b" }}>{painelDetalheCliente.classificacao?.trim() || "—"}</span>
+                  </div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Unidade / frequência</div>
+                  <div style={{ lineHeight: 1.45 }}>
+                    {painelDetalheCliente.unidade_medida?.trim() || "—"} ·{" "}
+                    {painelDetalheCliente.frequencia_coleta?.trim() || "—"}
+                  </div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Licença</div>
+                  <div>{painelDetalheCliente.licenca_numero?.trim() || "—"}</div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Validade</div>
+                  <div>{formatarData(painelDetalheCliente.validade)}</div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Ativo desde</div>
+                  <div>{formatarData(painelDetalheCliente.status_ativo_desde)}</div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Inativo desde</div>
+                  <div>{formatarData(painelDetalheCliente.status_inativo_desde)}</div>
+                </div>
+
+                <div
+                  style={{
+                    padding: "0 22px 22px",
+                    display: "flex",
+                    gap: "10px",
+                    flexWrap: "wrap",
+                    borderTop: "1px solid #f1f5f9",
+                    marginTop: 4,
+                    paddingTop: 18,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="rg-btn rg-btn--primary"
+                    onClick={() => {
+                      const alvo = painelDetalheCliente;
+                      if (!alvo) return;
+                      abrirEdicaoClienteImediato(alvo);
+                      setPainelDetalheCliente(null);
+                      void sincronizarClienteRemotoNoFormulario(alvo.id);
+                    }}
+                  >
+                    Editar cadastro
+                  </button>
+                  <button
+                    type="button"
+                    className="rg-btn rg-btn--outline"
+                    onClick={() => setPainelDetalheCliente(null)}
+                  >
+                    Fechar
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </MainLayout>
   );
 }
@@ -2084,6 +2595,11 @@ const inputStyle: React.CSSProperties = {
   fontSize: "14px",
   color: "#0f172a",
   boxSizing: "border-box",
+};
+
+const selectStyle: React.CSSProperties = {
+  ...inputStyle,
+  cursor: "pointer",
 };
 
 const textareaStyle: React.CSSProperties = {
@@ -2121,18 +2637,11 @@ const tdNowrap: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-/** Botão invisível com aspecto de hiperligação — abre o formulário de edição (mesmo fluxo que «Editar»). */
-const nomeClienteEditarBtnStyle: React.CSSProperties = {
+/** Aspecto de hiperligação no nome — abre o painel de detalhes. */
+const nomeClienteLinkStyle: React.CSSProperties = {
   display: "inline",
-  padding: 0,
-  margin: 0,
-  border: "none",
-  background: "transparent",
-  font: "inherit",
   fontWeight: 700,
   color: "#15803d",
-  cursor: "pointer",
-  textAlign: "left",
   textDecoration: "underline",
   textUnderlineOffset: "2px",
   textDecorationThickness: "1px",

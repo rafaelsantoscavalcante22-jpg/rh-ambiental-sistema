@@ -351,6 +351,7 @@ export default function Clientes() {
   const [salvando, setSalvando] = useState(false);
   const [gerandoRelatorio, setGerandoRelatorio] = useState(false);
   const [importandoExcel, setImportandoExcel] = useState(false);
+  const [exportandoExcel, setExportandoExcel] = useState(false);
   const [importResumo, setImportResumo] = useState("");
   const [sucesso, setSucesso] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -573,6 +574,55 @@ export default function Clientes() {
     XLSX.utils.book_append_sheet(wb, ws, "clientes");
     XLSX.writeFile(wb, "modelo_importacao_clientes.xlsx");
   }, []);
+
+  const handleExportarExcel = useCallback(async () => {
+    try {
+      setExportandoExcel(true);
+      const linhas = await fetchClientesRelatorio();
+
+      const headers = [
+        "nome",
+        "razao_social",
+        "cnpj",
+        "status",
+        "endereco_coleta",
+        "email_nf",
+        "tipo_residuo",
+        "classificacao",
+        "licenca_numero",
+        "validade",
+      ];
+
+      const aoa = [
+        headers,
+        ...linhas.map((c) => [
+          c.nome ?? "",
+          c.razao_social ?? "",
+          c.cnpj ?? "",
+          c.status ?? "Ativo",
+          c.endereco_coleta ?? "",
+          c.email_nf ?? "",
+          c.tipo_residuo ?? "",
+          c.classificacao ?? "",
+          c.licenca_numero ?? "",
+          c.validade ?? "",
+        ]),
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "clientes");
+
+      const iso = new Date().toISOString().slice(0, 10);
+      const sufixo = termoFiltro ? `_filtro-${termoFiltro.trim().slice(0, 40)}` : "";
+      XLSX.writeFile(wb, `clientes_${iso}${sufixo}.xlsx`);
+    } catch (err) {
+      console.error("Erro ao exportar Excel:", err);
+      alert("Não foi possível exportar em Excel. Tente novamente.");
+    } finally {
+      setExportandoExcel(false);
+    }
+  }, [fetchClientesRelatorio, termoFiltro]);
 
   const handleImportarExcel = useCallback(
     async (file: File) => {
@@ -834,61 +884,68 @@ export default function Clientes() {
   }
 
   async function handleEditar(cliente: Cliente) {
-    let fullRes = await supabase
-      .from("clientes")
-      .select(CLIENTES_SELECT_FULL)
-      .eq("id", cliente.id)
-      .maybeSingle();
-
-    if (fullRes.error && isMissingClientesStatusDateColumnsError(fullRes.error)) {
-      fullRes = await supabase
-        .from("clientes")
-        .select(CLIENTES_SELECT_LIST)
-        .eq("id", cliente.id)
-        .maybeSingle();
-    }
-
-    const { data: fullRow, error } = fullRes;
-
-    let row: Cliente = cliente
-    if (!error && fullRow && typeof fullRow === "object" && fullRow !== null && "id" in fullRow) {
-      row = fullRow as Cliente
-    }
-
-    setForm({
-      nome: row.nome || "",
-      razao_social: row.razao_social || "",
-      cnpj: row.cnpj || "",
-      status: row.status || "Ativo",
-
-      cep: row.cep || "",
-      rua: row.rua || "",
-      numero: row.numero || "",
-      complemento: row.complemento || "",
-      bairro: row.bairro || "",
-      cidade: row.cidade || "",
-      estado: row.estado || "",
-
-      endereco_coleta: row.endereco_coleta || "",
-      endereco_faturamento: row.endereco_faturamento || "",
-      email_nf: row.email_nf || "",
-
-      responsavel_nome: row.responsavel_nome || "",
-      telefone: row.telefone || "",
-      email: row.email || "",
-
-      licenca_numero: row.licenca_numero || "",
-      validade: row.validade || "",
-      status_ativo_desde: row.status_ativo_desde ?? "",
-      status_inativo_desde: row.status_inativo_desde ?? "",
-
-      residuos: montarResiduosDoCliente(row),
-    });
-
+    // feedback imediato: abre o cadastro já com os dados da linha
     setEditingId(cliente.id);
     setMostrarCadastro(true);
     setSucesso("");
     window.scrollTo({ top: 0, behavior: "smooth" });
+
+    const hydrate = (row: Cliente) => {
+      setForm({
+        nome: row.nome || "",
+        razao_social: row.razao_social || "",
+        cnpj: row.cnpj || "",
+        status: row.status || "Ativo",
+
+        cep: row.cep || "",
+        rua: row.rua || "",
+        numero: row.numero || "",
+        complemento: row.complemento || "",
+        bairro: row.bairro || "",
+        cidade: row.cidade || "",
+        estado: row.estado || "",
+
+        endereco_coleta: row.endereco_coleta || "",
+        endereco_faturamento: row.endereco_faturamento || "",
+        email_nf: row.email_nf || "",
+
+        responsavel_nome: row.responsavel_nome || "",
+        telefone: row.telefone || "",
+        email: row.email || "",
+
+        licenca_numero: row.licenca_numero || "",
+        validade: row.validade || "",
+        status_ativo_desde: row.status_ativo_desde ?? "",
+        status_inativo_desde: row.status_inativo_desde ?? "",
+
+        residuos: montarResiduosDoCliente(row),
+      });
+    };
+
+    hydrate(cliente);
+
+    try {
+      let fullRes = await supabase
+        .from("clientes")
+        .select(CLIENTES_SELECT_FULL)
+        .eq("id", cliente.id)
+        .maybeSingle();
+
+      if (fullRes.error && isMissingClientesStatusDateColumnsError(fullRes.error)) {
+        fullRes = await supabase
+          .from("clientes")
+          .select(CLIENTES_SELECT_LIST)
+          .eq("id", cliente.id)
+          .maybeSingle();
+      }
+
+      const { data: fullRow, error } = fullRes;
+      if (!error && fullRow && typeof fullRow === "object" && fullRow !== null && "id" in fullRow) {
+        hydrate(fullRow as Cliente);
+      }
+    } catch (e) {
+      console.warn("Falha ao carregar cliente completo:", e);
+    }
   }
 
   async function handleSalvarCliente(e: React.FormEvent<HTMLFormElement>) {
@@ -1125,6 +1182,15 @@ export default function Clientes() {
                 title="Importa clientes a partir de uma planilha .xlsx (valida e insere/atualiza por CNPJ)"
               >
                 {importandoExcel ? "Importando…" : "Importar (Excel)"}
+              </button>
+              <button
+                type="button"
+                className="rg-btn rg-btn--outline"
+                disabled={exportandoExcel}
+                onClick={() => void handleExportarExcel()}
+                title="Exporta os clientes em .xlsx conforme o filtro atual"
+              >
+                {exportandoExcel ? "Exportando…" : "Exportar (Excel)"}
               </button>
               <button
                 type="button"
@@ -1811,6 +1877,11 @@ export default function Clientes() {
                     return (
                     <tr
                       key={cliente.id}
+                      onClick={(e) => {
+                        const el = e.target as HTMLElement | null;
+                        if (el?.closest?.("button,a,input,select,textarea,label")) return;
+                        void handleEditar(cliente);
+                      }}
                       style={{
                         borderBottom: "1px solid #eef2f7",
                         backgroundColor: linhaInativa ? "#fef2f2" : undefined,
@@ -1840,7 +1911,19 @@ export default function Clientes() {
                           style={{ width: 18, height: 18, cursor: alternandoStatusId === cliente.id ? "wait" : "pointer" }}
                         />
                       </td>
-                      <td style={tdStyle}>
+                      <td
+                        style={{ ...tdStyle, cursor: "pointer" }}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => void handleEditar(cliente)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            void handleEditar(cliente);
+                          }
+                        }}
+                        title="Clique para abrir as informações do cliente"
+                      >
                         {(() => {
                           const nomeBruto = (cliente.nome ?? "").trim();
                           const sep = " — ";

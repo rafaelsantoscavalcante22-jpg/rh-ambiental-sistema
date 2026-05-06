@@ -16,6 +16,7 @@ const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'))
 const Clientes = lazyWithRetry(() => import('./pages/Clientes'))
 const PosVenda = lazyWithRetry(() => import('./pages/PosVenda'))
 const Motoristas = lazyWithRetry(() => import('./pages/Motoristas'))
+const RepresentantesRG = lazyWithRetry(() => import('./pages/RepresentantesRG'))
 const Caminhoes = lazyWithRetry(() => import('./pages/Caminhoes'))
 const Financeiro = lazyWithRetry(() => import('./pages/Financeiro'))
 const FinanceiroContasReceber = lazyWithRetry(() => import('./pages/FinanceiroContasReceber'))
@@ -354,6 +355,30 @@ function App() {
                   ]}
                 >
                   <Motoristas />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/representantes-rg"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[
+                    'Administrador',
+                    'Operacional',
+                    'Logística',
+                    'Balanceiro',
+                    'Diretoria',
+                    'Faturamento',
+                    'Financeiro',
+                    'Comercial',
+                    'Visualizador',
+                  ]}
+                >
+                  <RepresentantesRG />
                 </ProtectedRoute>
               }
             />

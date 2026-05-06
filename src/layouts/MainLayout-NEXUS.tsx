@@ -72,6 +72,7 @@ const menuGroups: { title: string; items: MenuItem[] }[] = [
     items: [
       { label: 'Clientes', path: '/clientes' },
       { label: 'Motoristas', path: '/motoristas' },
+      { label: 'Representante RG', path: '/representantes-rg' },
       { label: 'Caminhões', path: '/caminhoes' },
     ],
   },
