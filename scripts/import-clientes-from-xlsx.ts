@@ -1,15 +1,16 @@
 /**
  * Importa clientes reais de um .xlsx e remove clientes de teste (Seed/Demo/Teste).
  *
- * - Upsert por CNPJ (update se existir, insert se novo).
+ * - Upsert por CNPJ/CPF (update se existir, insert se novo).
  * - Remove apenas clientes claramente "de teste" (por padrões de nome/e-mail), para evitar apagar clientes reais.
  *
  * Uso:
  *   npx tsx scripts/import-clientes-from-xlsx.ts "C:\caminho\arquivo.xlsx"
+ *   npx tsx scripts/import-clientes-from-xlsx.ts "C:\caminho\arquivo.xlsx" --dry-run
  *
  * Requer: VITE_SUPABASE_URL (ou SUPABASE_URL) + SUPABASE_SERVICE_ROLE_KEY no .env
  */
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import * as XLSX from "xlsx";
 import { createClient } from "@supabase/supabase-js";
@@ -58,6 +59,13 @@ function normalizarHeader(raw: unknown): string {
 function formatarCNPJ(valor: string) {
   const digitos = valor.replace(/\D/g, "").slice(0, 14);
 
+  if (digitos.length <= 11) {
+    if (digitos.length <= 3) return digitos;
+    if (digitos.length <= 6) return digitos.replace(/^(\d{3})(\d+)/, "$1.$2");
+    if (digitos.length <= 9) return digitos.replace(/^(\d{3})(\d{3})(\d+)/, "$1.$2.$3");
+    return digitos.replace(/^(\d{3})(\d{3})(\d{3})(\d+)/, "$1.$2.$3-$4");
+  }
+
   if (digitos.length <= 2) return digitos;
   if (digitos.length <= 5) return digitos.replace(/^(\d{2})(\d+)/, "$1.$2");
   if (digitos.length <= 8) return digitos.replace(/^(\d{2})(\d{3})(\d+)/, "$1.$2.$3");
@@ -68,9 +76,25 @@ function formatarCNPJ(valor: string) {
   return digitos.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d+)/, "$1.$2.$3/$4-$5");
 }
 
-function normalizarCnpjParaArmazenar(valor: string): string {
+function normalizarDocumentoParaArmazenar(valor: string): string {
   const digitos = String(valor || "").replace(/\D/g, "").slice(0, 14);
+  if (digitos.length !== 11 && digitos.length !== 14) return "";
   return formatarCNPJ(digitos);
+}
+
+function documentoPossuiTamanhoValido(valor: string): boolean {
+  const total = valor.replace(/\D/g, "").length;
+  return total === 11 || total === 14;
+}
+
+function derivarDadosUnidadeDocumento(valor: string): { cnpj_raiz: string; tipo_unidade_cliente: string } {
+  const digitos = valor.replace(/\D/g, "");
+  if (digitos.length === 11) return { cnpj_raiz: "", tipo_unidade_cliente: "Pessoa física" };
+  if (digitos.length !== 14) return { cnpj_raiz: "", tipo_unidade_cliente: "" };
+  return {
+    cnpj_raiz: digitos.slice(0, 8),
+    tipo_unidade_cliente: digitos.slice(8, 12) === "0001" ? "Matriz" : "Filial",
+  };
 }
 
 function limparOuNull(valor: unknown): string | null {
@@ -81,7 +105,10 @@ function limparOuNull(valor: unknown): string | null {
 function parseExcelDateToIso(value: unknown): string | null {
   if (value == null) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
+    const yyyy = String(value.getFullYear()).padStart(4, "0");
+    const mm = String(value.getMonth() + 1).padStart(2, "0");
+    const dd = String(value.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
   }
   if (typeof value === "number" && Number.isFinite(value)) {
     const d = XLSX.SSF.parse_date_code(value);
@@ -123,6 +150,18 @@ type ImportRow = Partial<{
   frequencia_coleta: string;
   licenca_numero: string;
   validade: string;
+  codigo_ibama: string;
+  descricao_veiculo: string;
+  mtr_coleta: string;
+  destino: string;
+  mtr_destino: string;
+  residuo_destino: string;
+  observacoes_operacionais: string;
+  ajudante: string;
+  solicitante: string;
+  origem_planilha_cliente: string;
+  cnpj_raiz: string;
+  tipo_unidade_cliente: string;
   status_ativo_desde: string;
   status_inativo_desde: string;
 }>;
@@ -166,7 +205,32 @@ const IMPORT_HEADER_ALIASES: Record<string, keyof ImportRow> = {
   frequencia_coleta: "frequencia_coleta",
   "licenca numero": "licenca_numero",
   licenca_numero: "licenca_numero",
+  cadri: "licenca_numero",
+  "venc cadri": "validade",
   validade: "validade",
+  "codigo ibama": "codigo_ibama",
+  codigo_ibama: "codigo_ibama",
+  "descricao veiculo": "descricao_veiculo",
+  descricao_veiculo: "descricao_veiculo",
+  veiculo: "descricao_veiculo",
+  "mtr de coleta": "mtr_coleta",
+  "mtr coleta": "mtr_coleta",
+  mtr: "mtr_coleta",
+  mtr_coleta: "mtr_coleta",
+  destino: "destino",
+  "mtr de destino": "mtr_destino",
+  "mtr destino": "mtr_destino",
+  mtr_destino: "mtr_destino",
+  "residuo de destino": "residuo_destino",
+  residuo_destino: "residuo_destino",
+  observacoes: "observacoes_operacionais",
+  obs: "observacoes_operacionais",
+  "obs:": "observacoes_operacionais",
+  ajudante: "ajudante",
+  solicitante: "solicitante",
+  origem_planilha_cliente: "origem_planilha_cliente",
+  cnpj_raiz: "cnpj_raiz",
+  tipo_unidade_cliente: "tipo_unidade_cliente",
   "ativo desde": "status_ativo_desde",
   status_ativo_desde: "status_ativo_desde",
   "inativo desde": "status_inativo_desde",
@@ -174,6 +238,60 @@ const IMPORT_HEADER_ALIASES: Record<string, keyof ImportRow> = {
   "razao social (nf)": "razao_social",
   "responsavel nome": "responsavel_nome",
 };
+
+function dividirLista(valor?: string | null) {
+  if (!valor) return [];
+  return valor
+    .split(" | ")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+const IMPORT_MERGE_LIST_FIELDS: Array<keyof ImportRow> = [
+  "tipo_residuo",
+  "classificacao",
+  "unidade_medida",
+  "frequencia_coleta",
+  "codigo_ibama",
+  "descricao_veiculo",
+  "mtr_coleta",
+  "destino",
+  "mtr_destino",
+  "residuo_destino",
+  "observacoes_operacionais",
+  "ajudante",
+  "solicitante",
+  "origem_planilha_cliente",
+];
+
+function juntarValorLista(atual: string | undefined, proximo: string | undefined): string | undefined {
+  const itens = [...dividirLista(atual), ...dividirLista(proximo)];
+  const unicos = Array.from(new Set(itens.map((item) => item.trim()).filter(Boolean)));
+  return unicos.length ? unicos.join(" | ") : undefined;
+}
+
+function consolidarLinhasImportacao(rows: ImportRow[]): ImportRow[] {
+  const map = new Map<string, ImportRow>();
+  for (const row of rows) {
+    const key = row.cnpj?.trim();
+    if (!key) continue;
+    const existente = map.get(key);
+    if (!existente) {
+      map.set(key, { ...row });
+      continue;
+    }
+
+    for (const [campo, valor] of Object.entries(row) as Array<[keyof ImportRow, string | undefined]>) {
+      if (!valor) continue;
+      if (IMPORT_MERGE_LIST_FIELDS.includes(campo)) {
+        existente[campo] = juntarValorLista(existente[campo], valor);
+      } else if (!existente[campo]) {
+        existente[campo] = valor;
+      }
+    }
+  }
+  return Array.from(map.values());
+}
 
 function isClienteDeTeste(c: { nome?: string | null; email?: string | null; email_nf?: string | null }) {
   const nome = String(c.nome ?? "").trim().toLowerCase();
@@ -215,7 +333,8 @@ async function deleteByIds(
 carregarEnvArquivo();
 
 async function main() {
-  const filePath = process.argv[2]?.trim() || "";
+  const dryRun = process.argv.includes("--dry-run");
+  const filePath = process.argv.slice(2).find((arg) => !arg.startsWith("--"))?.trim() || "";
   if (!filePath) {
     console.error('Informe o caminho do .xlsx. Ex.: npx tsx scripts/import-clientes-from-xlsx.ts "C:\\\\path\\\\clientes.xlsx"');
     process.exit(1);
@@ -223,6 +342,105 @@ async function main() {
   if (!existsSync(filePath)) {
     console.error("Arquivo não encontrado:", filePath);
     process.exit(1);
+  }
+
+  console.log("Lendo planilha:", filePath);
+  const fileBuf = readFileSync(filePath);
+  const wb = XLSX.read(fileBuf, { type: "buffer", dense: true, cellDates: true });
+  if (!wb.SheetNames?.length) throw new Error("A planilha não possui abas.");
+
+  const rows: ImportRow[] = [];
+  const erros: string[] = [];
+  let abasProcessadas = 0;
+  let linhasLidas = 0;
+
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName];
+    const aoa = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      blankrows: false,
+      raw: true,
+    }) as unknown[][];
+
+    if (!Array.isArray(aoa) || aoa.length < 2) continue;
+
+    const headerRow = aoa[0] ?? [];
+    const colMap = new Map<number, keyof ImportRow>();
+    for (let c = 0; c < headerRow.length; c++) {
+      const h = normalizarHeader(headerRow[c]);
+      const mapped = IMPORT_HEADER_ALIASES[h];
+      if (mapped) colMap.set(c, mapped);
+    }
+
+    const required: Array<keyof ImportRow> = ["razao_social", "cnpj"];
+    const missing = required.filter((r) => !Array.from(colMap.values()).includes(r));
+    if (missing.length) {
+      erros.push(`Aba ${sheetName}: cabeçalhos obrigatórios ausentes (${missing.join(", ")}).`);
+      continue;
+    }
+
+    abasProcessadas++;
+    linhasLidas += aoa.length - 1;
+
+    for (let r = 1; r < aoa.length; r++) {
+      const row = aoa[r] ?? [];
+      const obj: ImportRow = { origem_planilha_cliente: sheetName };
+
+      for (const [idx, key] of colMap.entries()) {
+        const v = (row as unknown[])[idx];
+        if (key === "validade" || key === "status_ativo_desde" || key === "status_inativo_desde") {
+          const iso = parseExcelDateToIso(v);
+          if (iso) (obj as Record<keyof ImportRow, string | undefined>)[key] = iso;
+          continue;
+        }
+        const s = String(v ?? "").trim();
+        if (s && s !== "-") (obj as Record<keyof ImportRow, string | undefined>)[key] = s;
+      }
+
+      const razao = (obj.razao_social || "").trim();
+      const cnpj = normalizarDocumentoParaArmazenar(String(obj.cnpj || ""));
+      const nome = (obj.nome || razao || "").trim();
+
+      if (!razao || !cnpj || !documentoPossuiTamanhoValido(cnpj)) {
+        erros.push(`Aba ${sheetName}, linha ${r + 1}: razão/documento inválidos.`);
+        continue;
+      }
+
+      obj.nome = nome;
+      obj.razao_social = razao;
+      obj.cnpj = cnpj;
+      obj.status = (obj.status || "Ativo").trim() || "Ativo";
+      Object.assign(obj, derivarDadosUnidadeDocumento(cnpj));
+
+      if (!obj.tipo_residuo) obj.tipo_residuo = "—";
+      if (!obj.classificacao) obj.classificacao = "—";
+
+      rows.push(obj);
+    }
+  }
+
+  if (abasProcessadas === 0) {
+    throw new Error("Nenhuma aba com cabeçalho compatível foi encontrada.");
+  }
+
+  const rowsConsolidadas = consolidarLinhasImportacao(rows);
+
+  if (rowsConsolidadas.length === 0) {
+    throw new Error(erros.length ? `Nenhuma linha válida.\n${erros.slice(0, 12).join("\n")}` : "Nenhuma linha válida.");
+  }
+
+  console.log(
+    `Planilha: ${abasProcessadas} abas, ${linhasLidas} linhas lidas, ${rows.length} linhas válidas, ${rowsConsolidadas.length} clientes consolidados. ${erros.length} ignoradas.`
+  );
+  if (erros.length) {
+    const logPath = resolve(process.cwd(), "clientes-import-erros.log");
+    writeFileSync(logPath, erros.join("\n"), "utf8");
+    console.log(`Log de inconsistências: ${logPath}`);
+  }
+
+  if (dryRun) {
+    console.log("Dry-run concluído. Nenhuma alteração foi enviada ao Supabase.");
+    return;
   }
 
   const url = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
@@ -241,81 +459,6 @@ async function main() {
 
   const supabase = createClient(url, key);
 
-  console.log("Lendo planilha:", filePath);
-  const fileBuf = readFileSync(filePath);
-  const wb = XLSX.read(fileBuf, { type: "buffer", dense: true, cellDates: true });
-  const sheetName = wb.SheetNames?.[0];
-  if (!sheetName) throw new Error("A planilha não possui abas.");
-  const sheet = wb.Sheets[sheetName];
-
-  const aoa = XLSX.utils.sheet_to_json(sheet, {
-    header: 1,
-    blankrows: false,
-    raw: true,
-  }) as unknown[][];
-
-  if (!Array.isArray(aoa) || aoa.length < 2) {
-    throw new Error("Planilha vazia. Precisa ter cabeçalho e pelo menos 1 linha.");
-  }
-
-  const headerRow = aoa[0] ?? [];
-  const colMap = new Map<number, keyof ImportRow>();
-  for (let c = 0; c < headerRow.length; c++) {
-    const h = normalizarHeader(headerRow[c]);
-    const mapped = IMPORT_HEADER_ALIASES[h];
-    if (mapped) colMap.set(c, mapped);
-  }
-
-  const required: Array<keyof ImportRow> = ["razao_social", "cnpj"];
-  const missing = required.filter((r) => !Array.from(colMap.values()).includes(r));
-  if (missing.length) {
-    throw new Error(`Cabeçalhos obrigatórios ausentes: ${missing.join(", ")}.`);
-  }
-
-  const rows: ImportRow[] = [];
-  const erros: string[] = [];
-
-  for (let r = 1; r < aoa.length; r++) {
-    const row = aoa[r] ?? [];
-    const obj: ImportRow = {};
-
-    for (const [idx, key] of colMap.entries()) {
-      const v = (row as unknown[])[idx];
-      if (key === "validade" || key === "status_ativo_desde" || key === "status_inativo_desde") {
-        const iso = parseExcelDateToIso(v);
-        if (iso) (obj as Record<keyof ImportRow, string | undefined>)[key] = iso;
-        continue;
-      }
-      const s = String(v ?? "").trim();
-      if (s) (obj as Record<keyof ImportRow, string | undefined>)[key] = s;
-    }
-
-    const razao = (obj.razao_social || "").trim();
-    const cnpj = normalizarCnpjParaArmazenar(String(obj.cnpj || ""));
-    const nome = (obj.nome || razao || "").trim();
-
-    if (!razao || !cnpj || cnpj.replace(/\D/g, "").length !== 14) {
-      erros.push(`Linha ${r + 1}: razão/CNPJ inválidos.`);
-      continue;
-    }
-
-    obj.nome = nome;
-    obj.razao_social = razao;
-    obj.cnpj = cnpj;
-    obj.status = (obj.status || "Ativo").trim() || "Ativo";
-
-    if (!obj.tipo_residuo) obj.tipo_residuo = "—";
-    if (!obj.classificacao) obj.classificacao = "—";
-
-    rows.push(obj);
-  }
-
-  if (rows.length === 0) {
-    throw new Error(erros.length ? `Nenhuma linha válida.\n${erros.slice(0, 12).join("\n")}` : "Nenhuma linha válida.");
-  }
-
-  console.log(`Planilha: ${rows.length} linhas válidas. ${erros.length} ignoradas.`);
-
   console.log("1) Removendo clientes de teste (Seed/Demo/Teste)...");
   const idsParaApagar: string[] = [];
   for (let offset = 0; ; offset += 1000) {
@@ -333,8 +476,8 @@ async function main() {
   const apagados = idsParaApagar.length ? await deleteByIds(supabase, "clientes", idsParaApagar) : 0;
   console.log(`  - apagados: ${apagados}`);
 
-  console.log("2) Upsert (por CNPJ): inserir/atualizar clientes reais...");
-  const cnpjs = Array.from(new Set(rows.map((r) => r.cnpj!).filter(Boolean)));
+  console.log("2) Upsert (por CNPJ/CPF): inserir/atualizar clientes reais...");
+  const cnpjs = Array.from(new Set(rowsConsolidadas.map((r) => r.cnpj!).filter(Boolean)));
   const existingMap = new Map<string, string>();
 
   for (let i = 0; i < cnpjs.length; i += 200) {
@@ -349,7 +492,7 @@ async function main() {
   const inserts: Array<Record<string, unknown>> = [];
   const updates: Array<{ id: string; payload: Record<string, unknown> }> = [];
 
-  for (const r of rows) {
+  for (const r of rowsConsolidadas) {
     const payload = {
       nome: r.nome!,
       razao_social: r.razao_social!,
@@ -374,6 +517,18 @@ async function main() {
       frequencia_coleta: limparOuNull(r.frequencia_coleta),
       licenca_numero: limparOuNull(r.licenca_numero),
       validade: limparOuNull(r.validade),
+      codigo_ibama: limparOuNull(r.codigo_ibama),
+      descricao_veiculo: limparOuNull(r.descricao_veiculo),
+      mtr_coleta: limparOuNull(r.mtr_coleta),
+      destino: limparOuNull(r.destino),
+      mtr_destino: limparOuNull(r.mtr_destino),
+      residuo_destino: limparOuNull(r.residuo_destino),
+      observacoes_operacionais: limparOuNull(r.observacoes_operacionais),
+      ajudante: limparOuNull(r.ajudante),
+      solicitante: limparOuNull(r.solicitante),
+      origem_planilha_cliente: limparOuNull(r.origem_planilha_cliente),
+      cnpj_raiz: limparOuNull(r.cnpj_raiz),
+      tipo_unidade_cliente: limparOuNull(r.tipo_unidade_cliente),
     };
 
     const id = existingMap.get(r.cnpj!);

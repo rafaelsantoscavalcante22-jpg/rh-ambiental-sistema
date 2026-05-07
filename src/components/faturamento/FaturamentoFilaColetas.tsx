@@ -1,6 +1,10 @@
 import type { CSSProperties } from 'react'
 import type { FaturamentoResumoViewRow } from '../../lib/faturamentoResumo'
-import { rotuloConferenciaResumo, statusFaturamentoUi } from '../../lib/faturamentoOperacionalFila'
+import {
+  coletaFaturamentoSlaVencido,
+  rotuloConferenciaResumo,
+  statusFaturamentoUi,
+} from '../../lib/faturamentoOperacionalFila'
 
 const wrap: CSSProperties = {
   background: '#fff',
@@ -69,7 +73,7 @@ export function FaturamentoFilaColetas({
   carregando,
   onFaturar,
   titulo = 'Fila para emissão ao Financeiro',
-  subtitulo = 'Critérios: peso líquido registado, etapa após o controle de massa, aprovação e ainda sem faturamento emitido ao Financeiro. A conferência na vista ajuda a validar o pacote antes de registar o valor.',
+  subtitulo = 'Critérios: peso líquido registado, etapa após o controle de massa, aprovação e ainda sem faturamento emitido ao Financeiro. Coletas com mais de 3 dias nessa situação aparecem com indicador vermelho intermitente na coluna Faturamento.',
   mensagemVazia = 'Nenhuma coleta pronta para faturamento.',
   rotuloBotao = 'Faturar',
 }: Props) {
@@ -119,8 +123,17 @@ export function FaturamentoFilaColetas({
               </tr>
             </thead>
             <tbody>
-              {linhas.map((r) => (
-                <tr key={r.coleta_id} style={{ background: '#fafefd' }}>
+              {linhas.map((r) => {
+                const fat = statusFaturamentoUi(r)
+                const slaCritico = coletaFaturamentoSlaVencido(r) && fat === 'Pendente'
+                return (
+                <tr
+                  key={r.coleta_id}
+                  style={{
+                    background: '#fafefd',
+                    ...(slaCritico ? { boxShadow: 'inset 4px 0 0 #dc2626' } : {}),
+                  }}
+                >
                   <td style={{ ...td, fontWeight: 800, color: '#0f766e' }}>{r.numero_coleta ?? r.numero}</td>
                   <td style={td}>{r.cliente_nome || '—'}</td>
                   <td style={td}>{r.mtr_numero || '—'}</td>
@@ -133,17 +146,22 @@ export function FaturamentoFilaColetas({
                   </td>
                   <td style={td}>
                     <span
+                      className={slaCritico ? 'rg-faturamento-sla-critico' : undefined}
                       style={{
                         display: 'inline-flex',
                         padding: '4px 10px',
                         borderRadius: '999px',
                         fontSize: '11px',
                         fontWeight: 800,
-                        background: statusFaturamentoUi(r) === 'Faturado' ? '#dcfce7' : '#fef3c7',
-                        color: statusFaturamentoUi(r) === 'Faturado' ? '#15803d' : '#b45309',
+                        ...(slaCritico
+                          ? {}
+                          : {
+                              background: fat === 'Faturado' ? '#dcfce7' : '#fef3c7',
+                              color: fat === 'Faturado' ? '#15803d' : '#b45309',
+                            }),
                       }}
                     >
-                      {statusFaturamentoUi(r)}
+                      {fat}
                     </span>
                   </td>
                   <td style={{ ...td, maxWidth: '240px', fontSize: '12px', color: '#64748b' }} title={r.pendencias_resumo ?? ''}>
@@ -169,7 +187,8 @@ export function FaturamentoFilaColetas({
                     </button>
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>

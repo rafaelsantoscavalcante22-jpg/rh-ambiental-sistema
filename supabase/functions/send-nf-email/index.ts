@@ -20,10 +20,11 @@ type AnexoNormalizado = {
   contentBase64: string;
 };
 
-const MAX_ANEXOS = 5;
+/** NF + opcional boleto (PDF) no cliente — até 5 anexos gerais + 1 boleto. */
+const MAX_ANEXOS = 6;
 const MAX_BYTES_POR_ANEXO = 4 * 1024 * 1024; // 4 MiB (decodificado)
 
-type ProvedorEnvio = "gmail" | "resend";
+type ProvedorEnvio = "outlook" | "resend";
 
 function jsonResponse(req: Request, status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
@@ -109,22 +110,22 @@ ${observacaoUser ? `<p><strong>Observação:</strong> ${observacaoUser.replace(/
 
 function resolverProvedor(): {
   provedor: ProvedorEnvio;
-  gmailUser?: string;
-  gmailAppPassword?: string;
+  outlookUser?: string;
+  outlookAppPassword?: string;
   resendKey?: string;
   fromEmail: string;
   erroConfig?: string;
 } {
-  const gmailUser = Deno.env.get("GMAIL_USER")?.trim();
-  const gmailAppPassword = Deno.env.get("GMAIL_APP_PASSWORD")?.trim();
+  const outlookUser = Deno.env.get("OUTLOOK_USER")?.trim();
+  const outlookAppPassword = Deno.env.get("OUTLOOK_APP_PASSWORD")?.trim();
   const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
   const fromRaw = Deno.env.get("NF_EMAIL_FROM")?.trim();
 
-  if (gmailUser && gmailAppPassword) {
+  if (outlookUser && outlookAppPassword) {
     const fromEmail = fromRaw && fromRaw.includes("@")
       ? fromRaw
-      : `RG Ambiental <${gmailUser}>`;
-    return { provedor: "gmail", gmailUser, gmailAppPassword, fromEmail };
+      : `RG Ambiental <${outlookUser}>`;
+    return { provedor: "outlook", outlookUser, outlookAppPassword, fromEmail };
   }
 
   if (resendKey) {
@@ -134,11 +135,11 @@ function resolverProvedor(): {
   }
 
   return {
-    provedor: "gmail",
+    provedor: "outlook",
     fromEmail: "",
     erroConfig:
       "Nenhum provedor de e-mail configurado. No Supabase: Edge Functions → Secrets — " +
-      "opção A (Gmail): GMAIL_USER (conta Gmail/Google Workspace) e GMAIL_APP_PASSWORD (senha de app de 16 caracteres, com 2FA ativo). " +
+      "opção A (Outlook/Hotmail): OUTLOOK_USER e OUTLOOK_APP_PASSWORD (senha de app, com 2FA ativo). " +
       "opção B (Resend): RESEND_API_KEY. Opcional: NF_EMAIL_FROM (ex.: RG Ambiental <nf@dominio.com>).",
   };
 }
@@ -249,25 +250,26 @@ Deno.serve(async (req: Request) => {
   }[] = [];
 
   let smtp: SMTPClient | null = null;
-  if (cfg.provedor === "gmail" && cfg.gmailUser && cfg.gmailAppPassword) {
+  if (cfg.provedor === "outlook" && cfg.outlookUser && cfg.outlookAppPassword) {
     try {
       smtp = new SMTPClient({
         connection: {
-          hostname: "smtp.gmail.com",
-          port: 465,
-          tls: true,
+          hostname: "smtp-mail.outlook.com",
+          port: 587,
+          // STARTTLS (587) — denomailer usa STARTTLS quando tls=false.
+          tls: false,
           auth: {
-            username: cfg.gmailUser,
-            password: cfg.gmailAppPassword,
+            username: cfg.outlookUser,
+            password: cfg.outlookAppPassword,
           },
         },
       });
     } catch (e) {
       return jsonResponse(req,500, {
-        error: `Falha ao iniciar SMTP Gmail: ${
+        error: `Falha ao iniciar SMTP Outlook: ${
           e instanceof Error ? e.message : String(e)
         }`,
-        code: "GMAIL_SMTP_INIT_FAILED",
+        code: "OUTLOOK_SMTP_INIT_FAILED",
       });
     }
   }
@@ -308,7 +310,7 @@ Deno.serve(async (req: Request) => {
 
       const html = montarHtmlCorpo(nome, observacaoUser);
 
-      if (cfg.provedor === "gmail" && smtp) {
+      if (cfg.provedor === "outlook" && smtp) {
         try {
           await smtp.send({
             from: cfg.fromEmail,
@@ -331,7 +333,7 @@ Deno.serve(async (req: Request) => {
             nome,
             email,
             ok: false,
-            detalhe: e instanceof Error ? e.message : "Falha SMTP Gmail",
+            detalhe: e instanceof Error ? e.message : "Falha SMTP Outlook",
           });
         }
         continue;
@@ -404,8 +406,8 @@ Deno.serve(async (req: Request) => {
     ? `${provedor}_falha`
     : `${provedor}_parcial`;
 
-  const linhaResumo = provedor === "gmail"
-    ? `[Gmail] enviados: ${okCount} · falhas: ${failCount}`
+  const linhaResumo = provedor === "outlook"
+    ? `[Outlook] enviados: ${okCount} · falhas: ${failCount}`
     : `[Resend] enviados: ${okCount} · falhas: ${failCount}`;
   const linhaAnexos = anexos.length > 0
     ? `Anexos: ${anexos.map((a) => a.filename).join(", ")}`
@@ -437,8 +439,8 @@ Deno.serve(async (req: Request) => {
     ? String((logInsert as { id: string }).id)
     : null;
 
-  const msgOk = provedor === "gmail"
-    ? `${okCount} e-mail(ns) enviado(s) via Gmail.`
+  const msgOk = provedor === "outlook"
+    ? `${okCount} e-mail(ns) enviado(s) via Outlook.`
     : `${okCount} e-mail(ns) enviado(s) via Resend.`;
 
   return jsonResponse(req,200, {

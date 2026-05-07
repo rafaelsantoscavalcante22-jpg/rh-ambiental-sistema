@@ -1,26 +1,12 @@
--- =============================================================================
--- View vw_faturamento_resumo — copiar e colar no Supabase → SQL Editor → Run
---
--- Isto corrige o erro «view vw_faturamento_resumo não existe» na página Faturamento.
--- Se já existir uma versão antiga da view, CREATE OR REPLACE falha com 42P16
--- («cannot change name of view column…»): por isso usamos DROP VIEW + CREATE VIEW.
--- Mantém-se alinhado a: migrations/20260429120000_vw_faturamento_resumo_sem_aprovacao.sql
---
--- Depois de executar: recarregue a app (Faturamento / Financeiro).
--- Alternativa local: npm run db:apply:faturamento-view
--- =============================================================================
-
-ALTER TABLE public.contas_receber
-  ADD COLUMN IF NOT EXISTS nf_enviada_em timestamptz,
-  ADD COLUMN IF NOT EXISTS nf_envio_observacao text;
-
-ALTER TABLE public.contas_receber
-  ADD COLUMN IF NOT EXISTS valor_pago numeric NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS valor_travado boolean NOT NULL DEFAULT false;
+-- Margem de lucro por cliente + indicador de SLA de faturamento (3 dias) na view de resumo.
 
 ALTER TABLE public.clientes
   ADD COLUMN IF NOT EXISTS margem_lucro_percentual numeric(7, 2);
 
+COMMENT ON COLUMN public.clientes.margem_lucro_percentual IS
+  'Margem de lucro alvo para o cliente (%). Opcional; usada em precificação / relatórios.';
+
+-- Função de apoio: mesma regra da coluna computada da view (para jobs ou relatórios SQL).
 CREATE OR REPLACE FUNCTION public.coleta_faturamento_sla_vencido(
   p_created_at timestamptz,
   p_faturamento_registro_status text,
@@ -50,6 +36,9 @@ AS $$
       )
     );
 $$;
+
+COMMENT ON FUNCTION public.coleta_faturamento_sla_vencido IS
+  'Verdadeiro se a coleta tem mais de 3 dias e ainda não foi faturada (emitida) nem enviada ao financeiro.';
 
 DROP VIEW IF EXISTS public.vw_faturamento_resumo CASCADE;
 
@@ -176,6 +165,9 @@ LEFT JOIN LATERAL (
 ) lcr ON true;
 
 COMMENT ON VIEW public.vw_faturamento_resumo IS
-  'Consolidação para conferência / faturamento / financeiro; PRONTO_PARA_FATURAR sem exigir aprovação da diretoria.';
+  'Consolidação para conferência / faturamento / financeiro; inclui SLA de 3 dias (faturamento_sla_vencido) e margem do cliente.';
+
+COMMENT ON COLUMN public.vw_faturamento_resumo.faturamento_sla_vencido IS
+  'Indica atraso: coleta criada há mais de 3 dias sem faturamento emitido e sem envio ao financeiro.';
 
 GRANT SELECT ON public.vw_faturamento_resumo TO authenticated;

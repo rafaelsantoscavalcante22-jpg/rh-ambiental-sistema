@@ -14,6 +14,8 @@ export type FaturamentoResumoViewRow = {
   cliente_id: string | null
   cliente_nome: string | null
   cliente_razao_social: string | null
+  /** Margem de lucro alvo do cliente (%, da tabela clientes). */
+  cliente_margem_lucro_percentual?: number | null
   data_agendada: string
   data_programacao: string | null
   data_execucao: string | null
@@ -54,6 +56,8 @@ export type FaturamentoResumoViewRow = {
   conferencia_em: string | null
   status_conferencia: string | null
   pendencias_resumo: string | null
+  /** SLA: coleta criada há >3 dias sem faturamento emitido / envio ao financeiro (view). */
+  faturamento_sla_vencido?: boolean | null
   status_faturamento: string | null
   /** Preenchido quando existe linha em `contas_receber` (migração Fase 8). */
   conta_receber_nf_enviada_em?: string | null

@@ -36,6 +36,8 @@ type EnvioLogRow = {
 }
 
 const MAX_ANEXOS = 5
+/** Total no e-mail: anexos de NF (até 5) + opcional boleto PDF (1). */
+const MAX_TOTAL_ANEXOS_EMAIL = 6
 const MAX_BYTES_ANEXO = 4 * 1024 * 1024 // 4 MiB
 
 function formatarTamanho(bytes: number) {
@@ -88,6 +90,7 @@ export default function EnvioNF() {
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [observacao, setObservacao] = useState('')
   const [anexoFiles, setAnexoFiles] = useState<File[]>([])
+  const [boletoFile, setBoletoFile] = useState<File | null>(null)
   const [enviando, setEnviando] = useState(false)
   const [envioModo, setEnvioModo] = useState<'simulacao' | 'email' | null>(null)
   const [mensagem, setMensagem] = useState('')
@@ -312,7 +315,13 @@ export default function EnvioNF() {
       const avisos: string[] = []
       for (const f of picked) {
         if (next.length >= MAX_ANEXOS) {
-          avisos.push(`No máximo ${MAX_ANEXOS} anexos por envio.`)
+          avisos.push(`No máximo ${MAX_ANEXOS} anexos de NF por envio.`)
+          break
+        }
+        if (next.length + (boletoFile ? 1 : 0) >= MAX_TOTAL_ANEXOS_EMAIL) {
+          avisos.push(
+            `No máximo ${MAX_TOTAL_ANEXOS_EMAIL} anexos no e-mail (notas + boleto). Remova o boleto ou um anexo.`
+          )
           break
         }
         if (f.size > MAX_BYTES_ANEXO) {
@@ -335,6 +344,33 @@ export default function EnvioNF() {
 
   function limparAnexos() {
     setAnexoFiles([])
+  }
+
+  function onEscolherBoleto(files: FileList | null) {
+    if (!files?.length) return
+    const f = files[0]
+    const ehPdf =
+      f.type === 'application/pdf' || f.name.toLowerCase().trim().endsWith('.pdf')
+    if (!ehPdf) {
+      setErro('O boleto deve ser um ficheiro PDF.')
+      return
+    }
+    if (f.size > MAX_BYTES_ANEXO) {
+      setErro(`Boleto: "${f.name}" ultrapassa ${formatarTamanho(MAX_BYTES_ANEXO)}.`)
+      return
+    }
+    if (anexoFiles.length + 1 > MAX_TOTAL_ANEXOS_EMAIL) {
+      setErro(
+        `No máximo ${MAX_TOTAL_ANEXOS_EMAIL} anexos no e-mail (notas + boleto). Remova um anexo da NF.`
+      )
+      return
+    }
+    setErro('')
+    setBoletoFile(f)
+  }
+
+  function limparBoleto() {
+    setBoletoFile(null)
   }
 
   function toggleColetaConta(id: string) {
@@ -386,9 +422,15 @@ export default function EnvioNF() {
       email: (c.email_nf ?? '').trim(),
     }))
 
+    const nomesSimulacao = [
+      ...(anexoFiles.length > 0
+        ? [`NF: ${anexoFiles.map((f) => f.name).join(', ')}`]
+        : []),
+      ...(boletoFile ? [`Boleto: ${boletoFile.name}`] : []),
+    ]
     const obsComAnexos =
-      anexoFiles.length > 0
-        ? [observacao.trim(), `Anexos (simulação, não enviados): ${anexoFiles.map((f) => f.name).join(', ')}`]
+      nomesSimulacao.length > 0
+        ? [observacao.trim(), `Anexos (simulação, não enviados): ${nomesSimulacao.join(' · ')}`]
             .filter(Boolean)
             .join('\n')
         : observacao.trim()
@@ -425,6 +467,7 @@ export default function EnvioNF() {
       )
       setObservacao('')
       limparAnexos()
+      limparBoleto()
       setSelecionados(new Set())
       await carregarLogs()
     } catch (e) {
@@ -453,12 +496,21 @@ export default function EnvioNF() {
       email: (c.email_nf ?? '').trim(),
     }))
 
+    const todosArquivosEmail: File[] = [...anexoFiles]
+    if (boletoFile) todosArquivosEmail.push(boletoFile)
+    if (todosArquivosEmail.length > MAX_TOTAL_ANEXOS_EMAIL) {
+      setErro(
+        `No máximo ${MAX_TOTAL_ANEXOS_EMAIL} anexos por envio (notas fiscais + boleto). Reduza a quantidade.`
+      )
+      return
+    }
+
     let anexos:
       | { filename: string; contentType: string; contentBase64: string }[]
       | undefined
-    if (anexoFiles.length > 0) {
+    if (todosArquivosEmail.length > 0) {
       anexos = await Promise.all(
-        anexoFiles.map(async (f) => ({
+        todosArquivosEmail.map(async (f) => ({
           filename: f.name,
           contentType: f.type || 'application/octet-stream',
           contentBase64: await fileToBase64(f),
@@ -513,6 +565,7 @@ export default function EnvioNF() {
       setMensagem(msg)
       setObservacao('')
       limparAnexos()
+      limparBoleto()
       setSelecionados(new Set())
       await carregarLogs()
     } catch (e) {
@@ -549,8 +602,8 @@ export default function EnvioNF() {
               </h1>
               <p className="page-header__lead" style={{ margin: '6px 0 0' }}>
                 Selecione clientes com <strong>e-mail para NF</strong> em <strong>Clientes</strong>. Use{' '}
-                <strong>Enviar e-mails</strong> para disparo real (Gmail SMTP ou Resend, conforme segredos na Edge
-                Function) ou <strong>simulação</strong> só para testar o histórico sem enviar.
+                <strong>Enviar e-mails</strong> para disparo real (Outlook/Hotmail SMTP ou Resend, conforme segredos na
+                Edge Function) ou <strong>simulação</strong> só para testar o histórico sem enviar.
               </p>
               {coletaParam ? (
                 <p
@@ -864,8 +917,10 @@ export default function EnvioNF() {
                 Anexar Nota Fiscal
               </div>
               <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#64748b', maxWidth: '720px' }}>
-                PDF, XML ou imagens. Até {MAX_ANEXOS} ficheiros, {formatarTamanho(MAX_BYTES_ANEXO)} cada. Os anexos são
-                enviados no e-mail real; na <strong>simulação</strong> só ficam registados os nomes no log.
+                PDF, XML ou imagens. Até {MAX_ANEXOS} ficheiros de NF, {formatarTamanho(MAX_BYTES_ANEXO)} cada. Pode
+                anexar ainda <strong>um boleto em PDF</strong> abaixo (conta no limite de {MAX_TOTAL_ANEXOS_EMAIL}{' '}
+                ficheiros no e-mail). Os anexos são enviados no e-mail real; na <strong>simulação</strong> só ficam
+                registados os nomes no log.
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
                 <label
@@ -887,7 +942,11 @@ export default function EnvioNF() {
                     type="file"
                     multiple
                     accept=".pdf,.xml,.zip,application/pdf,application/xml,image/*"
-                    disabled={!podeDisparar || anexoFiles.length >= MAX_ANEXOS}
+                    disabled={
+                      !podeDisparar ||
+                      anexoFiles.length >= MAX_ANEXOS ||
+                      anexoFiles.length + (boletoFile ? 1 : 0) >= MAX_TOTAL_ANEXOS_EMAIL
+                    }
                     onChange={(e) => {
                       onEscolherAnexos(e.target.files)
                       e.target.value = ''
@@ -957,6 +1016,76 @@ export default function EnvioNF() {
               ) : null}
             </div>
 
+            <div style={{ marginTop: '20px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#64748b', marginBottom: '8px' }}>
+                Anexar boleto (PDF)
+              </div>
+              <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#64748b', maxWidth: '720px' }}>
+                Um ficheiro <strong>PDF</strong> por envio, até {formatarTamanho(MAX_BYTES_ANEXO)}. É enviado junto com
+                as notas fiscais no e-mail real.
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 16px',
+                    borderRadius: '10px',
+                    border: '1px solid #cbd5e1',
+                    background: podeDisparar ? '#f8fafc' : '#e2e8f0',
+                    fontSize: '14px',
+                    fontWeight: 700,
+                    color: '#334155',
+                    cursor: podeDisparar ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    disabled={
+                      !podeDisparar ||
+                      anexoFiles.length + (boletoFile ? 0 : 1) > MAX_TOTAL_ANEXOS_EMAIL
+                    }
+                    onChange={(e) => {
+                      onEscolherBoleto(e.target.files)
+                      e.target.value = ''
+                    }}
+                    style={{ display: 'none' }}
+                  />
+                  Anexar Boleto
+                </label>
+                {boletoFile ? (
+                  <>
+                    <span style={{ fontSize: '13px', color: '#334155', fontWeight: 600 }}>
+                      {boletoFile.name}
+                      <span style={{ color: '#94a3b8', fontWeight: 500 }}>
+                        {' '}
+                        · {formatarTamanho(boletoFile.size)}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={limparBoleto}
+                      disabled={!podeDisparar}
+                      style={{
+                        background: '#ffffff',
+                        color: '#b91c1c',
+                        border: '1px solid #fecaca',
+                        borderRadius: '10px',
+                        padding: '10px 14px',
+                        fontWeight: 700,
+                        fontSize: '13px',
+                        cursor: podeDisparar ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      Remover boleto
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+
             <div style={{ marginTop: '20px', display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
               <button
                 type="button"
@@ -1000,17 +1129,14 @@ export default function EnvioNF() {
               </button>
             </div>
             <p style={{ margin: '12px 0 0', fontSize: '12px', color: '#64748b', maxWidth: '820px' }}>
-              <strong>Gmail:</strong> na conta Google ative 2FA e crie uma{' '}
-              <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">
-                senha de app
-              </a>
-              . No Supabase → Edge Functions → Secrets defina <code style={{ fontSize: '11px' }}>GMAIL_USER</code> (e-mail
-              da conta) e <code style={{ fontSize: '11px' }}>GMAIL_APP_PASSWORD</code> (16 caracteres). Se{' '}
-              <code style={{ fontSize: '11px' }}>GMAIL_USER</code> existir, o envio usa Gmail; caso contrário usa{' '}
-              <strong>Resend</strong> com <code style={{ fontSize: '11px' }}>RESEND_API_KEY</code>. Publique{' '}
+              <strong>Outlook/Hotmail:</strong> ative 2FA e crie uma <strong>senha de app</strong>. No Supabase → Edge
+              Functions → Secrets defina <code style={{ fontSize: '11px' }}>OUTLOOK_USER</code> (ex.:{' '}
+              <code style={{ fontSize: '11px' }}>faturamentorgambiental@hotmail.com</code>) e{' '}
+              <code style={{ fontSize: '11px' }}>OUTLOOK_APP_PASSWORD</code>. Se <code style={{ fontSize: '11px' }}>OUTLOOK_USER</code>{' '}
+              existir, o envio usa Outlook; caso contrário usa <strong>Resend</strong> com{' '}
+              <code style={{ fontSize: '11px' }}>RESEND_API_KEY</code>. Publique{' '}
               <code style={{ fontSize: '11px' }}>send-nf-email</code>. Opcional:{' '}
-              <code style={{ fontSize: '11px' }}>NF_EMAIL_FROM</code> (o remetente deve ser permitido pelo provedor —
-              Gmail costuma exigir o mesmo e-mail da conta ou alias configurado).
+              <code style={{ fontSize: '11px' }}>NF_EMAIL_FROM</code> (remetente).
             </p>
           </div>
 
@@ -1027,7 +1153,7 @@ export default function EnvioNF() {
               Histórico recente
             </h2>
             <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#64748b' }}>
-              Últimos registos em <code style={{ fontSize: '12px' }}>nf_envios_log</code> (simulação, Gmail, Resend ou
+              Últimos registos em <code style={{ fontSize: '12px' }}>nf_envios_log</code> (simulação, Outlook, Resend ou
               parcial).
             </p>
             {loadingLogs ? (

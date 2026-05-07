@@ -12,9 +12,33 @@ describe('paginasSistema', () => {
     ).toBe(true)
   })
 
-  it('sem paginas_permitidas ou vazio não restringe rotas', () => {
-    expect(usuarioPodeAcessarRota({ email: 'u@test.com', paginas_permitidas: null }, '/mtr')).toBe(true)
-    expect(usuarioPodeAcessarRota({ email: 'u@test.com', paginas_permitidas: [] }, '/mtr')).toBe(true)
+  it('sem paginas_permitidas ou vazio não restringe rotas (cargo não-Visualizador)', () => {
+    expect(usuarioPodeAcessarRota({ email: 'u@test.com', cargo: 'Operacional', paginas_permitidas: null }, '/mtr')).toBe(true)
+    expect(usuarioPodeAcessarRota({ email: 'u@test.com', cargo: 'Operacional', paginas_permitidas: [] }, '/mtr')).toBe(true)
+  })
+
+  it('Visualizador sem paginas_permitidas só vê /bem-vindo', () => {
+    expect(
+      usuarioPodeAcessarRota({ email: 'u@test.com', cargo: 'Visualizador', paginas_permitidas: null }, '/bem-vindo')
+    ).toBe(true)
+    expect(
+      usuarioPodeAcessarRota({ email: 'u@test.com', cargo: 'Visualizador', paginas_permitidas: [] }, '/clientes')
+    ).toBe(false)
+  })
+
+  it('Visualizador com paginas_permitidas explícita vê só os prefixos liberados', () => {
+    expect(
+      usuarioPodeAcessarRota(
+        { email: 'u@test.com', cargo: 'Visualizador', paginas_permitidas: ['/financeiro'] },
+        '/financeiro/contas-pagar'
+      )
+    ).toBe(true)
+    expect(
+      usuarioPodeAcessarRota(
+        { email: 'u@test.com', cargo: 'Visualizador', paginas_permitidas: ['/financeiro'] },
+        '/clientes'
+      )
+    ).toBe(false)
   })
 
   it('whitelist por prefixo de rota', () => {
@@ -42,5 +66,6 @@ describe('paginasSistema', () => {
   it('rotas de UI alinhadas com a lista válida', () => {
     expect(pathEstaNaListaValida('/faturamento/regras-preco')).toBe(true)
     expect(pathEstaNaListaValida('/financeiro/contas-receber')).toBe(true)
+    expect(pathEstaNaListaValida('/financeiro/contas-pagar')).toBe(true)
   })
 })

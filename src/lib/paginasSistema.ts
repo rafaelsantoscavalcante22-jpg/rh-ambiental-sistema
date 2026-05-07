@@ -26,6 +26,7 @@ export const ROTAS_SISTEMA: { path: string; label: string }[] = [
   { path: '/envio-nf', label: 'Envio de NF' },
   { path: '/financeiro', label: 'Financeiro' },
   { path: '/financeiro/contas-receber', label: 'Contas a receber' },
+  { path: '/financeiro/contas-pagar', label: 'Contas a pagar' },
   { path: '/pos-venda', label: 'Pós-venda' },
   { path: '/usuarios', label: 'Usuários' },
   { path: '/chat', label: 'Chat' },
@@ -68,7 +69,17 @@ export function emailPodeDefinirPaginasPorUsuario(email: string | null | undefin
 
 export type UsuarioComPaginas = {
   email?: string | null
+  cargo?: string | null
   paginas_permitidas?: string[] | null
+}
+
+function cargoEhVisualizadorLocal(cargo: string | null | undefined): boolean {
+  return String(cargo ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .includes('visualizador')
 }
 
 function normalizarPath(pathname: string): string {
@@ -78,9 +89,12 @@ function normalizarPath(pathname: string): string {
 }
 
 /**
- * Quando `paginas_permitidas` é null ou vazio → não há filtro extra (mantém-se a regra por cargo nas rotas).
- * Quando tem entradas → o utilizador só acede a esses prefixos de rota.
- * Dois e-mails de gestão ignoram a lista (nunca ficam bloqueados por engano).
+ * Regras (alinhadas ao documento de cargos):
+ * - Página `/bem-vindo` é sempre acessível.
+ * - E-mails de gestão (bypass) ignoram qualquer restrição.
+ * - Cargo `Visualizador` exige `paginas_permitidas` explícita; sem lista, só vê `/bem-vindo`.
+ * - Demais cargos: lista vazia/nula = sem filtro extra (regra por cargo no `App.tsx`).
+ *   Lista preenchida = só os prefixos listados.
  */
 export function usuarioPodeAcessarRota(usuario: UsuarioComPaginas, pathname: string): boolean {
   const path = normalizarPath(pathname)
@@ -91,7 +105,11 @@ export function usuarioPodeAcessarRota(usuario: UsuarioComPaginas, pathname: str
   if (EMAILS_BYPASS_PAGINAS.has(em)) return true
 
   const raw = usuario.paginas_permitidas
-  if (raw == null || raw.length === 0) return true
+  const visualizador = cargoEhVisualizadorLocal(usuario.cargo)
+
+  if (raw == null || raw.length === 0) {
+    return !visualizador
+  }
 
   return raw.some((prefix) => {
     const pre = normalizarPath(prefix)

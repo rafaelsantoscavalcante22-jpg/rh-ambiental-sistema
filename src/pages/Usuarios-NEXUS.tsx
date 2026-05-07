@@ -9,7 +9,11 @@ import {
   obterSessaoParaEdgeFunctions,
 } from '../lib/edgeFunctionErrors'
 import { supabase } from '../lib/supabase'
-import { cargoEhAdministrador } from '../lib/workflowPermissions'
+import {
+  cargoEhAdministrador,
+  cargoPodeCriarOuExcluirUsuario,
+  cargoPodeGerirUsuarios,
+} from '../lib/workflowPermissions'
 import { ROTAS_SISTEMA, emailPodeDefinirPaginasPorUsuario } from '../lib/paginasSistema'
 
 type Usuario = {
@@ -122,8 +126,9 @@ export default function Usuarios() {
   const [salvandoPaginas, setSalvandoPaginas] = useState(false)
 
   const souAdministrador = cargoEhAdministrador(meuCargo)
-  /** Rota já restrita a admin; enquanto o cargo carrega, permite a UI (Edge Function valida de novo). */
-  const podeGerenciar = meuCargo === null || souAdministrador
+  /** Rota restrita a Administrador + Diretoria; enquanto o cargo carrega, permite a UI (a Edge Function revalida). */
+  const podeGerenciar = meuCargo === null || cargoPodeGerirUsuarios(meuCargo)
+  const podeCriarOuExcluir = meuCargo === null || cargoPodeCriarOuExcluirUsuario(meuCargo)
 
   const podeDefinirPaginas = emailPodeDefinirPaginasPorUsuario(meuEmail)
 
@@ -316,7 +321,7 @@ export default function Usuarios() {
   async function criarUsuario(e: FormEvent) {
     e.preventDefault()
 
-    if (!podeGerenciar) {
+    if (!podeCriarOuExcluir) {
       setErro('Apenas administradores podem criar usuários.')
       return
     }
@@ -503,7 +508,7 @@ export default function Usuarios() {
   }
 
   async function excluirUsuario(usuario: Usuario) {
-    if (!podeGerenciar) return
+    if (!podeCriarOuExcluir) return
 
     const ok = window.confirm(
       `Excluir permanentemente o usuário "${usuario.nome}" (${usuario.email})?\nEsta ação não pode ser desfeita.`
@@ -554,8 +559,9 @@ export default function Usuarios() {
             Acessos, perfis e permissões
           </h1>
           <p className="page-header__lead" style={{ margin: '6px 0 0' }}>
-            Quem acessa o sistema e com qual perfil (cargo). Criar, editar e excluir é permitido apenas
-            para o cargo <strong>Administrador</strong>.
+            Quem acessa o sistema e com qual perfil (cargo). <strong>Administrador</strong> e{' '}
+            <strong>Diretoria</strong> podem editar dados e cargos; criar e excluir continua restrito ao
+            <strong> Administrador</strong>.
             {podeDefinirPaginas ? (
               <>
                 {' '}
@@ -574,7 +580,7 @@ export default function Usuarios() {
             flexWrap: 'wrap',
           }}
         >
-          {podeGerenciar ? (
+          {podeCriarOuExcluir ? (
             <button
               type="button"
               onClick={abrirFormulario}
@@ -648,7 +654,7 @@ export default function Usuarios() {
         </div>
       )}
 
-      {formularioAberto && podeGerenciar ? (
+      {formularioAberto && podeCriarOuExcluir ? (
         <div
           style={{
             background: '#fff',
@@ -862,14 +868,16 @@ export default function Usuarios() {
                               Páginas
                             </button>
                           ) : null}
-                          <button
-                            type="button"
-                            onClick={() => void excluirUsuario(usuario)}
-                            style={actionDeleteStyle}
-                            disabled={excluindoId === usuario.id || loadingEdicao}
-                          >
-                            {excluindoId === usuario.id ? 'Excluindo...' : 'Excluir'}
-                          </button>
+                          {podeCriarOuExcluir ? (
+                            <button
+                              type="button"
+                              onClick={() => void excluirUsuario(usuario)}
+                              style={actionDeleteStyle}
+                              disabled={excluindoId === usuario.id || loadingEdicao}
+                            >
+                              {excluindoId === usuario.id ? 'Excluindo...' : 'Excluir'}
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     ) : null}

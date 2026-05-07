@@ -39,6 +39,13 @@ export function statusFaturamentoUi(row: FaturamentoResumoViewRow): 'Pendente' |
   return coletaHistoricoFaturamentoEmitido(row) ? 'Faturado' : 'Pendente'
 }
 
+/** Indicador de SLA (3 dias): prioriza coluna da view; sem coluna, não assinala crítico. */
+export function coletaFaturamentoSlaVencido(row: FaturamentoResumoViewRow): boolean {
+  if (row.faturamento_sla_vencido === true) return true
+  if (row.faturamento_sla_vencido === false) return false
+  return false
+}
+
 /** Mesmo critério do filtro «Pronto para faturar» em Financeiro (`status_conferencia` na vista). */
 export function coletaConferenciaProntaParaFaturar(row: FaturamentoResumoViewRow): boolean {
   return row.status_conferencia === 'PRONTO_PARA_FATURAR'

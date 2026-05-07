@@ -137,12 +137,34 @@ export function cargoPodeAlterarValorContaTravada(cargo: string | null | undefin
   return cargoEhAdministrador(cargo)
 }
 
-/** Cobrança / pagamento na tela Financeiro — Financeiro + Admin. */
+/**
+ * Gestão de usuários — quem pode editar nome, cargo, status, página e senha.
+ * Administrador e Diretoria, conforme regra de negócio acordada.
+ * Criar e excluir continua sendo somente Administrador (`cargoPodeCriarOuExcluirUsuario`).
+ */
+export function cargoPodeGerirUsuarios(cargo: string | null | undefined): boolean {
+  if (cargoEhVisualizador(cargo)) return false
+  if (cargoEhAdministrador(cargo)) return true
+  if (cargoEhDiretoria(cargo)) return true
+  return false
+}
+
+/** Criar ou excluir usuário — apenas Administrador. */
+export function cargoPodeCriarOuExcluirUsuario(cargo: string | null | undefined): boolean {
+  return cargoEhAdministrador(cargo)
+}
+
+/** Alterar o cargo de outro usuário — Administrador e Diretoria. */
+export const cargoPodeAlterarCargoDeUsuario = cargoPodeGerirUsuarios
+
+/** Cobrança / pagamento na tela Financeiro — alinhado ao RLS (financeiro, faturamento, diretoria, admin). */
 export function cargoPodeMutarFinanceiro(cargo: string | null | undefined): boolean {
   if (cargoEhVisualizador(cargo)) return false
   const c = normalizarTextoCargo(cargo)
   if (!c) return false
   if (cargoEhAdministrador(cargo)) return true
+  if (cargoEhDiretoria(cargo)) return true
+  if (c.includes('faturamento')) return true
   if (c.includes('operacional')) return false
   return c === 'financeiro' || (c.includes('financeiro') && !c.includes('operacional'))
 }

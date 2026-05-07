@@ -99,7 +99,7 @@ export default function BemVindoNexus() {
           </div>
 
           <p className="welcome-nexus__version" role="status">
-            Versão do sistema: <strong>{import.meta.env.VITE_APP_VERSION}</strong>
+            Versão do sistema: <strong>R{import.meta.env.VITE_APP_VERSION}</strong>
           </p>
 
           <div className="welcome-nexus__nexus-footer">

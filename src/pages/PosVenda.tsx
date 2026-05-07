@@ -12,7 +12,14 @@ import {
   resolverRegiao,
   resolverUfSigla,
 } from '../lib/brasilRegioes'
-import { BrasilMapaEstados } from '../components/posvenda/BrasilMapaEstados'
+import {
+  ZONAS_SP_MAPA_ORDEM,
+  type ZonaSpCarteira,
+  acumularContagensZonaSp,
+  contagensZonaSpInicial,
+  resolverZonaSpCarteira,
+} from '../lib/saoPauloPosVendaZonas'
+import { SaoPauloMapaZonas } from '../components/posvenda/SaoPauloMapaZonas'
 import { RgReportPdfIcon } from '../components/ui/RgReportPdfIcon'
 import { CarteiraStatusHistorico } from '../components/posvenda/CarteiraStatusHistorico'
 
@@ -22,6 +29,8 @@ type ClienteRow = {
   razao_social: string
   cidade: string | null
   estado: string | null
+  bairro?: string | null
+  bairro_faturamento?: string | null
   status: string | null
   email: string | null
   telefone: string | null
@@ -87,6 +96,13 @@ function contatoIncompleto(c: ClienteRow) {
   return em === '' || tel === ''
 }
 
+function bairroClientePosVenda(c: ClienteRow): string | null {
+  const a = (c.bairro ?? '').trim()
+  if (a) return a
+  const b = (c.bairro_faturamento ?? '').trim()
+  return b || null
+}
+
 function pontuacaoMotivo(m: MotivoPrioridade): number {
   switch (m) {
     case 'inativo':
@@ -146,6 +162,9 @@ async function carregarClienteIdsComColeta(): Promise<Set<string>> {
 
 /** Colunas opcionais podem não existir até migrações SQL serem aplicadas — tenta do mais completo ao mínimo. */
 const POS_VENDA_SELECT_CANDIDATES = [
+  'id, nome, razao_social, cidade, estado, bairro, bairro_faturamento, status, email, telefone, email_nf, validade, created_at, status_ativo_desde, status_inativo_desde',
+  'id, nome, razao_social, cidade, estado, bairro, bairro_faturamento, status, email, telefone, email_nf, validade, created_at',
+  'id, nome, razao_social, cidade, estado, bairro, bairro_faturamento, status, email, telefone, email_nf, validade',
   'id, nome, razao_social, cidade, estado, status, email, telefone, email_nf, validade, created_at, status_ativo_desde, status_inativo_desde',
   'id, nome, razao_social, cidade, estado, status, email, telefone, email_nf, validade, created_at',
   'id, nome, razao_social, cidade, estado, status, email, telefone, email_nf, validade',
@@ -438,6 +457,7 @@ export default function PosVenda() {
   const [idsComColeta, setIdsComColeta] = useState<Set<string> | null>(null)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
+  const [filtroZonaSp, setFiltroZonaSp] = useState<'todas' | ZonaSpCarteira>('todas')
 
   const carregar = useCallback(async () => {
     setLoading(true)
@@ -573,6 +593,54 @@ export default function PosVenda() {
     return out
   }, [clientes, idsComColeta, hoje])
 
+  const contagensPorZona = useMemo(() => {
+    const acc = contagensZonaSpInicial()
+    for (const c of clientes) {
+      acumularContagensZonaSp(
+        acc,
+        resolverZonaSpCarteira({
+          estado: c.estado,
+          cidade: c.cidade,
+          bairro: bairroClientePosVenda(c),
+        })
+      )
+    }
+    return acc
+  }, [clientes])
+
+  const destaquesPorZona = useMemo(() => {
+    const porZona: Record<ZonaSpCarteira, ClienteRow[]> = {} as Record<ZonaSpCarteira, ClienteRow[]>
+    for (const z of ZONAS_SP_MAPA_ORDEM) porZona[z] = []
+    for (const c of clientes) {
+      const z = resolverZonaSpCarteira({
+        estado: c.estado,
+        cidade: c.cidade,
+        bairro: bairroClientePosVenda(c),
+      })
+      porZona[z].push(c)
+    }
+    const comColeta = idsComColeta
+    function score(c: ClienteRow): number {
+      let s = 0
+      if (!clienteEstaAtivo(c.status)) s += 100
+      if (clienteEstaAtivo(c.status) && comColeta && !comColeta.has(c.id)) s += 50
+      if (contatoIncompleto(c)) s += 25
+      const v = parseValidade(c.validade)
+      if (v) {
+        const d = diasAte(v, hoje)
+        if (d < 0) s += 40
+        else if (d <= 30) s += 20
+      }
+      return s
+    }
+    const out: Record<ZonaSpCarteira, string[]> = {} as Record<ZonaSpCarteira, string[]>
+    for (const z of ZONAS_SP_MAPA_ORDEM) {
+      const lista = [...porZona[z]].sort((a, b) => score(b) - score(a)).slice(0, 5)
+      out[z] = lista.map((c) => c.nome || c.razao_social || '—')
+    }
+    return out
+  }, [clientes, idsComColeta, hoje])
+
   const prioridades = useMemo(() => {
     const comColeta = idsComColeta
     type Linha = {
@@ -601,6 +669,18 @@ export default function PosVenda() {
     linhas.sort((a, b) => b.score - a.score || a.cliente.nome.localeCompare(b.cliente.nome))
     return linhas.slice(0, 60)
   }, [clientes, idsComColeta, hoje])
+
+  const prioridadesFiltradas = useMemo(() => {
+    if (filtroZonaSp === 'todas') return prioridades
+    return prioridades.filter(
+      (p) =>
+        resolverZonaSpCarteira({
+          estado: p.cliente.estado,
+          cidade: p.cliente.cidade,
+          bairro: bairroClientePosVenda(p.cliente),
+        }) === filtroZonaSp
+    )
+  }, [prioridades, filtroZonaSp])
 
   const handleGerarPdfRelatorio = useCallback(() => {
     try {
@@ -977,16 +1057,19 @@ export default function PosVenda() {
                       color: '#0f172a',
                     }}
                   >
-                    Brasil por UF
+                    São Paulo — zonas da carteira
                   </h2>
                   <p style={{ margin: '0 0 14px', fontSize: '13px', color: '#64748b' }}>
-                    Mapa com cores por volume de clientes com UF válida; abaixo, totais e destaques
-                    por macro-região (ordenados por prioridade de pós-venda).
+                    Mapa interativo do estado (OpenStreetMap): bolhas por zona da carteira, com tamanho
+                    proporcional ao número de clientes. Referências geográficas fixas por categoria —
+                    não é geocodificação de cada endereço. Fora de SP só na legenda. Clique na bolha ou
+                    no filtro para refinar a fila de prioridades.
                   </p>
-                  <BrasilMapaEstados
-                    contagensPorUf={contagensPorUf}
-                    contagensRegiao={contagensRegiao}
-                    destaques={destaquesRegiao}
+                  <SaoPauloMapaZonas
+                    contagensPorZona={contagensPorZona}
+                    destaques={destaquesPorZona}
+                    filtroZona={filtroZonaSp}
+                    onFiltroZonaChange={setFiltroZonaSp}
                   />
                 </div>
               </div>
@@ -1006,11 +1089,20 @@ export default function PosVenda() {
                   <p style={{ margin: '6px 0 0', fontSize: '13px', color: '#64748b' }}>
                     Clientes que requerem atenção: inativos, sem operação registada, licença ou
                     contacto. Até 60 linhas, ordenadas por urgência.
+                    {filtroZonaSp !== 'todas' ? (
+                      <>
+                        {' '}
+                        <strong>Filtro ativo no mapa</strong> — a tabela mostra apenas clientes
+                        desta zona.
+                      </>
+                    ) : null}
                   </p>
                 </div>
-                {prioridades.length === 0 ? (
+                {prioridadesFiltradas.length === 0 ? (
                   <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
-                    Nenhum alerta neste momento — carteira consistente com os critérios acima.
+                    {prioridades.length === 0
+                      ? 'Nenhum alerta neste momento — carteira consistente com os critérios acima.'
+                      : 'Nenhum alerta nesta zona com o filtro atual — altere ou limpe o filtro no mapa.'}
                   </div>
                 ) : (
                   <div style={{ overflowX: 'auto' }}>
@@ -1025,7 +1117,7 @@ export default function PosVenda() {
                         </tr>
                       </thead>
                       <tbody>
-                        {prioridades.map(({ cliente: c, motivos }) => (
+                        {prioridadesFiltradas.map(({ cliente: c, motivos }) => (
                           <tr key={c.id}>
                             <td style={tdStyle}>
                               <div style={{ fontWeight: 700, color: '#0f172a' }}>

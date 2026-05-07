@@ -105,7 +105,10 @@ const menuGroups: { title: string; items: MenuItem[] }[] = [
       {
         label: 'Financeiro',
         path: '/financeiro',
-        children: [{ label: 'Contas a receber', path: '/financeiro/contas-receber' }],
+        children: [
+          { label: 'Contas a receber', path: '/financeiro/contas-receber' },
+          { label: 'Contas a pagar', path: '/financeiro/contas-pagar' },
+        ],
       },
     ],
   },
@@ -688,9 +691,9 @@ export default function MainLayout({ children }: MainLayoutProps) {
           </button>
           <p
             className="layout-sidebar-version"
-            aria-label={`Versão do sistema ${import.meta.env.VITE_APP_VERSION}`}
+            aria-label={`Versão do sistema R${import.meta.env.VITE_APP_VERSION}`}
           >
-            v{import.meta.env.VITE_APP_VERSION}
+            R{import.meta.env.VITE_APP_VERSION}
           </p>
         </div>
       </aside>

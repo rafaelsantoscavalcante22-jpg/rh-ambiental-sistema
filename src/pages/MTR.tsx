@@ -2736,7 +2736,7 @@ export default function MTR() {
                                     <td className="mtr-excel__v">{d.gerador.ie || '—'}</td>
                                   </tr>
                                   <tr>
-                                    <td className="mtr-excel__k">Endereço:</td>
+                                    <td className="mtr-excel__k">Endereço de coleta:</td>
                                     <td className="mtr-excel__v" colSpan={3}>{selectedMTR.endereco || '—'}</td>
                                     <td className="mtr-excel__k">Bairro:</td>
                                     <td className="mtr-excel__v">{d.gerador.bairro || '—'}</td>
@@ -3040,11 +3040,11 @@ export default function MTR() {
                     </div>
 
                     <div className="field field-full">
-                      <label>Endereço</label>
+                      <label>Endereço de Coleta</label>
                       <input
                         value={form.endereco}
                         onChange={(e) => setForm((prev) => ({ ...prev, endereco: e.target.value }))}
-                        placeholder="Endereço"
+                        placeholder="Endereço de Coleta"
                       />
                     </div>
 

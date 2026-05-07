@@ -14,6 +14,11 @@ type Caminhao = {
   tipo: string | null;
   rodizio: string | null;
   status_disponibilidade: string;
+  crlv_validade: string | null;
+  civ_numero: string | null;
+  civ_arquivo_url: string | null;
+  cipp_numero: string | null;
+  cipp_arquivo_url: string | null;
   foto_url: string | null;
   created_at: string | null;
 };
@@ -24,6 +29,10 @@ type FormCaminhao = {
   tipo: string;
   rodizio: string;
   status_disponibilidade: string;
+  /** Exibição com máscara dd/mm/aaaa; gravado como date no backend após validação. */
+  crlv_validade_br: string;
+  civ_numero: string;
+  cipp_numero: string;
 };
 
 const STATUS_DISPONIBILIDADE_OPCOES = [
@@ -39,6 +48,9 @@ const formInicial: FormCaminhao = {
   tipo: "",
   rodizio: "",
   status_disponibilidade: "Disponível",
+  crlv_validade_br: "",
+  civ_numero: "",
+  cipp_numero: "",
 };
 
 function limparOuNull(valor: string) {
@@ -49,6 +61,87 @@ function limparOuNull(valor: string) {
 /** Normaliza placa para maiúsculas e remove espaços (Mercosul / formato antigo). */
 function formatarPlacaDigitacao(valor: string) {
   return valor.toUpperCase().replace(/\s+/g, "").slice(0, 8);
+}
+
+function apenasDigitos(s: string) {
+  return s.replace(/\D/g, "");
+}
+
+/** Máscara de data dd/mm/aaaa durante a digitação. */
+function mascararDataDDMMAAAA(input: string) {
+  const d = apenasDigitos(input).slice(0, 8);
+  if (d.length <= 2) return d;
+  if (d.length <= 4) return `${d.slice(0, 2)}/${d.slice(2)}`;
+  return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`;
+}
+
+/** Converte dd/mm/aaaa válido para yyyy-mm-dd (Postgres date). */
+function dataBRparaIsoDate(br: string): string | null {
+  const m = br.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+  const dd = Number(m[1]);
+  const mm = Number(m[2]);
+  const yyyy = Number(m[3]);
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  const dt = new Date(yyyy, mm - 1, dd);
+  if (dt.getFullYear() !== yyyy || dt.getMonth() !== mm - 1 || dt.getDate() !== dd) return null;
+  return `${String(yyyy).padStart(4, "0")}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+}
+
+function isoDateParaBRDisplay(iso?: string | null) {
+  if (!iso) return "";
+  const part = iso.includes("T") ? iso.split("T")[0] : iso.slice(0, 10);
+  const [y, mo, d] = part.split("-");
+  if (!y || !mo || !d) return "";
+  return `${d}/${mo}/${y}`;
+}
+
+function formatarData(data?: string | null) {
+  if (!data) return "—";
+  const limpa = data.includes("T") ? data.split("T")[0] : data;
+  const partes = limpa.split("-");
+  if (partes.length !== 3) return data;
+  return `${partes[2]}/${partes[1]}/${partes[0]}`;
+}
+
+/** Indisponível — feedback visual vermelho na listagem e ficha. */
+function statusEhIndisponivel(status: string) {
+  return status.trim().toLowerCase() === "indisponível";
+}
+
+function CelulaStatusDisponibilidade({ status }: { status: string }) {
+  if (statusEhIndisponivel(status)) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+        <span
+          title="Veículo indisponível"
+          aria-hidden
+          style={{
+            width: "10px",
+            height: "10px",
+            borderRadius: "50%",
+            background: "#dc2626",
+            flexShrink: 0,
+            boxShadow: "0 0 0 2px #fecaca",
+          }}
+        />
+        <span
+          style={{
+            fontWeight: 800,
+            color: "#b91c1c",
+            background: "#fee2e2",
+            padding: "4px 10px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            border: "1px solid #fecaca",
+          }}
+        >
+          Indisponível
+        </span>
+      </span>
+    );
+  }
+  return <span>{status}</span>;
 }
 
 function formatarDataHora(iso?: string | null) {
@@ -65,6 +158,9 @@ function formatarDataHora(iso?: string | null) {
 
 const BUCKET_FOTO_CAMINHAO = "caminhoes-fotos";
 const MAX_BYTES_FOTO_CAMINHAO = 8 * 1024 * 1024;
+
+const BUCKET_CERT_CAMINHAO = "caminhoes-certificados";
+const MAX_BYTES_CERT_CAMINHAO = 10 * 1024 * 1024;
 
 function pathFromSupabasePublicUrl(url: string, bucketId: string): string | null {
   try {
@@ -96,7 +192,7 @@ const placaCaminhaoFichaBtnStyle: CSSProperties = {
 };
 
 const CAMINHOES_SELECT =
-  "id, placa, modelo, tipo, rodizio, status_disponibilidade, foto_url, created_at";
+  "id, placa, modelo, tipo, rodizio, status_disponibilidade, crlv_validade, civ_numero, civ_arquivo_url, cipp_numero, cipp_arquivo_url, foto_url, created_at";
 
 const CAMINHOES_CADASTRO_DRAFT_KEY = "rg-ambiental-caminhoes-cadastro-draft";
 
@@ -119,6 +215,8 @@ export default function Caminhoes() {
   const fichaCaminhaoTituloId = `${fichaCaminhaoDomBase}-titulo-ficha`;
   const fichaCaminhaoFotoInputId = `${fichaCaminhaoDomBase}-foto-file`;
   const cadastroFotoInputId = `${fichaCaminhaoDomBase}-cadastro-foto`;
+  const cadastroCivInputId = `${fichaCaminhaoDomBase}-cadastro-civ`;
+  const cadastroCippInputId = `${fichaCaminhaoDomBase}-cadastro-cipp`;
 
   /** URL já gravada no Supabase (edição ou após guardar). */
   const [cadastroFotoServidor, setCadastroFotoServidor] = useState<string | null>(null);
@@ -127,6 +225,12 @@ export default function Caminhoes() {
   /** Pré-visualização local (blob) para ficheiro pendente. */
   const [cadastroFotoBlobUrl, setCadastroFotoBlobUrl] = useState<string | null>(null);
   const [cadastroFotoEnviando, setCadastroFotoEnviando] = useState(false);
+
+  const [cadastroCivUrlServidor, setCadastroCivUrlServidor] = useState<string | null>(null);
+  const [cadastroCippUrlServidor, setCadastroCippUrlServidor] = useState<string | null>(null);
+  const [cadastroCivPendente, setCadastroCivPendente] = useState<File | null>(null);
+  const [cadastroCippPendente, setCadastroCippPendente] = useState<File | null>(null);
+  const [cadastroCertEnviando, setCadastroCertEnviando] = useState<"civ" | "cipp" | null>(null);
 
   const cadastroDraftData = useMemo(() => ({ form, editingId }), [form, editingId]);
   useCadastroFormDraft({
@@ -141,6 +245,11 @@ export default function Caminhoes() {
       setCadastroFotoServidor(null);
       setCadastroFotoPendente(null);
       setCadastroFotoEnviando(false);
+      setCadastroCivUrlServidor(null);
+      setCadastroCippUrlServidor(null);
+      setCadastroCivPendente(null);
+      setCadastroCippPendente(null);
+      setCadastroCertEnviando(null);
       setForm(d.form);
       setEditingId(d.editingId);
       setMostrarCadastro(true);
@@ -148,13 +257,18 @@ export default function Caminhoes() {
         queueMicrotask(() => {
           void supabase
             .from("caminhoes")
-            .select("foto_url")
+            .select("foto_url, civ_arquivo_url, cipp_arquivo_url")
             .eq("id", d.editingId as string)
             .maybeSingle()
             .then(({ data }) => {
-              setCadastroFotoServidor(
-                (data as { foto_url?: string | null } | null)?.foto_url ?? null
-              );
+              const row = data as {
+                foto_url?: string | null;
+                civ_arquivo_url?: string | null;
+                cipp_arquivo_url?: string | null;
+              } | null;
+              setCadastroFotoServidor(row?.foto_url ?? null);
+              setCadastroCivUrlServidor(row?.civ_arquivo_url ?? null);
+              setCadastroCippUrlServidor(row?.cipp_arquivo_url ?? null);
             });
         });
       }
@@ -203,6 +317,11 @@ export default function Caminhoes() {
       ((data as Caminhao[]) || []).map((c) => ({
         ...c,
         foto_url: c.foto_url ?? null,
+        crlv_validade: c.crlv_validade ?? null,
+        civ_numero: c.civ_numero ?? null,
+        civ_arquivo_url: c.civ_arquivo_url ?? null,
+        cipp_numero: c.cipp_numero ?? null,
+        cipp_arquivo_url: c.cipp_arquivo_url ?? null,
       }))
     );
     setLoading(false);
@@ -223,6 +342,10 @@ export default function Caminhoes() {
     const { name, value } = e.target;
     if (name === "placa") {
       setForm((prev) => ({ ...prev, placa: formatarPlacaDigitacao(value) }));
+      return;
+    }
+    if (name === "crlv_validade_br") {
+      setForm((prev) => ({ ...prev, crlv_validade_br: mascararDataDDMMAAAA(value) }));
       return;
     }
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -247,6 +370,11 @@ export default function Caminhoes() {
     setForm(formInicial);
     setEditingId(null);
     limparEstadoFotoCadastro();
+    setCadastroCivUrlServidor(null);
+    setCadastroCippUrlServidor(null);
+    setCadastroCivPendente(null);
+    setCadastroCippPendente(null);
+    setCadastroCertEnviando(null);
   }
 
   function abrirCadastroNovo() {
@@ -259,12 +387,20 @@ export default function Caminhoes() {
     revogarBlobCadastroFoto();
     setCadastroFotoPendente(null);
     setCadastroFotoServidor(c.foto_url ?? null);
+    setCadastroCivUrlServidor(c.civ_arquivo_url ?? null);
+    setCadastroCippUrlServidor(c.cipp_arquivo_url ?? null);
+    setCadastroCivPendente(null);
+    setCadastroCippPendente(null);
+    setCadastroCertEnviando(null);
     setForm({
       placa: c.placa || "",
       modelo: c.modelo || "",
       tipo: c.tipo || "",
       rodizio: c.rodizio || "",
       status_disponibilidade: c.status_disponibilidade || "Disponível",
+      crlv_validade_br: isoDateParaBRDisplay(c.crlv_validade),
+      civ_numero: c.civ_numero || "",
+      cipp_numero: c.cipp_numero || "",
     });
     setEditingId(c.id);
     setMostrarCadastro(true);
@@ -320,6 +456,68 @@ export default function Caminhoes() {
     return { ok: true, publicUrl };
   }
 
+  function extensaoArquivoCertSeguro(file: File): string {
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    if (ext && ["pdf", "jpg", "jpeg", "png", "webp", "gif"].includes(ext)) {
+      if (ext === "jpeg") return "jpg";
+      return ext;
+    }
+    if (file.type === "application/pdf") return "pdf";
+    if (file.type === "image/jpeg") return "jpg";
+    if (file.type === "image/png") return "png";
+    if (file.type === "image/webp") return "webp";
+    if (file.type === "image/gif") return "gif";
+    return "pdf";
+  }
+
+  async function persistirCertificadoCaminhao(
+    caminhaoId: string,
+    coluna: "civ_arquivo_url" | "cipp_arquivo_url",
+    prefixoArquivo: "civ" | "cipp",
+    file: File,
+    urlAnterior: string | null
+  ): Promise<{ ok: true; publicUrl: string } | { ok: false }> {
+    const extSeguro = extensaoArquivoCertSeguro(file);
+    const path = `${caminhaoId}/${prefixoArquivo}.${extSeguro}`;
+
+    const { error: upErr } = await supabase.storage
+      .from(BUCKET_CERT_CAMINHAO)
+      .upload(path, file, { upsert: true, contentType: file.type || undefined });
+
+    if (upErr) {
+      console.error(upErr);
+      window.alert(
+        "Não foi possível enviar o certificado. Aplique a migração do bucket caminhoes-certificados no Supabase ou verifique as políticas de Storage."
+      );
+      return { ok: false };
+    }
+
+    const { data: pub } = supabase.storage.from(BUCKET_CERT_CAMINHAO).getPublicUrl(path);
+    const publicUrl = pub.publicUrl;
+
+    const { error: dbErr } = await supabase
+      .from("caminhoes")
+      .update({ [coluna]: publicUrl })
+      .eq("id", caminhaoId);
+
+    if (dbErr) {
+      console.error(dbErr);
+      window.alert(
+        "O arquivo foi enviado, mas falhou ao gravar o endereço no cadastro. Verifique se as colunas civ_arquivo_url / cipp_arquivo_url existem (migração SQL)."
+      );
+      return { ok: false };
+    }
+
+    if (urlAnterior) {
+      const pAnt = pathFromSupabasePublicUrl(urlAnterior, BUCKET_CERT_CAMINHAO);
+      if (pAnt && pAnt !== path) {
+        void supabase.storage.from(BUCKET_CERT_CAMINHAO).remove([pAnt]);
+      }
+    }
+
+    return { ok: true, publicUrl };
+  }
+
   function validarArquivoFotoCaminhao(file: File): boolean {
     if (!file.type.startsWith("image/")) {
       window.alert("Escolha uma imagem (JPEG, PNG, WebP ou GIF).");
@@ -330,6 +528,94 @@ export default function Caminhoes() {
       return false;
     }
     return true;
+  }
+
+  function validarArquivoCertificado(file: File): boolean {
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    const extOk = ext && ["pdf", "jpg", "jpeg", "png", "webp", "gif"].includes(ext);
+    const okTipo =
+      file.type === "application/pdf" ||
+      (file.type.startsWith("image/") && file.type !== "") ||
+      Boolean(extOk);
+    if (!okTipo) {
+      window.alert("Escolha um PDF ou imagem (JPEG, PNG, WebP ou GIF).");
+      return false;
+    }
+    if (file.size > MAX_BYTES_CERT_CAMINHAO) {
+      window.alert("O arquivo deve ter no máximo 10 MB.");
+      return false;
+    }
+    return true;
+  }
+
+  async function handleCadastroEscolherCertificado(
+    tipo: "civ" | "cipp",
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!validarArquivoCertificado(file)) return;
+
+    const coluna = tipo === "civ" ? "civ_arquivo_url" : "cipp_arquivo_url";
+    const prefixo = tipo;
+    const urlAtual = tipo === "civ" ? cadastroCivUrlServidor : cadastroCippUrlServidor;
+
+    if (editingId) {
+      setCadastroCertEnviando(tipo);
+      try {
+        const res = await persistirCertificadoCaminhao(editingId, coluna, prefixo, file, urlAtual);
+        if (res.ok) {
+          if (tipo === "civ") setCadastroCivUrlServidor(res.publicUrl);
+          else setCadastroCippUrlServidor(res.publicUrl);
+          await fetchCaminhoes();
+          if (fichaCaminhao?.id === editingId) {
+            setFichaCaminhao((prev) => (prev ? { ...prev, [coluna]: res.publicUrl } : prev));
+          }
+        }
+      } finally {
+        setCadastroCertEnviando(null);
+      }
+      return;
+    }
+
+    if (tipo === "civ") setCadastroCivPendente(file);
+    else setCadastroCippPendente(file);
+  }
+
+  async function handleCadastroRemoverCertificado(tipo: "civ" | "cipp") {
+    const coluna = tipo === "civ" ? "civ_arquivo_url" : "cipp_arquivo_url";
+    const urlSrv = tipo === "civ" ? cadastroCivUrlServidor : cadastroCippUrlServidor;
+
+    if (editingId) {
+      if (!urlSrv) return;
+      if (!window.confirm("Remover o arquivo deste certificado?")) return;
+      setCadastroCertEnviando(tipo);
+      try {
+        const p = pathFromSupabasePublicUrl(urlSrv, BUCKET_CERT_CAMINHAO);
+        if (p) {
+          const { error: rmErr } = await supabase.storage.from(BUCKET_CERT_CAMINHAO).remove([p]);
+          if (rmErr) console.warn("Storage remove cert:", rmErr);
+        }
+        const { error } = await supabase.from("caminhoes").update({ [coluna]: null }).eq("id", editingId);
+        if (error) {
+          window.alert("Não foi possível limpar o registo do arquivo.");
+          return;
+        }
+        if (tipo === "civ") setCadastroCivUrlServidor(null);
+        else setCadastroCippUrlServidor(null);
+        await fetchCaminhoes();
+        if (fichaCaminhao?.id === editingId) {
+          setFichaCaminhao((prev) => (prev ? { ...prev, [coluna]: null } : prev));
+        }
+      } finally {
+        setCadastroCertEnviando(null);
+      }
+      return;
+    }
+
+    if (tipo === "civ") setCadastroCivPendente(null);
+    else setCadastroCippPendente(null);
   }
 
   async function handleCadastroEscolherFoto(e: React.ChangeEvent<HTMLInputElement>) {
@@ -405,6 +691,21 @@ export default function Caminhoes() {
       return;
     }
 
+    const digitosCrlv = apenasDigitos(form.crlv_validade_br);
+    let crlv_validade: string | null = null;
+    if (digitosCrlv.length > 0) {
+      if (digitosCrlv.length < 8) {
+        alert("Data de validade da CRLV incompleta. Use o formato dd/mm/aaaa ou deixe em branco.");
+        return;
+      }
+      const iso = dataBRparaIsoDate(form.crlv_validade_br.trim());
+      if (!iso) {
+        alert("Data de validade da CRLV inválida. Verifique dia, mês e ano.");
+        return;
+      }
+      crlv_validade = iso;
+    }
+
     setSalvando(true);
 
     const payload = {
@@ -413,6 +714,9 @@ export default function Caminhoes() {
       tipo: limparOuNull(form.tipo),
       rodizio: limparOuNull(form.rodizio),
       status_disponibilidade: form.status_disponibilidade.trim() || "Disponível",
+      crlv_validade,
+      civ_numero: limparOuNull(form.civ_numero),
+      cipp_numero: limparOuNull(form.cipp_numero),
     };
 
     let error: PostgrestError | null = null;
@@ -459,6 +763,36 @@ export default function Caminhoes() {
       }
     }
 
+    if (!editingId && novoId && cadastroCivPendente) {
+      const r = await persistirCertificadoCaminhao(
+        novoId,
+        "civ_arquivo_url",
+        "civ",
+        cadastroCivPendente,
+        null
+      );
+      if (!r.ok) {
+        window.alert(
+          "O veículo foi guardado, mas o arquivo CIV não foi enviado. Pode anexá-lo ao editar o registo."
+        );
+      }
+    }
+
+    if (!editingId && novoId && cadastroCippPendente) {
+      const r = await persistirCertificadoCaminhao(
+        novoId,
+        "cipp_arquivo_url",
+        "cipp",
+        cadastroCippPendente,
+        null
+      );
+      if (!r.ok) {
+        window.alert(
+          "O veículo foi guardado, mas o arquivo CIPP não foi enviado. Pode anexá-lo ao editar o registo."
+        );
+      }
+    }
+
     const mensagem = editingId
       ? "Veículo atualizado com sucesso!"
       : "Veículo cadastrado com sucesso!";
@@ -479,16 +813,29 @@ export default function Caminhoes() {
     const confirmar = window.confirm("Deseja realmente excluir este veículo?");
     if (!confirmar) return;
 
-    const { data: rowFoto } = await supabase
+    const { data: rowMidia } = await supabase
       .from("caminhoes")
-      .select("foto_url")
+      .select("foto_url, civ_arquivo_url, cipp_arquivo_url")
       .eq("id", id)
       .maybeSingle();
 
-    const urlFoto = (rowFoto as { foto_url?: string | null } | null)?.foto_url;
-    if (urlFoto) {
-      const p = pathFromSupabasePublicUrl(urlFoto, BUCKET_FOTO_CAMINHAO);
+    const row = rowMidia as {
+      foto_url?: string | null;
+      civ_arquivo_url?: string | null;
+      cipp_arquivo_url?: string | null;
+    } | null;
+
+    if (row?.foto_url) {
+      const p = pathFromSupabasePublicUrl(row.foto_url, BUCKET_FOTO_CAMINHAO);
       if (p) void supabase.storage.from(BUCKET_FOTO_CAMINHAO).remove([p]);
+    }
+    if (row?.civ_arquivo_url) {
+      const p = pathFromSupabasePublicUrl(row.civ_arquivo_url, BUCKET_CERT_CAMINHAO);
+      if (p) void supabase.storage.from(BUCKET_CERT_CAMINHAO).remove([p]);
+    }
+    if (row?.cipp_arquivo_url) {
+      const p = pathFromSupabasePublicUrl(row.cipp_arquivo_url, BUCKET_CERT_CAMINHAO);
+      if (p) void supabase.storage.from(BUCKET_CERT_CAMINHAO).remove([p]);
     }
 
     const { error } = await supabase.from("caminhoes").delete().eq("id", id);
@@ -818,6 +1165,233 @@ export default function Caminhoes() {
                       ))}
                     </select>
                   </div>
+
+                  <div style={{ marginTop: "18px" }}>
+                    <div
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: 800,
+                        color: "#334155",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      Documentação e certificações
+                    </div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                        gap: "12px",
+                      }}
+                    >
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <label
+                          style={{
+                            display: "block",
+                            fontSize: "12px",
+                            fontWeight: 700,
+                            color: "#64748b",
+                            marginBottom: "6px",
+                          }}
+                        >
+                          Validade da CRLV
+                        </label>
+                        <input
+                          name="crlv_validade_br"
+                          value={form.crlv_validade_br}
+                          onChange={handleInputChange}
+                          placeholder="dd/mm/aaaa"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          maxLength={10}
+                          style={inputStyle}
+                        />
+                        <p style={{ margin: "6px 0 0", fontSize: "12px", color: "#94a3b8" }}>
+                          Digite a data de validade do documento CRLV (máscara automática).
+                        </p>
+                      </div>
+
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <div
+                          style={{
+                            fontSize: "13px",
+                            fontWeight: 800,
+                            color: "#0f172a",
+                            marginBottom: "8px",
+                          }}
+                        >
+                          CIV — Certificado de Inspeção Veicular
+                        </div>
+                        <input
+                          name="civ_numero"
+                          value={form.civ_numero}
+                          onChange={handleInputChange}
+                          placeholder="Número do certificado (opcional)"
+                          style={{ ...inputStyle, marginBottom: "10px" }}
+                        />
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center" }}>
+                          <input
+                            id={cadastroCivInputId}
+                            type="file"
+                            accept="application/pdf,image/jpeg,image/png,image/webp,image/gif"
+                            onChange={(e) => void handleCadastroEscolherCertificado("civ", e)}
+                            disabled={Boolean(cadastroCertEnviando) || salvando}
+                            style={{ display: "none" }}
+                          />
+                          <label
+                            htmlFor={cadastroCivInputId}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              minHeight: "40px",
+                              padding: "0 16px",
+                              borderRadius: "10px",
+                              background:
+                                cadastroCertEnviando === "civ" || salvando ? "#e2e8f0" : "#334155",
+                              color: "#ffffff",
+                              fontWeight: 700,
+                              fontSize: "13px",
+                              cursor:
+                                cadastroCertEnviando === "civ" || salvando ? "wait" : "pointer",
+                            }}
+                          >
+                            {cadastroCertEnviando === "civ"
+                              ? "A enviar…"
+                              : cadastroCivUrlServidor || cadastroCivPendente
+                                ? "Substituir arquivo CIV"
+                                : "Anexar arquivo CIV"}
+                          </label>
+                          {cadastroCivUrlServidor ? (
+                            <a
+                              href={cadastroCivUrlServidor}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ fontSize: "13px", fontWeight: 700, color: "#15803d" }}
+                            >
+                              Ver arquivo atual
+                            </a>
+                          ) : null}
+                          {cadastroCivPendente && !editingId ? (
+                            <span style={{ fontSize: "12px", color: "#64748b" }}>
+                              Pendente: {cadastroCivPendente.name}
+                            </span>
+                          ) : null}
+                          {cadastroCivUrlServidor || cadastroCivPendente ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleCadastroRemoverCertificado("civ")}
+                              disabled={Boolean(cadastroCertEnviando) || salvando}
+                              style={{
+                                minHeight: "36px",
+                                padding: "0 12px",
+                                borderRadius: "8px",
+                                border: "1px solid #fecaca",
+                                background: "#ffffff",
+                                color: "#b91c1c",
+                                fontWeight: 700,
+                                fontSize: "12px",
+                                cursor:
+                                  cadastroCertEnviando || salvando ? "not-allowed" : "pointer",
+                              }}
+                            >
+                              Remover arquivo
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <div
+                          style={{
+                            fontSize: "13px",
+                            fontWeight: 800,
+                            color: "#0f172a",
+                            marginBottom: "8px",
+                          }}
+                        >
+                          CIPP — Certificado de Inspeção para o Transporte de Produtos Perigosos
+                        </div>
+                        <input
+                          name="cipp_numero"
+                          value={form.cipp_numero}
+                          onChange={handleInputChange}
+                          placeholder="Número do certificado (opcional)"
+                          style={{ ...inputStyle, marginBottom: "10px" }}
+                        />
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center" }}>
+                          <input
+                            id={cadastroCippInputId}
+                            type="file"
+                            accept="application/pdf,image/jpeg,image/png,image/webp,image/gif"
+                            onChange={(e) => void handleCadastroEscolherCertificado("cipp", e)}
+                            disabled={Boolean(cadastroCertEnviando) || salvando}
+                            style={{ display: "none" }}
+                          />
+                          <label
+                            htmlFor={cadastroCippInputId}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              minHeight: "40px",
+                              padding: "0 16px",
+                              borderRadius: "10px",
+                              background:
+                                cadastroCertEnviando === "cipp" || salvando ? "#e2e8f0" : "#334155",
+                              color: "#ffffff",
+                              fontWeight: 700,
+                              fontSize: "13px",
+                              cursor:
+                                cadastroCertEnviando === "cipp" || salvando ? "wait" : "pointer",
+                            }}
+                          >
+                            {cadastroCertEnviando === "cipp"
+                              ? "A enviar…"
+                              : cadastroCippUrlServidor || cadastroCippPendente
+                                ? "Substituir arquivo CIPP"
+                                : "Anexar arquivo CIPP"}
+                          </label>
+                          {cadastroCippUrlServidor ? (
+                            <a
+                              href={cadastroCippUrlServidor}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ fontSize: "13px", fontWeight: 700, color: "#15803d" }}
+                            >
+                              Ver arquivo atual
+                            </a>
+                          ) : null}
+                          {cadastroCippPendente && !editingId ? (
+                            <span style={{ fontSize: "12px", color: "#64748b" }}>
+                              Pendente: {cadastroCippPendente.name}
+                            </span>
+                          ) : null}
+                          {cadastroCippUrlServidor || cadastroCippPendente ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleCadastroRemoverCertificado("cipp")}
+                              disabled={Boolean(cadastroCertEnviando) || salvando}
+                              style={{
+                                minHeight: "36px",
+                                padding: "0 12px",
+                                borderRadius: "8px",
+                                border: "1px solid #fecaca",
+                                background: "#ffffff",
+                                color: "#b91c1c",
+                                fontWeight: 700,
+                                fontSize: "12px",
+                                cursor:
+                                  cadastroCertEnviando || salvando ? "not-allowed" : "pointer",
+                              }}
+                            >
+                              Remover arquivo
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div
@@ -952,7 +1526,7 @@ export default function Caminhoes() {
                 >
                   <button
                     type="submit"
-                    disabled={salvando || cadastroFotoEnviando}
+                    disabled={salvando || cadastroFotoEnviando || cadastroCertEnviando !== null}
                     style={{
                       background: "#16a34a",
                       color: "#ffffff",
@@ -962,7 +1536,10 @@ export default function Caminhoes() {
                       padding: "0 18px",
                       fontWeight: 700,
                       cursor: "pointer",
-                      opacity: salvando || cadastroFotoEnviando ? 0.8 : 1,
+                      opacity:
+                        salvando || cadastroFotoEnviando || cadastroCertEnviando !== null
+                          ? 0.8
+                          : 1,
                     }}
                   >
                     {salvando
@@ -1078,17 +1655,26 @@ export default function Caminhoes() {
                       <th style={thStyle}>Modelo</th>
                       <th style={thStyle}>Tipo</th>
                       <th style={thStyle}>Rodízio</th>
+                      <th style={thStyle}>CRLV</th>
                       <th style={thStyle}>Disponibilidade</th>
                       <th style={thStyle}>Ações</th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    {caminhoes.map((c) => (
+                    {caminhoes.map((c) => {
+                      const indisp = statusEhIndisponivel(c.status_disponibilidade);
+                      return (
                       <tr
                         key={c.id}
                         style={{
                           borderBottom: "1px solid #eef2f7",
+                          ...(indisp
+                            ? {
+                                background: "#fff1f2",
+                                boxShadow: "inset 4px 0 0 #dc2626",
+                              }
+                            : {}),
                         }}
                       >
                         <td style={{ ...tdStyle, whiteSpace: "normal", wordBreak: "break-word" }}>
@@ -1105,7 +1691,10 @@ export default function Caminhoes() {
                         <td style={tdStyle}>{c.modelo || "-"}</td>
                         <td style={tdStyle}>{c.tipo || "-"}</td>
                         <td style={tdStyle}>{c.rodizio || "-"}</td>
-                        <td style={tdStyle}>{c.status_disponibilidade}</td>
+                        <td style={tdStyle}>{formatarData(c.crlv_validade)}</td>
+                        <td style={{ ...tdStyle, whiteSpace: "normal" }}>
+                          <CelulaStatusDisponibilidade status={c.status_disponibilidade} />
+                        </td>
                         <td style={{ ...tdStyle, whiteSpace: "nowrap", verticalAlign: "middle" }}>
                           <div
                             role="group"
@@ -1158,12 +1747,13 @@ export default function Caminhoes() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                    );
+                    })}
 
                     {caminhoes.length === 0 && (
                       <tr>
                         <td
-                          colSpan={6}
+                          colSpan={7}
                           style={{
                             textAlign: "center",
                             padding: "28px 12px",
@@ -1297,7 +1887,9 @@ export default function Caminhoes() {
               background: "#ffffff",
               borderRadius: "16px",
               boxShadow: "0 25px 50px rgba(15, 23, 42, 0.2)",
-              border: "1px solid #e2e8f0",
+              border: statusEhIndisponivel(fichaCaminhao.status_disponibilidade)
+                ? "2px solid #f87171"
+                : "1px solid #e2e8f0",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1362,8 +1954,46 @@ export default function Caminhoes() {
                 <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.tipo || "—"}</dd>
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>Rodízio</dt>
                 <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.rodizio || "—"}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Validade CRLV</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{formatarData(fichaCaminhao.crlv_validade)}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>CIV (nº / arquivo)</dt>
+                <dd style={{ margin: 0, color: "#1f2937", wordBreak: "break-word" }}>
+                  {fichaCaminhao.civ_numero || "—"}
+                  {fichaCaminhao.civ_arquivo_url ? (
+                    <>
+                      {" "}
+                      <a
+                        href={fichaCaminhao.civ_arquivo_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontWeight: 700, color: "#15803d" }}
+                      >
+                        Ver arquivo
+                      </a>
+                    </>
+                  ) : null}
+                </dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>CIPP (nº / arquivo)</dt>
+                <dd style={{ margin: 0, color: "#1f2937", wordBreak: "break-word" }}>
+                  {fichaCaminhao.cipp_numero || "—"}
+                  {fichaCaminhao.cipp_arquivo_url ? (
+                    <>
+                      {" "}
+                      <a
+                        href={fichaCaminhao.cipp_arquivo_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontWeight: 700, color: "#15803d" }}
+                      >
+                        Ver arquivo
+                      </a>
+                    </>
+                  ) : null}
+                </dd>
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>Disponibilidade</dt>
-                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.status_disponibilidade}</dd>
+                <dd style={{ margin: 0, color: "#1f2937" }}>
+                  <CelulaStatusDisponibilidade status={fichaCaminhao.status_disponibilidade} />
+                </dd>
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>Cadastrado em</dt>
                 <dd style={{ margin: 0, color: "#1f2937" }}>{formatarDataHora(fichaCaminhao.created_at)}</dd>
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>ID</dt>

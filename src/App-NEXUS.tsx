@@ -13,13 +13,14 @@ import { lazyWithRetry } from './lib/lazyWithRetry'
 
 const BemVindoNexus = lazyWithRetry(() => import('./pages/BemVindoNexus'))
 const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'))
-const Clientes = lazyWithRetry(() => import('./pages/Clientes-NEXUS'))
+const Clientes = lazyWithRetry(() => import('./pages/Clientes'))
 const PosVenda = lazyWithRetry(() => import('./pages/PosVenda'))
 const Motoristas = lazyWithRetry(() => import('./pages/Motoristas'))
 const RepresentantesRG = lazyWithRetry(() => import('./pages/RepresentantesRG'))
 const Caminhoes = lazyWithRetry(() => import('./pages/Caminhoes'))
 const Financeiro = lazyWithRetry(() => import('./pages/Financeiro'))
 const FinanceiroContasReceber = lazyWithRetry(() => import('./pages/FinanceiroContasReceber'))
+const FinanceiroContasPagar = lazyWithRetry(() => import('./pages/FinanceiroContasPagar'))
 const EnvioNF = lazyWithRetry(() => import('./pages/EnvioNF'))
 const Usuarios = lazyWithRetry(() => import('./pages/Usuarios'))
 const ChecklistTransporte = lazyWithRetry(() => import('./pages/ChecklistTransporte'))
@@ -660,7 +661,13 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Financeiro', 'Faturamento', 'Visualizador']}
+                  allowedRoles={[
+                    'Administrador',
+                    'Diretoria',
+                    'Financeiro',
+                    'Faturamento',
+                    'Visualizador',
+                  ]}
                 >
                   <Financeiro />
                 </ProtectedRoute>
@@ -674,9 +681,35 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Financeiro', 'Faturamento', 'Visualizador']}
+                  allowedRoles={[
+                    'Administrador',
+                    'Diretoria',
+                    'Financeiro',
+                    'Faturamento',
+                    'Visualizador',
+                  ]}
                 >
                   <FinanceiroContasReceber />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/financeiro/contas-pagar"
+              element={
+                <ProtectedRoute
+                  session={session}
+                  usuario={usuario}
+                  carregandoUsuario={carregandoUsuario}
+                  allowedRoles={[
+                    'Administrador',
+                    'Diretoria',
+                    'Financeiro',
+                    'Faturamento',
+                    'Visualizador',
+                  ]}
+                >
+                  <FinanceiroContasPagar />
                 </ProtectedRoute>
               }
             />
@@ -702,7 +735,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador']}
+                  allowedRoles={['Administrador', 'Diretoria']}
                 >
                   <Usuarios />
                 </ProtectedRoute>

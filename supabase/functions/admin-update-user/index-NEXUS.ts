@@ -115,9 +115,12 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    if (perfilAdmin.cargo !== "Administrador") {
-      return jsonResponse(req,403, {
-        error: "Apenas administradores podem editar usuários.",
+    const cargoEditor = String(perfilAdmin.cargo || "").trim().toLowerCase();
+    const ehAdministrador = cargoEditor === "administrador";
+    const ehDiretoria = cargoEditor === "diretoria" || cargoEditor === "diretor";
+    if (!ehAdministrador && !ehDiretoria) {
+      return jsonResponse(req, 403, {
+        error: "Apenas Administrador ou Diretoria podem editar usuários.",
       });
     }
 

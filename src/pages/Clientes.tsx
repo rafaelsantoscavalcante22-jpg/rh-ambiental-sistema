@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import MainLayout from "../layouts/MainLayout";
@@ -11,6 +12,11 @@ import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import { clienteEstaAtivo } from "../lib/brasilRegioes";
 import { RgReportPdfIcon } from "../components/ui/RgReportPdfIcon";
+import {
+  margemLucroClienteRotuloLista,
+  margemLucroDbParaCampo,
+  parseMargemLucroPercentual,
+} from "../lib/clienteMargemLucro";
 
 type Cliente = {
   id: string;
@@ -38,6 +44,7 @@ type Cliente = {
   endereco_coleta: string | null;
   endereco_faturamento: string | null;
   email_nf: string | null;
+  margem_lucro_percentual?: string | number | null;
 
   responsavel_nome: string | null;
   telefone: string | null;
@@ -50,8 +57,24 @@ type Cliente = {
 
   licenca_numero: string | null;
   validade: string | null;
+  codigo_ibama: string | null;
+  descricao_veiculo: string | null;
+  mtr_coleta: string | null;
+  destino: string | null;
+  mtr_destino: string | null;
+  residuo_destino: string | null;
+  observacoes_operacionais: string | null;
+  ajudante: string | null;
+  solicitante: string | null;
+  origem_planilha_cliente: string | null;
+  cnpj_raiz: string | null;
+  tipo_unidade_cliente: string | null;
   status_ativo_desde: string | null;
   status_inativo_desde: string | null;
+
+  representante_rg_id?: string | null;
+  caminhao_id?: string | null;
+  equipamentos?: string | null;
 };
 
 type ResiduoForm = {
@@ -74,6 +97,7 @@ type FormCliente = {
   bairro: string;
   cidade: string;
   estado: string;
+  endereco_coleta: string;
 
   cep_faturamento: string;
   rua_faturamento: string;
@@ -84,6 +108,7 @@ type FormCliente = {
   estado_faturamento: string;
 
   email_nf: string;
+  margem_lucro_percentual: string;
 
   responsavel_nome: string;
   telefone: string;
@@ -91,8 +116,24 @@ type FormCliente = {
 
   licenca_numero: string;
   validade: string;
+  codigo_ibama: string;
+  descricao_veiculo: string;
+  mtr_coleta: string;
+  destino: string;
+  mtr_destino: string;
+  residuo_destino: string;
+  observacoes_operacionais: string;
+  ajudante: string;
+  solicitante: string;
+  origem_planilha_cliente: string;
+  cnpj_raiz: string;
+  tipo_unidade_cliente: string;
   status_ativo_desde: string;
   status_inativo_desde: string;
+
+  representante_rg_id: string;
+  caminhao_id: string;
+  equipamentos: string;
 
   residuos: ResiduoForm[];
 };
@@ -117,6 +158,7 @@ const formInicial: FormCliente = {
   bairro: "",
   cidade: "",
   estado: "",
+  endereco_coleta: "",
 
   cep_faturamento: "",
   rua_faturamento: "",
@@ -127,6 +169,7 @@ const formInicial: FormCliente = {
   estado_faturamento: "",
 
   email_nf: "",
+  margem_lucro_percentual: "",
 
   responsavel_nome: "",
   telefone: "",
@@ -134,8 +177,24 @@ const formInicial: FormCliente = {
 
   licenca_numero: "",
   validade: "",
+  codigo_ibama: "",
+  descricao_veiculo: "",
+  mtr_coleta: "",
+  destino: "",
+  mtr_destino: "",
+  residuo_destino: "",
+  observacoes_operacionais: "",
+  ajudante: "",
+  solicitante: "",
+  origem_planilha_cliente: "",
+  cnpj_raiz: "",
+  tipo_unidade_cliente: "",
   status_ativo_desde: "",
   status_inativo_desde: "",
+
+  representante_rg_id: "",
+  caminhao_id: "",
+  equipamentos: "",
 
   residuos: [{ ...residuoInicial }],
 };
@@ -220,6 +279,13 @@ function montarEnderecoTextoLivreDosCamposEstruturados(p: {
 function formatarCNPJ(valor: string) {
   const digitos = valor.replace(/\D/g, "").slice(0, 14);
 
+  if (digitos.length <= 11) {
+    if (digitos.length <= 3) return digitos;
+    if (digitos.length <= 6) return digitos.replace(/^(\d{3})(\d+)/, "$1.$2");
+    if (digitos.length <= 9) return digitos.replace(/^(\d{3})(\d{3})(\d+)/, "$1.$2.$3");
+    return digitos.replace(/^(\d{3})(\d{3})(\d{3})(\d+)/, "$1.$2.$3-$4");
+  }
+
   if (digitos.length <= 2) return digitos;
   if (digitos.length <= 5) return digitos.replace(/^(\d{2})(\d+)/, "$1.$2");
   if (digitos.length <= 8) return digitos.replace(/^(\d{2})(\d{3})(\d+)/, "$1.$2.$3");
@@ -230,9 +296,25 @@ function formatarCNPJ(valor: string) {
   return digitos.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d+)/, "$1.$2.$3/$4-$5");
 }
 
-function normalizarCnpjParaArmazenar(valor: string): string {
+function normalizarDocumentoParaArmazenar(valor: string): string {
   const digitos = String(valor || "").replace(/\D/g, "").slice(0, 14);
+  if (digitos.length !== 11 && digitos.length !== 14) return "";
   return formatarCNPJ(digitos);
+}
+
+function documentoPossuiTamanhoValido(valor: string): boolean {
+  const total = valor.replace(/\D/g, "").length;
+  return total === 11 || total === 14;
+}
+
+function derivarDadosUnidadeDocumento(valor: string): Pick<FormCliente, "cnpj_raiz" | "tipo_unidade_cliente"> {
+  const digitos = valor.replace(/\D/g, "");
+  if (digitos.length === 11) return { cnpj_raiz: "", tipo_unidade_cliente: "Pessoa física" };
+  if (digitos.length !== 14) return { cnpj_raiz: "", tipo_unidade_cliente: "" };
+  return {
+    cnpj_raiz: digitos.slice(0, 8),
+    tipo_unidade_cliente: digitos.slice(8, 12) === "0001" ? "Matriz" : "Filial",
+  };
 }
 
 function normalizarHeader(raw: unknown): string {
@@ -246,7 +328,10 @@ function normalizarHeader(raw: unknown): string {
 function parseExcelDateToIso(value: unknown): string | null {
   if (value == null) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
+    const yyyy = String(value.getFullYear()).padStart(4, "0");
+    const mm = String(value.getMonth() + 1).padStart(2, "0");
+    const dd = String(value.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
   }
   if (typeof value === "number" && Number.isFinite(value)) {
     const d = XLSX.SSF.parse_date_code(value);
@@ -286,6 +371,7 @@ type ImportRow = Partial<{
   endereco_coleta: string;
   endereco_faturamento: string;
   email_nf: string;
+  margem_lucro_percentual: string;
   responsavel_nome: string;
   telefone: string;
   email: string;
@@ -295,6 +381,18 @@ type ImportRow = Partial<{
   frequencia_coleta: string;
   licenca_numero: string;
   validade: string;
+  codigo_ibama: string;
+  descricao_veiculo: string;
+  mtr_coleta: string;
+  destino: string;
+  mtr_destino: string;
+  residuo_destino: string;
+  observacoes_operacionais: string;
+  ajudante: string;
+  solicitante: string;
+  origem_planilha_cliente: string;
+  cnpj_raiz: string;
+  tipo_unidade_cliente: string;
   status_ativo_desde: string;
   status_inativo_desde: string;
 }>;
@@ -340,6 +438,11 @@ const IMPORT_HEADER_ALIASES: Record<string, keyof ImportRow> = {
   estado_faturamento: "estado_faturamento",
   "email nf": "email_nf",
   email_nf: "email_nf",
+  "margem lucro": "margem_lucro_percentual",
+  margem_lucro: "margem_lucro_percentual",
+  margem_lucro_percentual: "margem_lucro_percentual",
+  "margem de lucro": "margem_lucro_percentual",
+  "% margem": "margem_lucro_percentual",
   responsavel: "responsavel_nome",
   responsavel_nome: "responsavel_nome",
   telefone: "telefone",
@@ -353,7 +456,33 @@ const IMPORT_HEADER_ALIASES: Record<string, keyof ImportRow> = {
   frequencia_coleta: "frequencia_coleta",
   "licenca numero": "licenca_numero",
   licenca_numero: "licenca_numero",
+  cadri: "licenca_numero",
+  "venc cadri": "validade",
   validade: "validade",
+  "codigo ibama": "codigo_ibama",
+  codigo_ibama: "codigo_ibama",
+  "descricao veiculo": "descricao_veiculo",
+  descricao_veiculo: "descricao_veiculo",
+  veiculo: "descricao_veiculo",
+  "mtr de coleta": "mtr_coleta",
+  "mtr coleta": "mtr_coleta",
+  mtr: "mtr_coleta",
+  mtr_coleta: "mtr_coleta",
+  destino: "destino",
+  "mtr de destino": "mtr_destino",
+  "mtr destino": "mtr_destino",
+  mtr_destino: "mtr_destino",
+  "residuo de destino": "residuo_destino",
+  residuo_destino: "residuo_destino",
+  observacoes: "observacoes_operacionais",
+  "observações": "observacoes_operacionais",
+  obs: "observacoes_operacionais",
+  "obs:": "observacoes_operacionais",
+  ajudante: "ajudante",
+  solicitante: "solicitante",
+  origem_planilha_cliente: "origem_planilha_cliente",
+  cnpj_raiz: "cnpj_raiz",
+  tipo_unidade_cliente: "tipo_unidade_cliente",
   "status ativo desde": "status_ativo_desde",
   status_ativo_desde: "status_ativo_desde",
   "status inativo desde": "status_inativo_desde",
@@ -366,6 +495,52 @@ function dividirLista(valor?: string | null) {
     .split(" | ")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+const IMPORT_MERGE_LIST_FIELDS: Array<keyof ImportRow> = [
+  "tipo_residuo",
+  "classificacao",
+  "unidade_medida",
+  "frequencia_coleta",
+  "codigo_ibama",
+  "descricao_veiculo",
+  "mtr_coleta",
+  "destino",
+  "mtr_destino",
+  "residuo_destino",
+  "observacoes_operacionais",
+  "ajudante",
+  "solicitante",
+  "origem_planilha_cliente",
+];
+
+function juntarValorLista(atual: string | undefined, proximo: string | undefined): string | undefined {
+  const itens = [...dividirLista(atual), ...dividirLista(proximo)];
+  const unicos = Array.from(new Set(itens.map((item) => item.trim()).filter(Boolean)));
+  return unicos.length ? unicos.join(" | ") : undefined;
+}
+
+function consolidarLinhasImportacao(rows: ImportRow[]): ImportRow[] {
+  const map = new Map<string, ImportRow>();
+  for (const row of rows) {
+    const key = row.cnpj?.trim();
+    if (!key) continue;
+    const existente = map.get(key);
+    if (!existente) {
+      map.set(key, { ...row });
+      continue;
+    }
+
+    for (const [campo, valor] of Object.entries(row) as Array<[keyof ImportRow, string | undefined]>) {
+      if (!valor) continue;
+      if (IMPORT_MERGE_LIST_FIELDS.includes(campo)) {
+        existente[campo] = juntarValorLista(existente[campo], valor);
+      } else if (!existente[campo]) {
+        existente[campo] = valor;
+      }
+    }
+  }
+  return Array.from(map.values());
 }
 
 function serializarResiduos(residuos: ResiduoForm[]) {
@@ -411,20 +586,26 @@ const CLIENTES_SELECT_CORE =
 const CLIENTES_SELECT_FAT_ENDERECO =
   "cep_faturamento, rua_faturamento, numero_faturamento, complemento_faturamento, bairro_faturamento, cidade_faturamento, estado_faturamento";
 
-const CLIENTES_SELECT_TAIL =
-  "endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade";
+const CLIENTES_SELECT_TAIL_BASE =
+  "endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade, codigo_ibama, descricao_veiculo, mtr_coleta, destino, mtr_destino, residuo_destino, observacoes_operacionais, ajudante, solicitante, origem_planilha_cliente, cnpj_raiz, tipo_unidade_cliente, representante_rg_id, caminhao_id, equipamentos";
 
-function montarClientesSelectPrincipalLegacy(incluirFatEstruturado: boolean): string {
+function montarClientesSelectPrincipalLegacy(
+  incluirFatEstruturado: boolean,
+  incluirMargemLucro: boolean
+): string {
+  const tail = incluirMargemLucro
+    ? `${CLIENTES_SELECT_TAIL_BASE}, margem_lucro_percentual`
+    : CLIENTES_SELECT_TAIL_BASE;
   return incluirFatEstruturado
-    ? `${CLIENTES_SELECT_CORE}, ${CLIENTES_SELECT_FAT_ENDERECO}, ${CLIENTES_SELECT_TAIL}`
-    : `${CLIENTES_SELECT_CORE}, ${CLIENTES_SELECT_TAIL}`;
+    ? `${CLIENTES_SELECT_CORE}, ${CLIENTES_SELECT_FAT_ENDERECO}, ${tail}`
+    : `${CLIENTES_SELECT_CORE}, ${tail}`;
 }
 
 function montarOrFilterBuscaClientesLegacy(s: string, incluirColunasFat: boolean): string {
   const base = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%`;
   const rest = incluirColunasFat
-    ? `,cidade_faturamento.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,rua.ilike.%${s}%,rua_faturamento.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`
-    : `,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,rua.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
+    ? `,cidade_faturamento.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,rua.ilike.%${s}%,rua_faturamento.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%,codigo_ibama.ilike.%${s}%,descricao_veiculo.ilike.%${s}%,mtr_coleta.ilike.%${s}%,destino.ilike.%${s}%,mtr_destino.ilike.%${s}%,residuo_destino.ilike.%${s}%,observacoes_operacionais.ilike.%${s}%,ajudante.ilike.%${s}%,solicitante.ilike.%${s}%,origem_planilha_cliente.ilike.%${s}%,cnpj_raiz.ilike.%${s}%,tipo_unidade_cliente.ilike.%${s}%`
+    : `,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,rua.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%,codigo_ibama.ilike.%${s}%,descricao_veiculo.ilike.%${s}%,mtr_coleta.ilike.%${s}%,destino.ilike.%${s}%,mtr_destino.ilike.%${s}%,residuo_destino.ilike.%${s}%,observacoes_operacionais.ilike.%${s}%,ajudante.ilike.%${s}%,solicitante.ilike.%${s}%,origem_planilha_cliente.ilike.%${s}%,cnpj_raiz.ilike.%${s}%,tipo_unidade_cliente.ilike.%${s}%`;
   return base + rest;
 }
 
@@ -456,8 +637,137 @@ function isMissingFaturamentoEstruturadoColumnsError(
   );
 }
 
+function isMissingMargemLucroPercentualColumnError(
+  error: { message?: string; code?: string } | null | undefined
+): boolean {
+  const msg = (error?.message ?? "").toLowerCase();
+  const code = String(error?.code ?? "");
+  if (code === "PGRST204" && msg.includes("margem_lucro_percentual")) return true;
+  if (!msg.includes("margem_lucro_percentual")) return false;
+  return (
+    msg.includes("schema cache") ||
+    msg.includes("could not find") ||
+    msg.includes("does not exist") ||
+    msg.includes("unknown column")
+  );
+}
+
 /** Rascunho do cadastro: evita perder dados se a aba for recarregada ou descartada pelo navegador. */
 const CLIENTES_CADASTRO_DRAFT_KEY = "rg-ambiental-clientes-cadastro-draft";
+
+/** Persistência da preferência da listagem (vista compacta ou réplica da planilha). */
+const CLIENTES_LISTAGEM_MODO_KEY = "rg-ambiental-clientes-listagem-modo";
+
+type ModoTabelaClientes = "compacta" | "planilha";
+
+const MODO_TABELA_PADRAO: ModoTabelaClientes = "compacta";
+
+function lerModoTabelaPersistido(): ModoTabelaClientes {
+  if (typeof window === "undefined") return MODO_TABELA_PADRAO;
+  try {
+    const v = window.localStorage.getItem(CLIENTES_LISTAGEM_MODO_KEY);
+    return v === "planilha" || v === "compacta" ? v : MODO_TABELA_PADRAO;
+  } catch {
+    return MODO_TABELA_PADRAO;
+  }
+}
+
+function gravarModoTabelaPersistido(modo: ModoTabelaClientes) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(CLIENTES_LISTAGEM_MODO_KEY, modo);
+  } catch {
+    /* localStorage indisponível: ignora silenciosamente. */
+  }
+}
+
+type FiltroVencCadri = "todos" | "vencidos" | "30" | "60" | "90";
+
+const FILTRO_VENC_CADRI_OPTIONS: Array<{ value: FiltroVencCadri; label: string }> = [
+  { value: "todos", label: "Todos" },
+  { value: "vencidos", label: "Já vencidos" },
+  { value: "30", label: "Vencendo em 30 dias" },
+  { value: "60", label: "Vencendo em 60 dias" },
+  { value: "90", label: "Vencendo em 90 dias" },
+];
+
+/** Calcula dias restantes até a data (negativo se já venceu). null se data inválida/ausente. */
+function calcularDiasParaVencer(validade: string | null | undefined): number | null {
+  if (!validade) return null;
+  const limpa = String(validade).includes("T")
+    ? String(validade).split("T")[0]
+    : String(validade);
+  const m = limpa.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const ano = Number(m[1]);
+  const mes = Number(m[2]);
+  const dia = Number(m[3]);
+  if (!ano || !mes || !dia) return null;
+  const alvo = new Date(ano, mes - 1, dia);
+  if (Number.isNaN(alvo.getTime())) return null;
+  const hoje = new Date();
+  const hojeNorm = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  const ms = alvo.getTime() - hojeNorm.getTime();
+  return Math.round(ms / 86_400_000);
+}
+
+type VencCadriEstado = {
+  /** -1 = sem data, 0 = vencido, 1 = crítico (<30), 2 = atenção (30-90), 3 = ok (>90). */
+  nivel: -1 | 0 | 1 | 2 | 3;
+  bg: string;
+  fg: string;
+  borda: string;
+  rotulo: string;
+};
+
+function classificarVencCadri(dias: number | null): VencCadriEstado {
+  if (dias == null) {
+    return { nivel: -1, bg: "transparent", fg: "#64748b", borda: "transparent", rotulo: "" };
+  }
+  if (dias < 0) {
+    return {
+      nivel: 0,
+      bg: "#fee2e2",
+      fg: "#991b1b",
+      borda: "#fecaca",
+      rotulo: `Vencido há ${Math.abs(dias)}d`,
+    };
+  }
+  if (dias <= 30) {
+    return {
+      nivel: 1,
+      bg: "#fef2f2",
+      fg: "#b91c1c",
+      borda: "#fecaca",
+      rotulo: `Vence em ${dias}d`,
+    };
+  }
+  if (dias <= 90) {
+    return {
+      nivel: 2,
+      bg: "#fef9c3",
+      fg: "#854d0e",
+      borda: "#fde68a",
+      rotulo: `Vence em ${dias}d`,
+    };
+  }
+  return {
+    nivel: 3,
+    bg: "#dcfce7",
+    fg: "#166534",
+    borda: "#bbf7d0",
+    rotulo: `Vence em ${dias}d`,
+  };
+}
+
+function clienteAtendeFiltroVencCadri(c: Cliente, filtro: FiltroVencCadri): boolean {
+  if (filtro === "todos") return true;
+  const dias = calcularDiasParaVencer(c.validade);
+  if (dias == null) return false;
+  if (filtro === "vencidos") return dias < 0;
+  const limite = Number(filtro);
+  return dias >= 0 && dias <= limite;
+}
 
 export default function Clientes() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -478,8 +788,117 @@ export default function Clientes() {
   const [alternandoStatusId, setAlternandoStatusId] = useState<string | null>(null);
   const [form, setForm] = useState<FormCliente>(formInicial);
   const faturamentoEstruturadoColDisponivelRef = useRef(true);
+  const margemLucroColDisponivelRef = useRef(true);
+
+  const [modoTabela, setModoTabela] = useState<ModoTabelaClientes>(() => lerModoTabelaPersistido());
+  const [filtroVencCadri, setFiltroVencCadri] = useState<FiltroVencCadri>("todos");
+  const [linhasExpandidas, setLinhasExpandidas] = useState<Set<string>>(() => new Set());
+
+  /** Modal de informações completas do cliente (aberto ao clicar no nome). */
+  const [clienteDetalhe, setClienteDetalhe] = useState<Cliente | null>(null);
+
+  type RepresentanteRgOpcao = { id: string; nome: string };
+  const [representantesRg, setRepresentantesRg] = useState<RepresentanteRgOpcao[]>([]);
+
+  type VeiculoCaminhaoOpcao = { id: string; placa: string; modelo: string | null };
+  const [veiculosCaminhoes, setVeiculosCaminhoes] = useState<VeiculoCaminhaoOpcao[]>([]);
+
+  const rotuloRepresentanteRgCliente = useCallback(
+    (c: Cliente) => {
+      const rid = c.representante_rg_id;
+      if (rid) {
+        const hit = representantesRg.find((r) => r.id === rid);
+        if (hit) return hit.nome;
+        return "Representante (indisponível na lista)";
+      }
+      return c.responsavel_nome?.trim() || "—";
+    },
+    [representantesRg]
+  );
+
+  const rotuloVeiculoCliente = useCallback(
+    (c: Cliente) => {
+      const vid = c.caminhao_id;
+      if (!vid) return "—";
+      const hit = veiculosCaminhoes.find((v) => v.id === vid);
+      if (hit) {
+        const m = hit.modelo?.trim();
+        return m ? `${hit.placa} — ${m}` : hit.placa;
+      }
+      return "Veículo (indisponível na lista)";
+    },
+    [veiculosCaminhoes]
+  );
+
+  useEffect(() => {
+    if (!clienteDetalhe) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setClienteDetalhe(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [clienteDetalhe]);
+
+  useEffect(() => {
+    void (async () => {
+      const { data, error } = await supabase
+        .from("representantes_rg")
+        .select("id, nome")
+        .order("nome", { ascending: true });
+      if (error) {
+        console.warn("Erro ao listar Representantes RG:", error);
+        return;
+      }
+      setRepresentantesRg(
+        ((data as Array<{ id: string; nome: string }> | null) ?? []).map((r) => ({
+          id: r.id,
+          nome: r.nome,
+        }))
+      );
+    })();
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      const { data, error } = await supabase
+        .from("caminhoes")
+        .select("id, placa, modelo")
+        .order("placa", { ascending: true });
+      if (error) {
+        console.warn("Erro ao listar veículos (frota):", error);
+        return;
+      }
+      setVeiculosCaminhoes(
+        ((data as Array<{ id: string; placa: string; modelo: string | null }> | null) ?? []).map((v) => ({
+          id: v.id,
+          placa: v.placa,
+          modelo: v.modelo ?? null,
+        }))
+      );
+    })();
+  }, []);
+
+  useEffect(() => {
+    gravarModoTabelaPersistido(modoTabela);
+  }, [modoTabela]);
+
+  const alternarLinhaExpandida = useCallback((id: string) => {
+    setLinhasExpandidas((atual) => {
+      const proximo = new Set(atual);
+      if (proximo.has(id)) proximo.delete(id);
+      else proximo.add(id);
+      return proximo;
+    });
+  }, []);
 
   const termoFiltro = useMemo(() => buscaDebounced.trim(), [buscaDebounced]);
+
+  const clientesFiltrados = useMemo(() => {
+    if (filtroVencCadri === "todos") return clientes;
+    return clientes.filter((c) => clienteAtendeFiltroVencCadri(c, filtroVencCadri));
+  }, [clientes, filtroVencCadri]);
+
+  const totalFiltradoLocalmente = clientesFiltrados.length;
 
   const cadastroDraftData = useMemo(() => ({ form, editingId }), [form, editingId]);
   useCadastroFormDraft({
@@ -513,9 +932,10 @@ export default function Clientes() {
     };
 
     let fat = faturamentoEstruturadoColDisponivelRef.current;
+    let ml = margemLucroColDisponivelRef.current;
 
     const executarFetch = () => {
-      const listStr = montarClientesSelectPrincipalLegacy(fat);
+      const listStr = montarClientesSelectPrincipalLegacy(fat, ml);
       return montarQueries(listStr, fat);
     };
 
@@ -537,6 +957,16 @@ export default function Clientes() {
         ]);
         continue;
       }
+      if (ml && isMissingMargemLucroPercentualColumnError(error)) {
+        margemLucroColDisponivelRef.current = false;
+        ml = false;
+        ({ countQ, dataQ } = executarFetch());
+        [{ count, error: errCount }, { data, error }] = await Promise.all([
+          countQ,
+          dataQ.range(from, to),
+        ]);
+        continue;
+      }
       break;
     }
 
@@ -548,7 +978,7 @@ export default function Clientes() {
 
     if (error) {
       console.error("Erro ao buscar clientes:", error);
-      const listMin = montarClientesSelectPrincipalLegacy(false);
+      const listMin = montarClientesSelectPrincipalLegacy(false, false);
       let cqMin = supabase.from("clientes").select("id", { count: "exact", head: true });
       let dqMin = supabase.from("clientes").select(listMin).order("nome", { ascending: true });
       if (termoFiltro) {
@@ -593,18 +1023,27 @@ export default function Clientes() {
     };
 
     let fat = faturamentoEstruturadoColDisponivelRef.current;
+    let ml = margemLucroColDisponivelRef.current;
 
     const out: Cliente[] = [];
     for (let from = 0; ; from += PAGE) {
       const to = from + PAGE - 1;
-      let listStr = montarClientesSelectPrincipalLegacy(fat);
+      let listStr = montarClientesSelectPrincipalLegacy(fat, ml);
       let dataQ = montarDataQ(listStr, fat);
       let { data, error } = await dataQ.range(from, to);
       while (error) {
         if (fat && isMissingFaturamentoEstruturadoColumnsError(error)) {
           faturamentoEstruturadoColDisponivelRef.current = false;
           fat = false;
-          listStr = montarClientesSelectPrincipalLegacy(fat);
+          listStr = montarClientesSelectPrincipalLegacy(fat, ml);
+          dataQ = montarDataQ(listStr, fat);
+          ({ data, error } = await dataQ.range(from, to));
+          continue;
+        }
+        if (ml && isMissingMargemLucroPercentualColumnError(error)) {
+          margemLucroColDisponivelRef.current = false;
+          ml = false;
+          listStr = montarClientesSelectPrincipalLegacy(fat, ml);
           dataQ = montarDataQ(listStr, fat);
           ({ data, error } = await dataQ.range(from, to));
           continue;
@@ -663,6 +1102,7 @@ export default function Clientes() {
           "Telefone",
           "E-mail",
           "E-mail NF",
+          "Margem lucro %",
           "Resíduo",
           "Classe",
           "Licença válida até",
@@ -679,6 +1119,7 @@ export default function Clientes() {
           c.telefone?.trim() || "-",
           c.email?.trim() || "-",
           c.email_nf?.trim() || "-",
+          margemLucroClienteRotuloLista(c.margem_lucro_percentual),
           c.tipo_residuo ?? "-",
           c.classificacao ?? "-",
           formatarData(c.validade),
@@ -699,10 +1140,11 @@ export default function Clientes() {
           7: { cellWidth: 42 },
           8: { cellWidth: 50 },
           9: { cellWidth: 46 },
-          10: { cellWidth: 40 },
-          11: { cellWidth: 32 },
-          12: { cellWidth: 36 },
-          13: { cellWidth: 32 },
+          10: { cellWidth: 34 },
+          11: { cellWidth: 40 },
+          12: { cellWidth: 32 },
+          13: { cellWidth: 36 },
+          14: { cellWidth: 32 },
         },
       });
 
@@ -737,6 +1179,7 @@ export default function Clientes() {
       "cidade_faturamento",
       "estado_faturamento",
       "email_nf",
+      "margem_lucro_percentual",
       "responsavel_nome",
       "telefone",
       "email",
@@ -746,6 +1189,18 @@ export default function Clientes() {
       "frequencia_coleta",
       "licenca_numero",
       "validade",
+      "codigo_ibama",
+      "descricao_veiculo",
+      "mtr_coleta",
+      "destino",
+      "mtr_destino",
+      "residuo_destino",
+      "observacoes_operacionais",
+      "ajudante",
+      "solicitante",
+      "origem_planilha_cliente",
+      "cnpj_raiz",
+      "tipo_unidade_cliente",
     ];
 
     const exemplo = [
@@ -768,6 +1223,7 @@ export default function Clientes() {
       "São Paulo",
       "SP",
       "nf@cliente.com.br",
+      "15,5",
       "Fulano",
       "(11) 99999-9999",
       "contato@cliente.com.br",
@@ -777,6 +1233,18 @@ export default function Clientes() {
       "semanal",
       "",
       "2026-12-31",
+      "150202",
+      "BAU",
+      "RG EMITE - EXCEL",
+      "RG AMBIENTAL",
+      "",
+      "",
+      "Observação operacional",
+      "NÃO",
+      "Compras",
+      "CLIENTES",
+      "00000000",
+      "Matriz",
     ];
 
     const ws = XLSX.utils.aoa_to_sheet([headers, exemplo]);
@@ -788,53 +1256,120 @@ export default function Clientes() {
   const handleExportarExcel = useCallback(async () => {
     try {
       setExportandoExcel(true);
-      const linhas = await fetchClientesRelatorio();
+      const linhasOriginais = await fetchClientesRelatorio();
+      const linhas =
+        filtroVencCadri === "todos"
+          ? linhasOriginais
+          : linhasOriginais.filter((c) => clienteAtendeFiltroVencCadri(c, filtroVencCadri));
 
-      const headers = [
-        "nome",
-        "razao_social",
-        "cnpj",
-        "status",
-        "endereco_coleta",
-        "endereco_faturamento",
-        "email_nf",
-        "tipo_residuo",
-        "classificacao",
-        "licenca_numero",
-        "validade",
-      ];
+      const isPlanilha = modoTabela === "planilha";
 
-      const aoa = [
-        headers,
-        ...linhas.map((c) => [
-          c.nome ?? "",
-          c.razao_social ?? "",
-          c.cnpj ?? "",
-          c.status ?? "Ativo",
-          formatarEnderecoRelatorio(c),
-          formatarEnderecoFaturamentoRelatorio(c),
-          c.email_nf ?? "",
-          c.tipo_residuo ?? "",
-          c.classificacao ?? "",
-          c.licenca_numero ?? "",
-          c.validade ?? "",
-        ]),
-      ];
+      const headers = isPlanilha
+        ? [
+            "razao_social",
+            "cnpj",
+            "endereco",
+            "cadri",
+            "venc_cadri",
+            "codigo_ibama",
+            "descricao_veiculo",
+            "tipo_residuo",
+            "mtr_de_coleta",
+            "destino",
+            "mtr_de_destino",
+            "residuo_de_destino",
+            "observacoes",
+            "ajudante",
+          ]
+        : [
+            "nome",
+            "razao_social",
+            "cnpj",
+            "status",
+            "endereco_coleta",
+            "endereco_faturamento",
+            "email_nf",
+            "margem_lucro_percentual",
+            "tipo_residuo",
+            "classificacao",
+            "licenca_numero",
+            "validade",
+            "codigo_ibama",
+            "descricao_veiculo",
+            "mtr_coleta",
+            "destino",
+            "mtr_destino",
+            "residuo_destino",
+            "observacoes_operacionais",
+            "ajudante",
+            "solicitante",
+            "origem_planilha_cliente",
+            "cnpj_raiz",
+            "tipo_unidade_cliente",
+          ];
+
+      const corpo = isPlanilha
+        ? linhas.map((c) => [
+            c.razao_social ?? "",
+            c.cnpj ?? "",
+            formatarEnderecoRelatorio(c),
+            c.licenca_numero ?? "",
+            c.validade ?? "",
+            c.codigo_ibama ?? "",
+            c.descricao_veiculo ?? "",
+            c.tipo_residuo ?? "",
+            c.mtr_coleta ?? "",
+            c.destino ?? "",
+            c.mtr_destino ?? "",
+            c.residuo_destino ?? "",
+            c.observacoes_operacionais ?? "",
+            c.ajudante ?? "",
+          ])
+        : linhas.map((c) => [
+            c.nome ?? "",
+            c.razao_social ?? "",
+            c.cnpj ?? "",
+            c.status ?? "Ativo",
+            formatarEnderecoRelatorio(c),
+            formatarEnderecoFaturamentoRelatorio(c),
+            c.email_nf ?? "",
+            margemLucroDbParaCampo(c.margem_lucro_percentual),
+            c.tipo_residuo ?? "",
+            c.classificacao ?? "",
+            c.licenca_numero ?? "",
+            c.validade ?? "",
+            c.codigo_ibama ?? "",
+            c.descricao_veiculo ?? "",
+            c.mtr_coleta ?? "",
+            c.destino ?? "",
+            c.mtr_destino ?? "",
+            c.residuo_destino ?? "",
+            c.observacoes_operacionais ?? "",
+            c.ajudante ?? "",
+            c.solicitante ?? "",
+            c.origem_planilha_cliente ?? "",
+            c.cnpj_raiz ?? "",
+            c.tipo_unidade_cliente ?? "",
+          ]);
+
+      const aoa = [headers, ...corpo];
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "clientes");
+      XLSX.utils.book_append_sheet(wb, ws, isPlanilha ? "CLIENTES" : "clientes");
 
       const iso = new Date().toISOString().slice(0, 10);
       const sufixo = termoFiltro ? `_filtro-${termoFiltro.trim().slice(0, 40)}` : "";
-      XLSX.writeFile(wb, `clientes_${iso}${sufixo}.xlsx`);
+      const sufixoVenc = filtroVencCadri !== "todos" ? `_cadri-${filtroVencCadri}` : "";
+      const prefixo = isPlanilha ? "clientes_planilha" : "clientes";
+      XLSX.writeFile(wb, `${prefixo}_${iso}${sufixo}${sufixoVenc}.xlsx`);
     } catch (err) {
       console.error("Erro ao exportar Excel:", err);
       alert("Não foi possível exportar em Excel. Tente novamente.");
     } finally {
       setExportandoExcel(false);
     }
-  }, [fetchClientesRelatorio, termoFiltro]);
+  }, [fetchClientesRelatorio, filtroVencCadri, modoTabela, termoFiltro]);
 
   const handleImportarExcel = useCallback(
     async (file: File) => {
@@ -856,87 +1391,96 @@ export default function Clientes() {
       try {
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, { type: "array", dense: true, cellDates: true });
-        const sheetName = wb.SheetNames?.[0];
-        if (!sheetName) throw new Error("A planilha não possui abas.");
-        const sheet = wb.Sheets[sheetName];
-
-        const aoa = XLSX.utils.sheet_to_json(sheet, {
-          header: 1,
-          blankrows: false,
-          raw: true,
-        }) as unknown[][];
-
-        if (!Array.isArray(aoa) || aoa.length < 2) {
-          throw new Error("Planilha vazia. Precisa ter cabeçalho e pelo menos 1 linha.");
-        }
-
-        if (aoa.length - 1 > IMPORT_MAX_ROWS) {
-          throw new Error(`Muitas linhas (${aoa.length - 1}). Limite: ${IMPORT_MAX_ROWS}.`);
-        }
-
-        const headerRow = aoa[0] ?? [];
-        if ((headerRow as unknown[]).length > IMPORT_MAX_COLS) {
-          throw new Error(`Muitas colunas (${(headerRow as unknown[]).length}). Limite: ${IMPORT_MAX_COLS}.`);
-        }
-
-        const colMap = new Map<number, keyof ImportRow>();
-        for (let c = 0; c < headerRow.length; c++) {
-          const h = normalizarHeader(headerRow[c]);
-          const mapped = IMPORT_HEADER_ALIASES[h];
-          if (mapped) colMap.set(c, mapped);
-        }
-
-        const required: Array<keyof ImportRow> = ["nome", "razao_social", "cnpj"];
-        const missing = required.filter((r) => !Array.from(colMap.values()).includes(r));
-        if (missing.length) {
-          throw new Error(`Cabeçalhos obrigatórios ausentes: ${missing.join(", ")}.`);
-        }
-
         const rows: ImportRow[] = [];
         const erros: string[] = [];
+        let abasProcessadas = 0;
+        let linhasLidas = 0;
 
-        for (let r = 1; r < aoa.length; r++) {
-          const row = aoa[r] ?? [];
-          const obj: ImportRow = {};
+        for (const sheetName of wb.SheetNames || []) {
+          const sheet = wb.Sheets[sheetName];
+          const aoa = XLSX.utils.sheet_to_json(sheet, {
+            header: 1,
+            blankrows: false,
+            raw: true,
+          }) as unknown[][];
 
-          for (const [idx, key] of colMap.entries()) {
-            const v = (row as unknown[])[idx];
-            if (key === "validade" || key === "status_ativo_desde" || key === "status_inativo_desde") {
-              const iso = parseExcelDateToIso(v);
-              if (iso) (obj as Record<keyof ImportRow, string | undefined>)[key] = iso;
-              continue;
-            }
-            const s = String(v ?? "").trim();
-            if (s) (obj as Record<keyof ImportRow, string | undefined>)[key] = s;
+          if (!Array.isArray(aoa) || aoa.length < 2) continue;
+
+          const headerRow = aoa[0] ?? [];
+          if ((headerRow as unknown[]).length > IMPORT_MAX_COLS) {
+            throw new Error(`Muitas colunas na aba ${sheetName} (${(headerRow as unknown[]).length}). Limite: ${IMPORT_MAX_COLS}.`);
           }
 
-          const nome = (obj.nome || "").trim();
-          const razao = (obj.razao_social || "").trim();
-          const cnpj = normalizarCnpjParaArmazenar(String(obj.cnpj || ""));
+          const colMap = new Map<number, keyof ImportRow>();
+          for (let c = 0; c < headerRow.length; c++) {
+            const h = normalizarHeader(headerRow[c]);
+            const mapped = IMPORT_HEADER_ALIASES[h];
+            if (mapped) colMap.set(c, mapped);
+          }
 
-          if (!nome || !razao || !cnpj || cnpj.replace(/\D/g, "").length !== 14) {
-            erros.push(`Linha ${r + 1}: nome/razão/CNPJ inválidos.`);
+          const required: Array<keyof ImportRow> = ["razao_social", "cnpj"];
+          const missing = required.filter((r) => !Array.from(colMap.values()).includes(r));
+          if (missing.length) {
+            erros.push(`Aba ${sheetName}: cabeçalhos obrigatórios ausentes (${missing.join(", ")}).`);
             continue;
           }
 
-          obj.nome = nome;
-          obj.razao_social = razao;
-          obj.cnpj = cnpj;
-          obj.status = (obj.status || "Ativo").trim() || "Ativo";
+          abasProcessadas++;
+          linhasLidas += aoa.length - 1;
+          if (linhasLidas > IMPORT_MAX_ROWS) {
+            throw new Error(`Muitas linhas (${linhasLidas}). Limite: ${IMPORT_MAX_ROWS}.`);
+          }
 
-          if (!obj.tipo_residuo) obj.tipo_residuo = "—";
-          if (!obj.classificacao) obj.classificacao = "—";
+          for (let r = 1; r < aoa.length; r++) {
+            const row = aoa[r] ?? [];
+            const obj: ImportRow = { origem_planilha_cliente: sheetName };
 
-          rows.push(obj);
+            for (const [idx, key] of colMap.entries()) {
+              const v = (row as unknown[])[idx];
+              if (key === "validade" || key === "status_ativo_desde" || key === "status_inativo_desde") {
+                const iso = parseExcelDateToIso(v);
+                if (iso) (obj as Record<keyof ImportRow, string | undefined>)[key] = iso;
+                continue;
+              }
+              const s = String(v ?? "").trim();
+              if (s && s !== "-") (obj as Record<keyof ImportRow, string | undefined>)[key] = s;
+            }
+
+            const razao = (obj.razao_social || "").trim();
+            const cnpj = normalizarDocumentoParaArmazenar(String(obj.cnpj || ""));
+            const nome = (obj.nome || razao || "").trim();
+
+            if (!razao || !cnpj || !documentoPossuiTamanhoValido(cnpj)) {
+              erros.push(`Aba ${sheetName}, linha ${r + 1}: razão/documento inválidos.`);
+              continue;
+            }
+
+            obj.nome = nome;
+            obj.razao_social = razao;
+            obj.cnpj = cnpj;
+            obj.status = (obj.status || "Ativo").trim() || "Ativo";
+            Object.assign(obj, derivarDadosUnidadeDocumento(cnpj));
+
+            if (!obj.tipo_residuo) obj.tipo_residuo = "—";
+            if (!obj.classificacao) obj.classificacao = "—";
+
+            rows.push(obj);
+          }
         }
 
-        if (rows.length === 0) {
+        if (abasProcessadas === 0) {
+          throw new Error("Nenhuma aba com cabeçalho compatível foi encontrada.");
+        }
+
+        const rowsConsolidadas = consolidarLinhasImportacao(rows);
+
+        if (rowsConsolidadas.length === 0) {
           throw new Error(
             erros.length ? `Nenhuma linha válida.\n\n${erros.slice(0, 8).join("\n")}` : "Nenhuma linha válida."
           );
         }
 
-        const cnpjs = Array.from(new Set(rows.map((r) => r.cnpj!).filter(Boolean)));
+        const cnpjs = Array.from(new Set(rowsConsolidadas.map((r) => r.cnpj!).filter(Boolean)));
         const existingMap = new Map<string, string>();
 
         for (let i = 0; i < cnpjs.length; i += 200) {
@@ -951,7 +1495,7 @@ export default function Clientes() {
         const inserts: Array<Record<string, unknown>> = [];
         const updates: Array<{ id: string; payload: Record<string, unknown> }> = [];
 
-        for (const r of rows) {
+        for (const r of rowsConsolidadas) {
           const textoColetaImp = montarEnderecoTextoLivreDosCamposEstruturados({
             cep: r.cep || "",
             rua: r.rua || "",
@@ -992,6 +1536,10 @@ export default function Clientes() {
             endereco_coleta: limparOuNull(r.endereco_coleta || textoColetaImp),
             endereco_faturamento: limparOuNull(r.endereco_faturamento || textoFatImp),
             email_nf: limparOuNull(r.email_nf || ""),
+            margem_lucro_percentual: (() => {
+              const p = parseMargemLucroPercentual(String(r.margem_lucro_percentual ?? ""));
+              return p.ok ? p.value : null;
+            })(),
             responsavel_nome: limparOuNull(r.responsavel_nome || ""),
             telefone: limparOuNull(r.telefone || ""),
             email: limparOuNull(r.email || ""),
@@ -1001,6 +1549,18 @@ export default function Clientes() {
             frequencia_coleta: limparOuNull(r.frequencia_coleta || ""),
             licenca_numero: limparOuNull(r.licenca_numero || ""),
             validade: limparOuNull(r.validade || ""),
+            codigo_ibama: limparOuNull(r.codigo_ibama || ""),
+            descricao_veiculo: limparOuNull(r.descricao_veiculo || ""),
+            mtr_coleta: limparOuNull(r.mtr_coleta || ""),
+            destino: limparOuNull(r.destino || ""),
+            mtr_destino: limparOuNull(r.mtr_destino || ""),
+            residuo_destino: limparOuNull(r.residuo_destino || ""),
+            observacoes_operacionais: limparOuNull(r.observacoes_operacionais || ""),
+            ajudante: limparOuNull(r.ajudante || ""),
+            solicitante: limparOuNull(r.solicitante || ""),
+            origem_planilha_cliente: limparOuNull(r.origem_planilha_cliente || ""),
+            cnpj_raiz: limparOuNull(r.cnpj_raiz || ""),
+            tipo_unidade_cliente: limparOuNull(r.tipo_unidade_cliente || ""),
             status_ativo_desde: limparOuNull(r.status_ativo_desde || ""),
             status_inativo_desde: limparOuNull(r.status_inativo_desde || ""),
           };
@@ -1024,7 +1584,9 @@ export default function Clientes() {
         setImportResumo(
           [
             `Importação concluída.`,
+            `Abas: ${abasProcessadas}.`,
             `Linhas válidas: ${rows.length}.`,
+            `Clientes consolidados: ${rowsConsolidadas.length}.`,
             `Novos: ${inserts.length}.`,
             `Atualizados: ${updates.length}.`,
             erros.length ? `Ignorados: ${erros.length} (ex.: ${erros[0]})` : "",
@@ -1060,7 +1622,20 @@ export default function Clientes() {
   ) {
     const { name, value } = e.target;
     const rawValue = name === "cnpj" ? formatarCNPJ(value) : value;
-    setForm((prev) => ({ ...prev, [name]: rawValue }));
+
+    if (name === "representante_rg_id") {
+      const nomeRep = rawValue
+        ? representantesRg.find((r) => r.id === rawValue)?.nome ?? ""
+        : "";
+      setForm((prev) => ({ ...prev, representante_rg_id: rawValue, responsavel_nome: nomeRep }));
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      [name]: rawValue,
+      ...(name === "cnpj" ? derivarDadosUnidadeDocumento(rawValue) : {}),
+    }));
   }
 
   function handleResiduoChange(
@@ -1138,6 +1713,7 @@ export default function Clientes() {
         bairro: row.bairro || "",
         cidade: row.cidade || "",
         estado: row.estado || "",
+        endereco_coleta: row.endereco_coleta || "",
 
         cep_faturamento: row.cep_faturamento ?? row.cep ?? "",
         rua_faturamento: row.rua_faturamento ?? row.rua ?? "",
@@ -1148,13 +1724,35 @@ export default function Clientes() {
         estado_faturamento: row.estado_faturamento ?? row.estado ?? "",
 
         email_nf: row.email_nf || "",
+        margem_lucro_percentual: margemLucroDbParaCampo(row.margem_lucro_percentual),
 
-        responsavel_nome: row.responsavel_nome || "",
+        responsavel_nome:
+          row.responsavel_nome ||
+          (row.representante_rg_id
+            ? representantesRg.find((r) => r.id === row.representante_rg_id)?.nome ?? ""
+            : ""),
         telefone: row.telefone || "",
         email: row.email || "",
 
+        representante_rg_id: row.representante_rg_id ?? "",
+        caminhao_id: row.caminhao_id ?? "",
+        equipamentos: row.equipamentos ?? "",
+
         licenca_numero: row.licenca_numero || "",
         validade: row.validade || "",
+        codigo_ibama: row.codigo_ibama || "",
+        descricao_veiculo: row.descricao_veiculo || "",
+        mtr_coleta: row.mtr_coleta || "",
+        destino: row.destino || "",
+        mtr_destino: row.mtr_destino || "",
+        residuo_destino: row.residuo_destino || "",
+        observacoes_operacionais: row.observacoes_operacionais || "",
+        ajudante: row.ajudante || "",
+        solicitante: row.solicitante || "",
+        origem_planilha_cliente: row.origem_planilha_cliente || "",
+        cnpj_raiz: row.cnpj_raiz || derivarDadosUnidadeDocumento(row.cnpj || "").cnpj_raiz,
+        tipo_unidade_cliente:
+          row.tipo_unidade_cliente || derivarDadosUnidadeDocumento(row.cnpj || "").tipo_unidade_cliente,
         status_ativo_desde: row.status_ativo_desde ?? "",
         status_inativo_desde: row.status_inativo_desde ?? "",
 
@@ -1166,7 +1764,8 @@ export default function Clientes() {
 
     try {
       let fat = faturamentoEstruturadoColDisponivelRef.current;
-      const lista = () => montarClientesSelectPrincipalLegacy(fat);
+      let ml = margemLucroColDisponivelRef.current;
+      const lista = () => montarClientesSelectPrincipalLegacy(fat, ml);
       const completa = () => `${lista()}, status_ativo_desde, status_inativo_desde`;
 
       let fullRes = await supabase
@@ -1178,6 +1777,16 @@ export default function Clientes() {
       if (fullRes.error && isMissingFaturamentoEstruturadoColumnsError(fullRes.error)) {
         faturamentoEstruturadoColDisponivelRef.current = false;
         fat = false;
+        fullRes = await supabase
+          .from("clientes")
+          .select(completa())
+          .eq("id", cliente.id)
+          .maybeSingle();
+      }
+
+      if (fullRes.error && isMissingMargemLucroPercentualColumnError(fullRes.error)) {
+        margemLucroColDisponivelRef.current = false;
+        ml = false;
         fullRes = await supabase
           .from("clientes")
           .select(completa())
@@ -1216,7 +1825,12 @@ export default function Clientes() {
     }
 
     if (!form.cnpj.trim()) {
-      alert("Preencha o CNPJ.");
+      alert("Preencha o CNPJ/CPF.");
+      return;
+    }
+
+    if (!documentoPossuiTamanhoValido(form.cnpj)) {
+      alert("Informe um CNPJ com 14 dígitos ou CPF com 11 dígitos.");
       return;
     }
 
@@ -1227,9 +1841,24 @@ export default function Clientes() {
       return;
     }
 
+    const margemParsed = parseMargemLucroPercentual(form.margem_lucro_percentual);
+    if (!margemParsed.ok) {
+      alert(margemParsed.message);
+      return;
+    }
+
     setSalvando(true);
 
     const residuosSerializados = serializarResiduos(residuosValidos);
+    const enderecoColetaEstruturado = montarEnderecoTextoLivreDosCamposEstruturados({
+      cep: form.cep,
+      rua: form.rua,
+      numero: form.numero,
+      complemento: form.complemento,
+      bairro: form.bairro,
+      cidade: form.cidade,
+      estado: form.estado,
+    });
 
     const payloadBase = {
       nome: form.nome.trim(),
@@ -1249,17 +1878,7 @@ export default function Clientes() {
       bairro_faturamento: limparOuNull(form.bairro_faturamento),
       cidade_faturamento: limparOuNull(form.cidade_faturamento),
       estado_faturamento: limparOuNull(form.estado_faturamento),
-      endereco_coleta: limparOuNull(
-        montarEnderecoTextoLivreDosCamposEstruturados({
-          cep: form.cep,
-          rua: form.rua,
-          numero: form.numero,
-          complemento: form.complemento,
-          bairro: form.bairro,
-          cidade: form.cidade,
-          estado: form.estado,
-        })
-      ),
+      endereco_coleta: limparOuNull(form.endereco_coleta || enderecoColetaEstruturado),
       endereco_faturamento: limparOuNull(
         montarEnderecoTextoLivreDosCamposEstruturados({
           cep: form.cep_faturamento,
@@ -1281,23 +1900,59 @@ export default function Clientes() {
       frequencia_coleta: limparOuNull(residuosSerializados.frequencia_coleta),
       licenca_numero: limparOuNull(form.licenca_numero),
       validade: limparOuNull(form.validade),
+      codigo_ibama: limparOuNull(form.codigo_ibama),
+      descricao_veiculo: limparOuNull(form.descricao_veiculo),
+      mtr_coleta: limparOuNull(form.mtr_coleta),
+      destino: limparOuNull(form.destino),
+      mtr_destino: limparOuNull(form.mtr_destino),
+      residuo_destino: limparOuNull(form.residuo_destino),
+      observacoes_operacionais: limparOuNull(form.observacoes_operacionais),
+      ajudante: limparOuNull(form.ajudante),
+      solicitante: limparOuNull(form.solicitante),
+      origem_planilha_cliente: limparOuNull(form.origem_planilha_cliente),
+      cnpj_raiz: limparOuNull(derivarDadosUnidadeDocumento(form.cnpj).cnpj_raiz),
+      tipo_unidade_cliente: limparOuNull(derivarDadosUnidadeDocumento(form.cnpj).tipo_unidade_cliente),
+      representante_rg_id: form.representante_rg_id.trim() || null,
+      caminhao_id: form.caminhao_id.trim() || null,
+      equipamentos: limparOuNull(form.equipamentos),
       status: form.status?.trim() || "Ativo",
     };
 
-    const payloadWithStatusDatas = {
-      ...payloadBase,
-      status_ativo_desde: limparOuNull(form.status_ativo_desde),
-      status_inativo_desde: limparOuNull(form.status_inativo_desde),
+    let usarMargemLucro =
+      margemLucroColDisponivelRef.current || form.margem_lucro_percentual.trim() !== "";
+    let usarStatusDatas = true;
+
+    const montarPayloadSalvar = (): Record<string, unknown> => {
+      const corpo: Record<string, unknown> = { ...payloadBase };
+      if (usarStatusDatas) {
+        corpo.status_ativo_desde = limparOuNull(form.status_ativo_desde);
+        corpo.status_inativo_desde = limparOuNull(form.status_inativo_desde);
+      }
+      if (usarMargemLucro) {
+        corpo.margem_lucro_percentual = margemParsed.value;
+      }
+      return corpo;
     };
 
     let response = editingId
-      ? await supabase.from("clientes").update(payloadWithStatusDatas).eq("id", editingId)
-      : await supabase.from("clientes").insert([payloadWithStatusDatas]);
+      ? await supabase.from("clientes").update(montarPayloadSalvar()).eq("id", editingId)
+      : await supabase.from("clientes").insert([montarPayloadSalvar()]);
 
-    if (response.error && isMissingClientesStatusDateColumnsError(response.error)) {
+    if (response.error && usarStatusDatas && isMissingClientesStatusDateColumnsError(response.error)) {
+      usarStatusDatas = false;
+      usarMargemLucro =
+        margemLucroColDisponivelRef.current || form.margem_lucro_percentual.trim() !== "";
       response = editingId
-        ? await supabase.from("clientes").update(payloadBase).eq("id", editingId)
-        : await supabase.from("clientes").insert([payloadBase]);
+        ? await supabase.from("clientes").update(montarPayloadSalvar()).eq("id", editingId)
+        : await supabase.from("clientes").insert([montarPayloadSalvar()]);
+    }
+
+    if (response.error && usarMargemLucro && isMissingMargemLucroPercentualColumnError(response.error)) {
+      margemLucroColDisponivelRef.current = false;
+      usarMargemLucro = false;
+      response = editingId
+        ? await supabase.from("clientes").update(montarPayloadSalvar()).eq("id", editingId)
+        : await supabase.from("clientes").insert([montarPayloadSalvar()]);
     }
 
     const error: PostgrestError | null = response.error;
@@ -1460,7 +2115,7 @@ export default function Clientes() {
                 className="rg-btn rg-btn--outline"
                 disabled={importandoExcel}
                 onClick={() => document.getElementById("clientes-import-xlsx")?.click()}
-                title="Importa clientes a partir de uma planilha .xlsx (valida e insere/atualiza por CNPJ)"
+                title="Importa clientes a partir de uma planilha .xlsx (valida e insere/atualiza por CNPJ/CPF)"
               >
                 {importandoExcel ? "Importando…" : "Importar (Excel)"}
               </button>
@@ -1579,7 +2234,7 @@ export default function Clientes() {
                     name="cnpj"
                     value={form.cnpj}
                     onChange={handleInputChange}
-                    placeholder="CNPJ"
+                    placeholder="CNPJ/CPF"
                     style={inputStyle}
                   />
 
@@ -1596,7 +2251,7 @@ export default function Clientes() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
                     gap: "12px",
                     marginTop: "12px",
                   }}
@@ -1619,7 +2274,143 @@ export default function Clientes() {
                     title="Inativo desde (opcional)"
                     style={inputStyle}
                   />
+                  <input
+                    name="tipo_unidade_cliente"
+                    value={form.tipo_unidade_cliente}
+                    readOnly
+                    placeholder="Matriz/Filial/Pessoa física"
+                    title="Calculado automaticamente pelo CNPJ/CPF"
+                    style={{ ...inputStyle, background: "#f8fafc" }}
+                  />
+                  <input
+                    name="cnpj_raiz"
+                    value={form.cnpj_raiz}
+                    readOnly
+                    placeholder="Raiz do CNPJ"
+                    title="Raiz usada para agrupar matriz e filiais"
+                    style={{ ...inputStyle, background: "#f8fafc" }}
+                  />
                 </div>
+              </div>
+
+              <div>
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 800,
+                    color: "#334155",
+                    marginBottom: "12px",
+                  }}
+                >
+                  Colunas da aba CLIENTES
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                    gap: "12px",
+                    marginBottom: "12px",
+                  }}
+                >
+                  <input
+                    name="licenca_numero"
+                    value={form.licenca_numero}
+                    onChange={handleInputChange}
+                    placeholder="CADRI"
+                    title="Coluna CADRI da planilha"
+                    style={inputStyle}
+                  />
+                  <input
+                    type="date"
+                    name="validade"
+                    value={form.validade}
+                    onChange={handleInputChange}
+                    placeholder="Venc CADRI"
+                    title="Coluna Venc CADRI da planilha"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="codigo_ibama"
+                    value={form.codigo_ibama}
+                    onChange={handleInputChange}
+                    placeholder="Código IBAMA"
+                    title="Coluna Código IBAMA da planilha"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="descricao_veiculo"
+                    value={form.descricao_veiculo}
+                    onChange={handleInputChange}
+                    placeholder="Descrição veículo"
+                    title="Coluna Descrição veículo da planilha"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="ajudante"
+                    value={form.ajudante}
+                    onChange={handleInputChange}
+                    placeholder="Ajudante"
+                    title="Coluna Ajudante da planilha"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="mtr_coleta"
+                    value={form.mtr_coleta}
+                    onChange={handleInputChange}
+                    placeholder="MTR de Coleta"
+                    title="Coluna MTR de Coleta da planilha"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="destino"
+                    value={form.destino}
+                    onChange={handleInputChange}
+                    placeholder="Destino"
+                    title="Coluna Destino da planilha"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="mtr_destino"
+                    value={form.mtr_destino}
+                    onChange={handleInputChange}
+                    placeholder="MTR de Destino"
+                    title="Coluna MTR de Destino da planilha"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="residuo_destino"
+                    value={form.residuo_destino}
+                    onChange={handleInputChange}
+                    placeholder="Resíduo de Destino"
+                    title="Coluna Resíduo de Destino da planilha"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="solicitante"
+                    value={form.solicitante}
+                    onChange={handleInputChange}
+                    placeholder="Solicitante"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="origem_planilha_cliente"
+                    value={form.origem_planilha_cliente}
+                    onChange={handleInputChange}
+                    placeholder="Origem da planilha"
+                    style={inputStyle}
+                  />
+                </div>
+
+                <textarea
+                  name="observacoes_operacionais"
+                  value={form.observacoes_operacionais}
+                  onChange={handleInputChange}
+                  placeholder="Observações operacionais"
+                  title="Coluna Observações da planilha"
+                  rows={3}
+                  style={{ ...inputStyle, height: "auto", paddingTop: "10px", resize: "vertical" }}
+                />
               </div>
 
               <div>
@@ -1633,6 +2424,22 @@ export default function Clientes() {
                 >
                   Endereço de Coleta
                 </div>
+
+                <textarea
+                  name="endereco_coleta"
+                  value={form.endereco_coleta}
+                  onChange={handleInputChange}
+                  placeholder="Endereço completo (coluna ENDEREÇO da planilha)"
+                  title="Texto original da coluna ENDEREÇO. Os campos estruturados abaixo podem ser preenchidos quando houver separação por CEP/rua/número."
+                  rows={2}
+                  style={{
+                    ...inputStyle,
+                    height: "auto",
+                    paddingTop: "10px",
+                    resize: "vertical",
+                    marginBottom: "12px",
+                  }}
+                />
 
                 <div
                   style={{
@@ -1837,6 +2644,149 @@ export default function Clientes() {
                     style={inputStyle}
                   />
                 </div>
+
+                <div style={{ marginTop: "10px" }}>
+                  <input
+                    name="margem_lucro_percentual"
+                    value={form.margem_lucro_percentual}
+                    onChange={handleInputChange}
+                    placeholder="Margem de lucro (%) — ex.: 12,5"
+                    style={inputStyle}
+                    inputMode="decimal"
+                    aria-label="Margem de lucro percentual do cliente"
+                  />
+                  <p style={{ margin: "6px 0 0", fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Opcional. Usada no faturamento; deixe em branco se não aplicável.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 800,
+                    color: "#334155",
+                    marginBottom: "12px",
+                  }}
+                >
+                  Representante RG
+                </div>
+
+                <select
+                  id="cliente-representante-rg"
+                  name="representante_rg_id"
+                  value={form.representante_rg_id}
+                  onChange={handleInputChange}
+                  aria-label="Representante RG"
+                  style={inputStyle}
+                >
+                  <option value="">Selecione o representante RG</option>
+                  {representantesRg.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.nome}
+                    </option>
+                  ))}
+                </select>
+
+                <p style={{ margin: "10px 0 0", fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                  Cadastro em <strong>Cadastros → Representantes RG</strong>. O nome selecionado é
+                  copiado para o campo "Responsável" automaticamente.
+                </p>
+
+                <div style={{ marginTop: "22px" }}>
+                  <div
+                    style={{
+                      fontSize: "15px",
+                      fontWeight: 800,
+                      color: "#334155",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    Veículo preferencial
+                  </div>
+                  <label
+                    htmlFor="cliente-veiculo-select"
+                    style={{
+                      display: "block",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      color: "#475569",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Selecionar veículo
+                  </label>
+                  <select
+                    id="cliente-veiculo-select"
+                    name="caminhao_id"
+                    value={form.caminhao_id}
+                    onChange={handleInputChange}
+                    aria-label="Veículo da frota (tabela caminhoes)"
+                    style={inputStyle}
+                  >
+                    <option value="">Selecione o veículo</option>
+                    {veiculosCaminhoes.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.modelo?.trim() ? `${v.placa} — ${v.modelo.trim()}` : v.placa}
+                      </option>
+                    ))}
+                  </select>
+                  <p
+                    style={{
+                      margin: "8px 0 0",
+                      fontSize: "12px",
+                      color: "#64748b",
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    Lista ligada ao cadastro em <strong>Cadastros → Veículos</strong>. Para incluir
+                    ou editar veículos, use essa página.
+                  </p>
+                </div>
+
+                <div style={{ marginTop: "22px" }}>
+                  <div
+                    style={{
+                      fontSize: "15px",
+                      fontWeight: 800,
+                      color: "#334155",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    Equipamentos
+                  </div>
+                  <label
+                    htmlFor="cliente-equipamentos"
+                    style={{
+                      display: "block",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      color: "#475569",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Lista de equipamentos desejados
+                  </label>
+                  <textarea
+                    id="cliente-equipamentos"
+                    name="equipamentos"
+                    value={form.equipamentos}
+                    onChange={handleInputChange}
+                    placeholder="Ex.: caçamba 3 m³, lona, EPIs..."
+                    rows={4}
+                    style={{
+                      ...inputStyle,
+                      width: "100%",
+                      height: "auto",
+                      minHeight: "96px",
+                      paddingTop: "10px",
+                      resize: "vertical",
+                      fontFamily: "inherit",
+                      lineHeight: 1.45,
+                    }}
+                  />
+                </div>
               </div>
 
               <div>
@@ -1981,43 +2931,6 @@ export default function Clientes() {
                 </div>
               </div>
 
-              <div>
-                <div
-                  style={{
-                    fontSize: "15px",
-                    fontWeight: 800,
-                    color: "#334155",
-                    marginBottom: "12px",
-                  }}
-                >
-                  Dados para MTR
-                </div>
-
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: "12px",
-                  }}
-                >
-                  <input
-                    name="licenca_numero"
-                    value={form.licenca_numero}
-                    onChange={handleInputChange}
-                    placeholder="Número da licença ambiental"
-                    style={inputStyle}
-                  />
-
-                  <input
-                    type="date"
-                    name="validade"
-                    value={form.validade}
-                    onChange={handleInputChange}
-                    style={inputStyle}
-                  />
-                </div>
-              </div>
-
               <div
                 style={{
                   display: "flex",
@@ -2108,8 +3021,8 @@ export default function Clientes() {
             <input
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
-              placeholder="Busca (aguarda digitar — nome, razão social, CNPJ, cidade, e-mail NF, resíduo, endereços…)"
-              title="Filtra por nome, razão social, CNPJ, cidade, tipo de resíduo, status, e-mail NF ou endereços de coleta/faturamento."
+              placeholder="Busca (aguarda digitar — nome, razão social, CNPJ/CPF, cidade, e-mail NF, resíduo, endereços, MTR, destino…)"
+              title="Filtra por nome, razão social, CNPJ/CPF, cidade, resíduo, status, e-mail NF, endereços, MTR, destino e dados operacionais."
               style={{
                 flex: "1 1 280px",
                 width: "100%",
@@ -2127,6 +3040,116 @@ export default function Clientes() {
             />
           </div>
 
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+              marginBottom: "14px",
+            }}
+          >
+            <div
+              role="tablist"
+              aria-label="Modo de exibição da lista"
+              style={{
+                display: "inline-flex",
+                background: "#f1f5f9",
+                border: "1px solid #e2e8f0",
+                borderRadius: "10px",
+                padding: "3px",
+                gap: "2px",
+              }}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={modoTabela === "compacta"}
+                onClick={() => setModoTabela("compacta")}
+                title="Vista compacta — colunas-chave para faturamento e comercial"
+                style={{
+                  padding: "7px 14px",
+                  borderRadius: "8px",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  background: modoTabela === "compacta" ? "#ffffff" : "transparent",
+                  color: modoTabela === "compacta" ? "#0f172a" : "#475569",
+                  boxShadow: modoTabela === "compacta" ? "0 1px 2px rgba(15, 23, 42, 0.08)" : "none",
+                }}
+              >
+                Vista compacta
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={modoTabela === "planilha"}
+                onClick={() => setModoTabela("planilha")}
+                title="Vista planilha — réplica da aba CLIENTES (CADRI, IBAMA, veículo, MTRs, destino, ajudante)"
+                style={{
+                  padding: "7px 14px",
+                  borderRadius: "8px",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  background: modoTabela === "planilha" ? "#ffffff" : "transparent",
+                  color: modoTabela === "planilha" ? "#0f172a" : "#475569",
+                  boxShadow: modoTabela === "planilha" ? "0 1px 2px rgba(15, 23, 42, 0.08)" : "none",
+                }}
+              >
+                Vista planilha
+              </button>
+            </div>
+
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                fontSize: "13px",
+                color: "#475569",
+                fontWeight: 600,
+              }}
+              title="Filtra a página atual por situação do CADRI"
+            >
+              CADRI:
+              <select
+                value={filtroVencCadri}
+                onChange={(e) => setFiltroVencCadri(e.target.value as FiltroVencCadri)}
+                style={{
+                  height: "36px",
+                  padding: "0 10px",
+                  borderRadius: "8px",
+                  border: "1px solid #cbd5e1",
+                  background: "#ffffff",
+                  fontSize: "13px",
+                  color: "#0f172a",
+                  fontWeight: 600,
+                }}
+              >
+                {FILTRO_VENC_CADRI_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              {filtroVencCadri !== "todos" ? (
+                <span
+                  style={{
+                    fontSize: "12px",
+                    color: "#64748b",
+                    fontWeight: 500,
+                  }}
+                >
+                  ({totalFiltradoLocalmente} de {clientes.length} na página)
+                </span>
+              ) : null}
+            </label>
+          </div>
+
           {loading ? (
             <div
               style={{
@@ -2139,11 +3162,17 @@ export default function Clientes() {
               Carregando clientes...
             </div>
           ) : (
-            <div style={{ overflowX: "hidden", WebkitOverflowScrolling: "touch" }}>
+            <div
+              style={{
+                overflowX: modoTabela === "planilha" ? "auto" : "hidden",
+                WebkitOverflowScrolling: "touch",
+              }}
+            >
               <table
                 style={{
                   width: "100%",
-                  tableLayout: "fixed",
+                  tableLayout: modoTabela === "planilha" ? "auto" : "fixed",
+                  minWidth: modoTabela === "planilha" ? 1480 : undefined,
                   borderCollapse: "collapse",
                   fontSize: "14px",
                 }}
@@ -2158,7 +3187,7 @@ export default function Clientes() {
                     <th
                       style={{
                         ...thStyle,
-                        width: "4%",
+                        width: modoTabela === "planilha" ? 56 : "4%",
                         minWidth: 56,
                         maxWidth: 72,
                         textAlign: "center",
@@ -2168,225 +3197,561 @@ export default function Clientes() {
                     >
                       Inativo
                     </th>
-                    <th style={{ ...thStyle, width: "18%" }} title="Nome e localização (cidade e UF)">
-                      Cliente
-                    </th>
-                    <th style={{ ...thStyle, width: "16%" }}>Razão social</th>
-                    <th style={{ ...thStyle, width: "10%", whiteSpace: "nowrap" }}>CNPJ</th>
-                    <th style={{ ...thStyle, width: "12%" }}>E-mail NF</th>
-                    <th style={{ ...thStyle, width: "14%" }}>Resíduo</th>
-                    <th style={{ ...thStyle, width: "5%", whiteSpace: "nowrap" }}>Classe</th>
                     <th
-                      scope="col"
                       style={{
                         ...thStyle,
-                        width: "7%",
-                        whiteSpace: "normal",
-                        lineHeight: 1.25,
+                        width: modoTabela === "planilha" ? 40 : "3%",
+                        minWidth: 40,
+                        textAlign: "center",
+                        padding: "10px 4px",
                       }}
-                      title="Licença válida até"
+                      title="Expandir linha para ver todos os campos da planilha"
+                      aria-label="Expandir"
                     >
-                      Validade
+                      <span aria-hidden="true">▾</span>
                     </th>
-                    <th style={{ ...thStyle, width: "6%", whiteSpace: "nowrap" }}>Status</th>
-                    <th style={{ ...thStyle, width: "8%", whiteSpace: "nowrap" }}>Ações</th>
+
+                    {modoTabela === "compacta" ? (
+                      <>
+                        <th style={{ ...thStyle, width: "16%" }} title="Nome e localização (cidade e UF)">
+                          Cliente
+                        </th>
+                        <th style={{ ...thStyle, width: "13%" }}>Razão social</th>
+                        <th style={{ ...thStyle, width: "9%", whiteSpace: "nowrap" }}>CNPJ/CPF</th>
+                        <th style={{ ...thStyle, width: "10%" }}>E-mail NF</th>
+                        <th style={{ ...thStyle, width: "5%", whiteSpace: "nowrap" }} title="Margem de lucro (%)">
+                          Margem %
+                        </th>
+                        <th style={{ ...thStyle, width: "10%" }}>Resíduo</th>
+                        <th style={{ ...thStyle, width: "10%" }} title="Veículo, destino e MTR da planilha">
+                          Operação
+                        </th>
+                        <th style={{ ...thStyle, width: "5%", whiteSpace: "nowrap" }}>Classe</th>
+                        <th
+                          scope="col"
+                          style={{
+                            ...thStyle,
+                            width: "7%",
+                            whiteSpace: "normal",
+                            lineHeight: 1.25,
+                          }}
+                          title="Validade do CADRI — verde (ok), amarelo (≤90d) e vermelho (≤30d ou vencido)"
+                        >
+                          Venc CADRI
+                        </th>
+                        <th style={{ ...thStyle, width: "5%", whiteSpace: "nowrap" }}>Status</th>
+                        <th style={{ ...thStyle, width: "8%", whiteSpace: "nowrap" }}>Ações</th>
+                      </>
+                    ) : (
+                      <>
+                        <th style={{ ...thStyle, minWidth: 220 }}>Razão social</th>
+                        <th style={{ ...thStyle, minWidth: 150, whiteSpace: "nowrap" }}>CNPJ/CPF</th>
+                        <th style={{ ...thStyle, minWidth: 120 }}>Cidade</th>
+                        <th style={{ ...thStyle, minWidth: 110 }} title="CADRI da planilha">
+                          CADRI
+                        </th>
+                        <th
+                          style={{ ...thStyle, minWidth: 130, whiteSpace: "nowrap" }}
+                          title="Validade do CADRI — verde (ok), amarelo (≤90d) e vermelho (≤30d ou vencido)"
+                        >
+                          Venc CADRI
+                        </th>
+                        <th style={{ ...thStyle, minWidth: 100, whiteSpace: "nowrap" }} title="Código IBAMA">
+                          IBAMA
+                        </th>
+                        <th style={{ ...thStyle, minWidth: 110 }} title="Descrição do veículo">
+                          Veículo
+                        </th>
+                        <th style={{ ...thStyle, minWidth: 140 }}>Resíduo</th>
+                        <th style={{ ...thStyle, minWidth: 130 }}>MTR de coleta</th>
+                        <th style={{ ...thStyle, minWidth: 130 }}>Destino</th>
+                        <th style={{ ...thStyle, minWidth: 130 }}>MTR de destino</th>
+                        <th style={{ ...thStyle, minWidth: 140 }}>Resíduo de destino</th>
+                        <th style={{ ...thStyle, minWidth: 80, whiteSpace: "nowrap" }}>Ajudante</th>
+                        <th style={{ ...thStyle, minWidth: 110, whiteSpace: "nowrap" }}>Ações</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
 
                 <tbody>
-                  {clientes.map((cliente) => {
+                  {clientesFiltrados.map((cliente) => {
                     const linhaInativa = !clienteEstaAtivo(cliente.status);
+                    const expandida = linhasExpandidas.has(cliente.id);
+                    const dias = calcularDiasParaVencer(cliente.validade);
+                    const venc = classificarVencCadri(dias);
+                    const colSpanDetalhe = modoTabela === "compacta" ? 13 : 16;
                     return (
-                    <tr
-                      key={cliente.id}
-                      onClick={(e) => {
-                        const el = e.target as HTMLElement | null;
-                        if (el?.closest?.("button,a,input,select,textarea,label")) return;
-                        void handleEditar(cliente);
-                      }}
-                      style={{
-                        borderBottom: "1px solid #eef2f7",
-                        backgroundColor: linhaInativa ? "#fef2f2" : undefined,
-                      }}
-                    >
-                      <td
-                        style={{
-                          ...tdStyle,
-                          ...tdNowrap,
-                          width: "4%",
-                          minWidth: 56,
-                          textAlign: "center",
-                          verticalAlign: "middle",
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={linhaInativa}
-                          disabled={alternandoStatusId === cliente.id}
-                          onChange={(e) => void alternarInativoRapido(cliente, e.target.checked)}
-                          aria-label={
-                            linhaInativa
-                              ? "Desmarcar inativo (voltar a ativo)"
-                              : "Marcar como inativo"
-                          }
-                          title={linhaInativa ? "Cliente inativo — desmarque para reativar" : "Marcar como inativo"}
-                          style={{ width: 18, height: 18, cursor: alternandoStatusId === cliente.id ? "wait" : "pointer" }}
-                        />
-                      </td>
-                      <td
-                        style={{ ...tdStyle, cursor: "pointer" }}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => void handleEditar(cliente)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            void handleEditar(cliente);
-                          }
-                        }}
-                        title="Clique para abrir as informações do cliente"
-                      >
-                        {(() => {
-                          const nomeBruto = (cliente.nome ?? "").trim();
-                          const sep = " — ";
-                          const idx = nomeBruto.indexOf(sep);
-                          const parteNome = idx >= 0 ? nomeBruto.slice(0, idx) : nomeBruto;
-                          const parteSufixo = idx >= 0 ? nomeBruto.slice(idx) : "";
-                          const labelEdicao =
-                            parteNome || cliente.razao_social?.trim() || "cliente";
-                          return (
+                      <Fragment key={cliente.id}>
+                        <tr
+                          onClick={(e) => {
+                            const el = e.target as HTMLElement | null;
+                            if (el?.closest?.("button,a,input,select,textarea,label")) return;
+                            setClienteDetalhe(cliente);
+                          }}
+                          style={{
+                            borderBottom: expandida ? "none" : "1px solid #eef2f7",
+                            backgroundColor: linhaInativa ? "#fef2f2" : undefined,
+                            cursor: "pointer",
+                          }}
+                          title="Clique para ver todas as informações deste cliente"
+                        >
+                          <td
+                            style={{
+                              ...tdStyle,
+                              ...tdNowrap,
+                              width: modoTabela === "planilha" ? 56 : "4%",
+                              minWidth: 56,
+                              textAlign: "center",
+                              verticalAlign: "middle",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={linhaInativa}
+                              disabled={alternandoStatusId === cliente.id}
+                              onChange={(e) => void alternarInativoRapido(cliente, e.target.checked)}
+                              aria-label={
+                                linhaInativa
+                                  ? "Desmarcar inativo (voltar a ativo)"
+                                  : "Marcar como inativo"
+                              }
+                              title={linhaInativa ? "Cliente inativo — desmarque para reativar" : "Marcar como inativo"}
+                              style={{ width: 18, height: 18, cursor: alternandoStatusId === cliente.id ? "wait" : "pointer" }}
+                            />
+                          </td>
+                          <td
+                            style={{
+                              ...tdStyle,
+                              ...tdNowrap,
+                              width: modoTabela === "planilha" ? 40 : "3%",
+                              textAlign: "center",
+                              verticalAlign: "middle",
+                              padding: "8px 4px",
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                alternarLinhaExpandida(cliente.id);
+                              }}
+                              aria-expanded={expandida}
+                              aria-label={expandida ? "Recolher detalhes" : "Expandir detalhes da planilha"}
+                              title={expandida ? "Recolher" : "Ver todos os campos da planilha"}
+                              style={{
+                                background: expandida ? "#0f172a" : "#ffffff",
+                                color: expandida ? "#ffffff" : "#475569",
+                                border: "1px solid #cbd5e1",
+                                borderRadius: "6px",
+                                width: 26,
+                                height: 26,
+                                fontSize: 14,
+                                lineHeight: 1,
+                                cursor: "pointer",
+                                fontWeight: 800,
+                              }}
+                            >
+                              {expandida ? "▾" : "▸"}
+                            </button>
+                          </td>
+
+                          {modoTabela === "compacta" ? (
                             <>
-                              <div
-                                style={{
-                                  fontWeight: 700,
-                                  color: "#0f172a",
-                                  lineHeight: 1.4,
-                                  wordBreak: "break-word",
+                              <td
+                                style={{ ...tdStyle, cursor: "pointer" }}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setClienteDetalhe(cliente)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    setClienteDetalhe(cliente);
+                                  }
                                 }}
+                                title="Clique para ver todas as informações deste cliente"
                               >
-                                {parteNome ? (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleEditar(cliente)}
-                                      style={nomeClienteEditarBtnStyle}
-                                      title="Abrir cadastro para edição"
-                                      aria-label={`Editar ${labelEdicao}`}
-                                    >
-                                      {parteNome}
-                                    </button>
-                                    {parteSufixo ? (
-                                      <span style={{ fontWeight: 700, color: "#0f172a" }}>{parteSufixo}</span>
-                                    ) : null}
-                                  </>
-                                ) : cliente.razao_social?.trim() ? (
+                                {(() => {
+                                  const nomeBruto = (cliente.nome ?? "").trim();
+                                  const sep = " — ";
+                                  const idx = nomeBruto.indexOf(sep);
+                                  const parteNome = idx >= 0 ? nomeBruto.slice(0, idx) : nomeBruto;
+                                  const parteSufixo = idx >= 0 ? nomeBruto.slice(idx) : "";
+                                  const labelDetalhe =
+                                    parteNome || cliente.razao_social?.trim() || "cliente";
+                                  return (
+                                    <>
+                                      <div
+                                        style={{
+                                          fontWeight: 700,
+                                          color: "#0f172a",
+                                          lineHeight: 1.4,
+                                          wordBreak: "break-word",
+                                        }}
+                                      >
+                                        {parteNome ? (
+                                          <>
+                                            <button
+                                              type="button"
+                                              onClick={() => setClienteDetalhe(cliente)}
+                                              style={nomeClienteEditarBtnStyle}
+                                              title="Ver todas as informações"
+                                              aria-label={`Ver informações de ${labelDetalhe}`}
+                                            >
+                                              {parteNome}
+                                            </button>
+                                            {parteSufixo ? (
+                                              <span style={{ fontWeight: 700, color: "#0f172a" }}>{parteSufixo}</span>
+                                            ) : null}
+                                          </>
+                                        ) : cliente.razao_social?.trim() ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => setClienteDetalhe(cliente)}
+                                            style={nomeClienteEditarBtnStyle}
+                                            title="Ver todas as informações"
+                                            aria-label={`Ver informações de ${cliente.razao_social.trim()}`}
+                                          >
+                                            {cliente.razao_social.trim()}
+                                          </button>
+                                        ) : (
+                                          <span style={{ color: "#64748b" }}>—</span>
+                                        )}
+                                      </div>
+                                      <div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>
+                                        {[cliente.cidade, cliente.estado].filter(Boolean).join(" · ") || "—"}
+                                      </div>
+                                    </>
+                                  );
+                                })()}
+                              </td>
+                              <td style={tdStyle}>{cliente.razao_social || "—"}</td>
+                              <td style={{ ...tdStyle, ...tdNowrap }}>
+                                <div>{cliente.cnpj || "—"}</div>
+                                <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                                  {cliente.tipo_unidade_cliente || "-"}
+                                </div>
+                              </td>
+                              <td
+                                style={{
+                                  ...tdStyle,
+                                  wordBreak: "break-all",
+                                }}
+                                title={cliente.email_nf || undefined}
+                              >
+                                {cliente.email_nf || "-"}
+                              </td>
+                              <td style={{ ...tdStyle, ...tdNowrap }} title="Margem de lucro (%)">
+                                {margemLucroClienteRotuloLista(cliente.margem_lucro_percentual)}
+                              </td>
+                              <td style={tdStyle}>{cliente.tipo_residuo || "-"}</td>
+                              <td
+                                style={tdStyle}
+                                title={[
+                                  cliente.descricao_veiculo,
+                                  cliente.destino,
+                                  cliente.mtr_coleta,
+                                  cliente.observacoes_operacionais,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" | ")}
+                              >
+                                {[cliente.descricao_veiculo, cliente.destino, cliente.mtr_coleta]
+                                  .filter(Boolean)
+                                  .join(" · ") || "-"}
+                              </td>
+                              <td style={{ ...tdStyle, ...tdNowrap }}>{cliente.classificacao || "-"}</td>
+                              <td
+                                style={{ ...tdStyle, ...tdNowrap }}
+                                title={venc.rotulo || (cliente.validade ? "Validade do CADRI" : "Sem CADRI cadastrado")}
+                              >
+                                {cliente.validade ? (
+                                  <span
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                      padding: "3px 8px",
+                                      borderRadius: "999px",
+                                      background: venc.bg,
+                                      color: venc.fg,
+                                      border: `1px solid ${venc.borda}`,
+                                      fontSize: "12px",
+                                      fontWeight: 700,
+                                    }}
+                                  >
+                                    {formatarData(cliente.validade)}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: "#94a3b8" }}>-</span>
+                                )}
+                              </td>
+                              <td style={{ ...tdStyle, ...tdNowrap }}>{cliente.status || "Ativo"}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td style={tdStyle}>
+                                <div
+                                  style={{
+                                    fontWeight: 700,
+                                    color: "#0f172a",
+                                    wordBreak: "break-word",
+                                  }}
+                                >
                                   <button
                                     type="button"
-                                    onClick={() => void handleEditar(cliente)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setClienteDetalhe(cliente);
+                                    }}
                                     style={nomeClienteEditarBtnStyle}
-                                    title="Abrir cadastro para edição"
-                                    aria-label={`Editar ${cliente.razao_social.trim()}`}
+                                    title="Ver todas as informações"
                                   >
-                                    {cliente.razao_social.trim()}
+                                    {cliente.razao_social?.trim() || cliente.nome?.trim() || "—"}
                                   </button>
+                                </div>
+                                {cliente.nome && cliente.razao_social && cliente.nome !== cliente.razao_social ? (
+                                  <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                                    {cliente.nome}
+                                  </div>
+                                ) : null}
+                              </td>
+                              <td style={{ ...tdStyle, ...tdNowrap }}>
+                                <div>{cliente.cnpj || "—"}</div>
+                                <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                                  {cliente.tipo_unidade_cliente || "-"}
+                                </div>
+                              </td>
+                              <td style={{ ...tdStyle, ...tdNowrap }}>
+                                {[cliente.cidade, cliente.estado].filter(Boolean).join(" · ") || "-"}
+                              </td>
+                              <td style={tdStyle} title={cliente.licenca_numero || undefined}>
+                                {cliente.licenca_numero || "-"}
+                              </td>
+                              <td
+                                style={{ ...tdStyle, ...tdNowrap }}
+                                title={venc.rotulo || (cliente.validade ? "Validade do CADRI" : "Sem CADRI cadastrado")}
+                              >
+                                {cliente.validade ? (
+                                  <span
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                      padding: "3px 8px",
+                                      borderRadius: "999px",
+                                      background: venc.bg,
+                                      color: venc.fg,
+                                      border: `1px solid ${venc.borda}`,
+                                      fontSize: "12px",
+                                      fontWeight: 700,
+                                    }}
+                                  >
+                                    {formatarData(cliente.validade)}
+                                  </span>
                                 ) : (
-                                  <span style={{ color: "#64748b" }}>—</span>
+                                  <span style={{ color: "#94a3b8" }}>-</span>
                                 )}
-                              </div>
-                              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>
-                                {[cliente.cidade, cliente.estado].filter(Boolean).join(" · ") || "—"}
-                              </div>
+                              </td>
+                              <td style={tdStyle}>{cliente.codigo_ibama || "-"}</td>
+                              <td style={tdStyle}>{cliente.descricao_veiculo || "-"}</td>
+                              <td style={tdStyle}>{cliente.tipo_residuo || "-"}</td>
+                              <td style={tdStyle}>{cliente.mtr_coleta || "-"}</td>
+                              <td style={tdStyle}>{cliente.destino || "-"}</td>
+                              <td style={tdStyle}>{cliente.mtr_destino || "-"}</td>
+                              <td style={tdStyle}>{cliente.residuo_destino || "-"}</td>
+                              <td style={{ ...tdStyle, ...tdNowrap }}>{cliente.ajudante || "-"}</td>
                             </>
-                          );
-                        })()}
-                      </td>
-                      <td style={tdStyle}>{cliente.razao_social || "—"}</td>
-                      <td style={{ ...tdStyle, ...tdNowrap }}>{cliente.cnpj || "—"}</td>
-                      <td
-                        style={{
-                          ...tdStyle,
-                          wordBreak: "break-all",
-                        }}
-                        title={cliente.email_nf || undefined}
-                      >
-                        {cliente.email_nf || "-"}
-                      </td>
-                      <td style={tdStyle}>{cliente.tipo_residuo || "-"}</td>
-                      <td style={{ ...tdStyle, ...tdNowrap }}>{cliente.classificacao || "-"}</td>
-                      <td style={{ ...tdStyle, ...tdNowrap }}>{formatarData(cliente.validade)}</td>
-                      <td style={{ ...tdStyle, ...tdNowrap }}>{cliente.status || "Ativo"}</td>
-                      <td
-                        style={{
-                          ...tdStyle,
-                          ...tdNowrap,
-                          verticalAlign: "middle",
-                        }}
-                      >
-                        <div
-                          role="group"
-                          aria-label="Ações do cliente"
-                          style={{
-                            display: "flex",
-                            flexDirection: "row",
-                            flexWrap: "nowrap",
-                            alignItems: "center",
-                            gap: "5px",
-                          }}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => void handleEditar(cliente)}
+                          )}
+
+                          <td
                             style={{
-                              flex: "0 0 auto",
-                              background: "#16a34a",
-                              color: "#ffffff",
-                              border: "none",
-                              borderRadius: "6px",
-                              padding: "5px 9px",
-                              fontWeight: 700,
-                              fontSize: "11px",
-                              lineHeight: 1.2,
-                              cursor: "pointer",
-                              boxShadow: "0 1px 2px rgba(22, 163, 74, 0.25)",
+                              ...tdStyle,
+                              ...tdNowrap,
+                              verticalAlign: "middle",
                             }}
                           >
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(cliente.id)}
+                            <div
+                              role="group"
+                              aria-label="Ações do cliente"
+                              style={{
+                                display: "flex",
+                                flexDirection: "row",
+                                flexWrap: "nowrap",
+                                alignItems: "center",
+                                gap: "5px",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => void handleEditar(cliente)}
+                                style={{
+                                  flex: "0 0 auto",
+                                  background: "#16a34a",
+                                  color: "#ffffff",
+                                  border: "none",
+                                  borderRadius: "6px",
+                                  padding: "5px 9px",
+                                  fontWeight: 700,
+                                  fontSize: "11px",
+                                  lineHeight: 1.2,
+                                  cursor: "pointer",
+                                  boxShadow: "0 1px 2px rgba(22, 163, 74, 0.25)",
+                                }}
+                              >
+                                Editar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(cliente.id)}
+                                style={{
+                                  flex: "0 0 auto",
+                                  background: "#ffffff",
+                                  color: "#b91c1c",
+                                  border: "1px solid #fecaca",
+                                  borderRadius: "6px",
+                                  padding: "5px 9px",
+                                  fontWeight: 700,
+                                  fontSize: "11px",
+                                  lineHeight: 1.2,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {expandida ? (
+                          <tr
                             style={{
-                              flex: "0 0 auto",
-                              background: "#ffffff",
-                              color: "#b91c1c",
-                              border: "1px solid #fecaca",
-                              borderRadius: "6px",
-                              padding: "5px 9px",
-                              fontWeight: 700,
-                              fontSize: "11px",
-                              lineHeight: 1.2,
-                              cursor: "pointer",
+                              borderBottom: "1px solid #eef2f7",
+                              backgroundColor: linhaInativa ? "#fef2f2" : "#f8fafc",
                             }}
                           >
-                            Excluir
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
+                            <td colSpan={colSpanDetalhe} style={{ padding: "14px 18px" }}>
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                                  gap: "12px 18px",
+                                  fontSize: "13px",
+                                  color: "#0f172a",
+                                }}
+                              >
+                                {[
+                                  { rotulo: "CADRI", valor: cliente.licenca_numero },
+                                  {
+                                    rotulo: "Venc CADRI",
+                                    valor: cliente.validade ? formatarData(cliente.validade) : null,
+                                    tag: venc.rotulo || undefined,
+                                    tagBg: venc.bg,
+                                    tagFg: venc.fg,
+                                    tagBorda: venc.borda,
+                                  },
+                                  { rotulo: "Código IBAMA", valor: cliente.codigo_ibama },
+                                  { rotulo: "Veículo", valor: cliente.descricao_veiculo },
+                                  { rotulo: "Resíduo", valor: cliente.tipo_residuo },
+                                  { rotulo: "Classe", valor: cliente.classificacao },
+                                  { rotulo: "MTR de coleta", valor: cliente.mtr_coleta },
+                                  { rotulo: "Destino", valor: cliente.destino },
+                                  { rotulo: "MTR de destino", valor: cliente.mtr_destino },
+                                  { rotulo: "Resíduo de destino", valor: cliente.residuo_destino },
+                                  { rotulo: "Ajudante", valor: cliente.ajudante },
+                                  { rotulo: "Solicitante", valor: cliente.solicitante },
+                                  { rotulo: "Origem (planilha)", valor: cliente.origem_planilha_cliente },
+                                  { rotulo: "E-mail NF", valor: cliente.email_nf },
+                                ].map((item) => (
+                                  <div key={item.rotulo}>
+                                    <div
+                                      style={{
+                                        fontSize: "11px",
+                                        color: "#64748b",
+                                        fontWeight: 700,
+                                        textTransform: "uppercase",
+                                        letterSpacing: "0.04em",
+                                        marginBottom: "3px",
+                                      }}
+                                    >
+                                      {item.rotulo}
+                                    </div>
+                                    <div style={{ wordBreak: "break-word" }}>
+                                      {item.valor ? (
+                                        item.tag ? (
+                                          <span
+                                            style={{
+                                              display: "inline-flex",
+                                              alignItems: "center",
+                                              gap: "6px",
+                                              padding: "3px 8px",
+                                              borderRadius: "999px",
+                                              background: item.tagBg,
+                                              color: item.tagFg,
+                                              border: `1px solid ${item.tagBorda}`,
+                                              fontSize: "12px",
+                                              fontWeight: 700,
+                                            }}
+                                            title={item.tag}
+                                          >
+                                            {item.valor}
+                                          </span>
+                                        ) : (
+                                          item.valor
+                                        )
+                                      ) : (
+                                        <span style={{ color: "#94a3b8" }}>—</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {cliente.observacoes_operacionais ? (
+                                <div style={{ marginTop: "12px" }}>
+                                  <div
+                                    style={{
+                                      fontSize: "11px",
+                                      color: "#64748b",
+                                      fontWeight: 700,
+                                      textTransform: "uppercase",
+                                      letterSpacing: "0.04em",
+                                      marginBottom: "3px",
+                                    }}
+                                  >
+                                    Observações operacionais
+                                  </div>
+                                  <div
+                                    style={{
+                                      whiteSpace: "pre-wrap",
+                                      wordBreak: "break-word",
+                                      color: "#334155",
+                                    }}
+                                  >
+                                    {cliente.observacoes_operacionais}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
                   })}
 
-                  {clientes.length === 0 && (
+                  {clientesFiltrados.length === 0 && (
                     <tr>
                       <td
-                        colSpan={10}
+                        colSpan={modoTabela === "compacta" ? 13 : 16}
                         style={{
                           textAlign: "center",
                           padding: "28px 12px",
                           color: "#64748b",
                         }}
                       >
-                        Nenhum cliente encontrado.
+                        {clientes.length === 0
+                          ? "Nenhum cliente encontrado."
+                          : "Nenhum cliente corresponde ao filtro de CADRI selecionado nesta página."}
                       </td>
                     </tr>
                   )}
@@ -2474,6 +3839,23 @@ export default function Clientes() {
         </div>
       </div>
       </div>
+
+      {clienteDetalhe
+        ? createPortal(
+            <ClienteDetalheModal
+              cliente={clienteDetalhe}
+              representanteRotulo={rotuloRepresentanteRgCliente(clienteDetalhe)}
+              veiculoRotulo={rotuloVeiculoCliente(clienteDetalhe)}
+              onClose={() => setClienteDetalhe(null)}
+              onEditar={() => {
+                const c = clienteDetalhe;
+                setClienteDetalhe(null);
+                void handleEditar(c);
+              }}
+            />,
+            document.body
+          )
+        : null}
     </MainLayout>
   );
 }
@@ -2517,7 +3899,7 @@ const tdNowrap: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-/** Botão invisível com aspecto de hiperligação — abre o formulário de edição (mesmo fluxo que «Editar»). */
+/** Botão invisível com aspecto de hiperligação — abre o modal de detalhe completo do cliente. */
 const nomeClienteEditarBtnStyle: React.CSSProperties = {
   display: "inline",
   padding: 0,
@@ -2534,3 +3916,419 @@ const nomeClienteEditarBtnStyle: React.CSSProperties = {
   textDecorationThickness: "1px",
   textDecorationColor: "rgba(21, 128, 61, 0.4)",
 };
+
+type ClienteDetalheModalProps = {
+  cliente: Cliente;
+  representanteRotulo: string;
+  veiculoRotulo: string;
+  onClose: () => void;
+  onEditar: () => void;
+};
+
+function ClienteDetalheModal({
+  cliente,
+  representanteRotulo,
+  veiculoRotulo,
+  onClose,
+  onEditar,
+}: ClienteDetalheModalProps) {
+  const dias = calcularDiasParaVencer(cliente.validade);
+  const venc = classificarVencCadri(dias);
+
+  const enderecoColeta = (() => {
+    const partes: string[] = [];
+    const linha = [cliente.rua?.trim(), cliente.numero?.trim()].filter(Boolean).join(", ");
+    if (linha) partes.push(linha);
+    if (cliente.complemento?.trim()) partes.push(cliente.complemento.trim());
+    if (cliente.bairro?.trim()) partes.push(cliente.bairro.trim());
+    const local = [cliente.cidade?.trim(), cliente.estado?.trim()].filter(Boolean).join("/");
+    if (local) partes.push(local);
+    if (cliente.cep?.trim()) partes.push(`CEP ${cliente.cep.trim()}`);
+    const estruturado = partes.join(" · ");
+    return estruturado || cliente.endereco_coleta?.trim() || "—";
+  })();
+
+  const enderecoFaturamento = (() => {
+    const partes: string[] = [];
+    const linha = [cliente.rua_faturamento?.trim(), cliente.numero_faturamento?.trim()]
+      .filter(Boolean)
+      .join(", ");
+    if (linha) partes.push(linha);
+    if (cliente.complemento_faturamento?.trim()) partes.push(cliente.complemento_faturamento.trim());
+    if (cliente.bairro_faturamento?.trim()) partes.push(cliente.bairro_faturamento.trim());
+    const local = [cliente.cidade_faturamento?.trim(), cliente.estado_faturamento?.trim()]
+      .filter(Boolean)
+      .join("/");
+    if (local) partes.push(local);
+    if (cliente.cep_faturamento?.trim()) partes.push(`CEP ${cliente.cep_faturamento.trim()}`);
+    const estruturado = partes.join(" · ");
+    return estruturado || cliente.endereco_faturamento?.trim() || "—";
+  })();
+
+  const residuos = montarResiduosDoCliente(cliente);
+  const margemRotulo = margemLucroClienteRotuloLista(cliente.margem_lucro_percentual);
+  const ativo = clienteEstaAtivo(cliente.status);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Detalhes do cliente ${cliente.razao_social || cliente.nome || ""}`}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(15, 23, 42, 0.55)",
+        zIndex: 9999,
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        padding: "32px 16px",
+        overflowY: "auto",
+        WebkitOverflowScrolling: "touch",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 1080,
+          background: "#ffffff",
+          borderRadius: 18,
+          boxShadow: "0 20px 60px rgba(15, 23, 42, 0.35)",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          maxHeight: "calc(100vh - 64px)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 16,
+            padding: "20px 24px",
+            background: "#0f172a",
+            color: "#ffffff",
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, opacity: 0.7, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              Cliente
+            </div>
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 800,
+                lineHeight: 1.25,
+                wordBreak: "break-word",
+                marginTop: 4,
+              }}
+            >
+              {cliente.razao_social?.trim() || cliente.nome?.trim() || "—"}
+            </div>
+            {cliente.nome && cliente.razao_social && cliente.nome !== cliente.razao_social ? (
+              <div style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>{cliente.nome}</div>
+            ) : null}
+            <div
+              style={{
+                marginTop: 10,
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                alignItems: "center",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  padding: "3px 10px",
+                  borderRadius: 999,
+                  background: ativo ? "#16a34a" : "#dc2626",
+                  color: "#ffffff",
+                }}
+              >
+                {ativo ? "Ativo" : "Inativo"}
+              </span>
+              {cliente.tipo_unidade_cliente ? (
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    padding: "3px 10px",
+                    borderRadius: 999,
+                    background: "rgba(255,255,255,0.15)",
+                    color: "#ffffff",
+                  }}
+                >
+                  {cliente.tipo_unidade_cliente}
+                </span>
+              ) : null}
+              {cliente.cnpj ? (
+                <span style={{ fontSize: 13, opacity: 0.9 }}>{cliente.cnpj}</span>
+              ) : null}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={onEditar}
+              style={{
+                background: "#16a34a",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: 10,
+                padding: "10px 16px",
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              Editar
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Fechar"
+              title="Fechar (Esc)"
+              style={{
+                background: "transparent",
+                color: "#ffffff",
+                border: "1px solid rgba(255,255,255,0.4)",
+                borderRadius: 10,
+                width: 40,
+                height: 40,
+                fontSize: 18,
+                fontWeight: 700,
+                cursor: "pointer",
+                lineHeight: 1,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: "22px 24px",
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: 22,
+          }}
+        >
+          <DetalheSecao titulo="Identificação">
+            <DetalheCampo rotulo="Nome fantasia" valor={cliente.nome} />
+            <DetalheCampo rotulo="Razão social" valor={cliente.razao_social} />
+            <DetalheCampo rotulo="CNPJ/CPF" valor={cliente.cnpj} />
+            <DetalheCampo rotulo="Tipo de unidade" valor={cliente.tipo_unidade_cliente} />
+            <DetalheCampo rotulo="Raiz CNPJ" valor={cliente.cnpj_raiz} />
+            <DetalheCampo rotulo="Status" valor={cliente.status} />
+            <DetalheCampo
+              rotulo="Ativo desde"
+              valor={cliente.status_ativo_desde ? formatarData(cliente.status_ativo_desde) : null}
+            />
+            <DetalheCampo
+              rotulo="Inativo desde"
+              valor={cliente.status_inativo_desde ? formatarData(cliente.status_inativo_desde) : null}
+            />
+            <DetalheCampo rotulo="Origem (planilha)" valor={cliente.origem_planilha_cliente} />
+          </DetalheSecao>
+
+          <DetalheSecao titulo="Contato">
+            <DetalheCampo rotulo="Responsável" valor={cliente.responsavel_nome} />
+            <DetalheCampo rotulo="Telefone" valor={cliente.telefone} />
+            <DetalheCampo rotulo="E-mail" valor={cliente.email} />
+            <DetalheCampo rotulo="E-mail para NF" valor={cliente.email_nf} />
+            <DetalheCampo rotulo="Solicitante" valor={cliente.solicitante} />
+          </DetalheSecao>
+
+          <DetalheSecao titulo="Endereços">
+            <DetalheCampo rotulo="Endereço de coleta" valor={enderecoColeta} colunas={2} />
+            <DetalheCampo rotulo="Endereço de faturamento" valor={enderecoFaturamento} colunas={2} />
+          </DetalheSecao>
+
+          <DetalheSecao titulo="Operacional (planilha CLIENTES)">
+            <DetalheCampo rotulo="CADRI" valor={cliente.licenca_numero} />
+            <div>
+              <DetalheRotulo>Venc CADRI</DetalheRotulo>
+              {cliente.validade ? (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "3px 10px",
+                    borderRadius: 999,
+                    background: venc.bg,
+                    color: venc.fg,
+                    border: `1px solid ${venc.borda}`,
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                  title={venc.rotulo}
+                >
+                  {formatarData(cliente.validade)}
+                  {venc.rotulo ? <span style={{ fontWeight: 500, opacity: 0.85 }}>· {venc.rotulo}</span> : null}
+                </span>
+              ) : (
+                <DetalheVazio />
+              )}
+            </div>
+            <DetalheCampo rotulo="Código IBAMA" valor={cliente.codigo_ibama} />
+            <DetalheCampo rotulo="Descrição do veículo" valor={cliente.descricao_veiculo} />
+            <DetalheCampo rotulo="Resíduo (resumo)" valor={cliente.tipo_residuo} />
+            <DetalheCampo rotulo="Classe" valor={cliente.classificacao} />
+            <DetalheCampo rotulo="MTR de coleta" valor={cliente.mtr_coleta} colunas={2} />
+            <DetalheCampo rotulo="Destino" valor={cliente.destino} />
+            <DetalheCampo rotulo="MTR de destino" valor={cliente.mtr_destino} />
+            <DetalheCampo rotulo="Resíduo de destino" valor={cliente.residuo_destino} />
+            <DetalheCampo rotulo="Ajudante" valor={cliente.ajudante} />
+            <DetalheCampo
+              rotulo="Observações operacionais"
+              valor={cliente.observacoes_operacionais}
+              colunas={3}
+              quebrarLinha
+            />
+          </DetalheSecao>
+
+          <DetalheSecao titulo="Vínculos & Equipamentos">
+            <DetalheCampo rotulo="Representante RG" valor={representanteRotulo} />
+            <DetalheCampo rotulo="Veículo preferencial" valor={veiculoRotulo} />
+            <DetalheCampo rotulo="Margem de lucro" valor={margemRotulo} />
+            <DetalheCampo
+              rotulo="Equipamentos desejados"
+              valor={cliente.equipamentos}
+              colunas={3}
+              quebrarLinha
+            />
+          </DetalheSecao>
+
+          {residuos.length > 0 && residuos.some((r) => r.tipo_residuo || r.classificacao || r.unidade_medida || r.frequencia_coleta) ? (
+            <DetalheSecao titulo="Resíduos cadastrados">
+              <div style={{ gridColumn: "1 / -1" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                      <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 700, color: "#0f172a" }}>
+                        Tipo de resíduo
+                      </th>
+                      <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 700, color: "#0f172a" }}>
+                        Classe
+                      </th>
+                      <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 700, color: "#0f172a" }}>
+                        Unidade
+                      </th>
+                      <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 700, color: "#0f172a" }}>
+                        Frequência
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {residuos.map((r, idx) => (
+                      <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "8px 10px", color: "#1f2937" }}>{r.tipo_residuo || "—"}</td>
+                        <td style={{ padding: "8px 10px", color: "#1f2937" }}>{r.classificacao || "—"}</td>
+                        <td style={{ padding: "8px 10px", color: "#1f2937" }}>{r.unidade_medida || "—"}</td>
+                        <td style={{ padding: "8px 10px", color: "#1f2937" }}>{r.frequencia_coleta || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </DetalheSecao>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetalheSecao({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h3
+        style={{
+          margin: "0 0 12px",
+          fontSize: 13,
+          fontWeight: 800,
+          letterSpacing: "0.05em",
+          textTransform: "uppercase",
+          color: "#0f172a",
+          paddingBottom: 8,
+          borderBottom: "1px solid #e2e8f0",
+        }}
+      >
+        {titulo}
+      </h3>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+          gap: "14px 18px",
+        }}
+      >
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function DetalheRotulo({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        color: "#64748b",
+        textTransform: "uppercase",
+        letterSpacing: "0.04em",
+        marginBottom: 4,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function DetalheVazio() {
+  return <span style={{ color: "#94a3b8" }}>—</span>;
+}
+
+function DetalheCampo({
+  rotulo,
+  valor,
+  colunas = 1,
+  quebrarLinha = false,
+}: {
+  rotulo: string;
+  valor?: string | number | null;
+  colunas?: 1 | 2 | 3;
+  quebrarLinha?: boolean;
+}) {
+  const texto = valor == null ? "" : String(valor).trim();
+  return (
+    <div style={{ gridColumn: `span ${colunas}` }}>
+      <DetalheRotulo>{rotulo}</DetalheRotulo>
+      {texto ? (
+        <div
+          style={{
+            color: "#1f2937",
+            fontSize: 14,
+            wordBreak: "break-word",
+            whiteSpace: quebrarLinha ? "pre-wrap" : "normal",
+            lineHeight: 1.45,
+          }}
+        >
+          {texto}
+        </div>
+      ) : (
+        <DetalheVazio />
+      )}
+    </div>
+  );
+}
