@@ -16,6 +16,8 @@ type Motorista = {
   cnh_numero: string | null;
   cnh_categoria: string | null;
   cnh_validade: string | null;
+  possui_nopp: boolean | null;
+  nopp_validade: string | null;
   cnh_foto_url: string | null;
   created_at: string | null;
 };
@@ -25,6 +27,8 @@ type FormMotorista = {
   cnh_numero: string;
   cnh_categoria: string;
   cnh_validade: string;
+  possui_nopp: boolean;
+  nopp_validade: string;
 };
 
 const formInicial: FormMotorista = {
@@ -32,6 +36,8 @@ const formInicial: FormMotorista = {
   cnh_numero: "",
   cnh_categoria: "",
   cnh_validade: "",
+  possui_nopp: false,
+  nopp_validade: "",
 };
 
 function limparOuNull(valor: string) {
@@ -57,6 +63,10 @@ function formatarDataHora(iso?: string | null) {
   } catch {
     return iso;
   }
+}
+
+function simOuNao(val: boolean | null | undefined) {
+  return val ? "Sim" : "Não";
 }
 
 /** Bucket público definido em `20260428150000_motoristas_cnh_foto.sql`. */
@@ -93,7 +103,7 @@ const nomeMotoristaFichaBtnStyle: CSSProperties = {
 };
 
 const MOTORISTAS_SELECT =
-  "id, nome, cnh_numero, cnh_categoria, cnh_validade, cnh_foto_url, created_at";
+  "id, nome, cnh_numero, cnh_categoria, cnh_validade, possui_nopp, nopp_validade, cnh_foto_url, created_at";
 
 const MOTORISTAS_CADASTRO_DRAFT_KEY = "rg-ambiental-motoristas-cadastro-draft";
 
@@ -235,12 +245,25 @@ export default function Motoristas() {
 
       autoTable(doc, {
         startY: 96,
-        head: [["Nome", "Nº CNH", "Categoria", "Validade CNH", "Cadastrado em", "CNH (foto)"]],
+        head: [
+          [
+            "Nome",
+            "Nº CNH",
+            "Categoria",
+            "Validade CNH",
+            "Possui NOPP?",
+            "Validade NOPP",
+            "Cadastrado em",
+            "CNH (foto)",
+          ],
+        ],
         body: linhas.map((m) => [
           m.nome ?? "",
           m.cnh_numero ?? "-",
           m.cnh_categoria ?? "-",
           formatarData(m.cnh_validade),
+          simOuNao(!!m.possui_nopp),
+          m.possui_nopp ? formatarData(m.nopp_validade) : "—",
           formatarDataHora(m.created_at),
           m.cnh_foto_url ? "Sim" : "Não",
         ]),
@@ -249,12 +272,14 @@ export default function Motoristas() {
         margin: { left: 40, right: 40 },
         tableWidth: "auto",
         columnStyles: {
-          0: { cellWidth: 210 },
-          1: { cellWidth: 105 },
-          2: { cellWidth: 75 },
-          3: { cellWidth: 90 },
-          4: { cellWidth: 115 },
-          5: { cellWidth: 70 },
+          0: { cellWidth: 150 },
+          1: { cellWidth: 88 },
+          2: { cellWidth: 62 },
+          3: { cellWidth: 78 },
+          4: { cellWidth: 62 },
+          5: { cellWidth: 78 },
+          6: { cellWidth: 100 },
+          7: { cellWidth: 58 },
         },
       });
 
@@ -282,7 +307,16 @@ export default function Motoristas() {
   function handleInputChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) {
-    const { name, value } = e.target;
+    const t = e.target;
+    if (t instanceof HTMLInputElement && t.type === "checkbox" && t.name === "possui_nopp") {
+      setForm((prev) => ({
+        ...prev,
+        possui_nopp: t.checked,
+        nopp_validade: t.checked ? prev.nopp_validade : "",
+      }));
+      return;
+    }
+    const { name, value } = t;
     setForm((prev) => ({ ...prev, [name]: value }));
   }
 
@@ -308,6 +342,13 @@ export default function Motoristas() {
           ? m.cnh_validade.split("T")[0]
           : m.cnh_validade.slice(0, 10)
         : "",
+      possui_nopp: Boolean(m.possui_nopp),
+      nopp_validade:
+        m.possui_nopp && m.nopp_validade
+          ? m.nopp_validade.includes("T")
+            ? m.nopp_validade.split("T")[0]
+            : m.nopp_validade.slice(0, 10)
+          : "",
     });
     setEditingId(m.id);
     setMostrarCadastro(true);
@@ -330,6 +371,8 @@ export default function Motoristas() {
       cnh_numero: limparOuNull(form.cnh_numero),
       cnh_categoria: limparOuNull(form.cnh_categoria),
       cnh_validade: limparOuNull(form.cnh_validade),
+      possui_nopp: form.possui_nopp,
+      nopp_validade: form.possui_nopp ? limparOuNull(form.nopp_validade) : null,
     };
 
     let error: PostgrestError | null = null;
@@ -723,6 +766,84 @@ export default function Motoristas() {
                       style={inputStyle}
                     />
                   </div>
+
+                  <div style={{ marginTop: "6px" }}>
+                    <div
+                      style={{
+                        fontSize: "14px",
+                        fontWeight: 800,
+                        color: "#334155",
+                        marginBottom: "10px",
+                      }}
+                    >
+                      NOPP
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: "14px",
+                        alignItems: "center",
+                      }}
+                    >
+                      <label
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          cursor: "pointer",
+                          fontSize: "14px",
+                          fontWeight: 600,
+                          color: "#334155",
+                          userSelect: "none",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          name="possui_nopp"
+                          checked={form.possui_nopp}
+                          onChange={handleInputChange}
+                          style={{
+                            width: "18px",
+                            height: "18px",
+                            accentColor: "#16a34a",
+                            cursor: "pointer",
+                          }}
+                        />
+                        Possui NOPP?
+                      </label>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "4px",
+                          minWidth: "min(100%, 220px)",
+                          flex: "1 1 200px",
+                        }}
+                      >
+                        <span style={{ fontSize: "12px", fontWeight: 700, color: "#64748b" }}>
+                          Data de validade do NOPP
+                        </span>
+                        <input
+                          type="date"
+                          name="nopp_validade"
+                          value={form.nopp_validade}
+                          onChange={handleInputChange}
+                          disabled={!form.possui_nopp}
+                          title={
+                            form.possui_nopp
+                              ? "Data de validade do NOPP"
+                              : 'Marque "Possui NOPP?" para informar a validade'
+                          }
+                          style={{
+                            ...inputStyle,
+                            opacity: form.possui_nopp ? 1 : 0.65,
+                            cursor: form.possui_nopp ? undefined : "not-allowed",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div
@@ -862,6 +983,8 @@ export default function Motoristas() {
                       <th style={thStyle}>Nº CNH</th>
                       <th style={thStyle}>Categoria</th>
                       <th style={thStyle}>Validade CNH</th>
+                      <th style={thStyle}>NOPP</th>
+                      <th style={thStyle}>Val. NOPP</th>
                       <th style={thStyle}>Ações</th>
                     </tr>
                   </thead>
@@ -888,6 +1011,10 @@ export default function Motoristas() {
                         <td style={tdStyle}>{m.cnh_numero || "-"}</td>
                         <td style={tdStyle}>{m.cnh_categoria || "-"}</td>
                         <td style={tdStyle}>{formatarData(m.cnh_validade)}</td>
+                        <td style={tdStyle}>{simOuNao(!!m.possui_nopp)}</td>
+                        <td style={tdStyle}>
+                          {m.possui_nopp ? formatarData(m.nopp_validade) : "—"}
+                        </td>
                         <td style={{ ...tdStyle, whiteSpace: "nowrap", verticalAlign: "middle" }}>
                           <div
                             role="group"
@@ -1145,6 +1272,12 @@ export default function Motoristas() {
                 <dd style={{ margin: 0, color: "#1f2937" }}>{fichaMotorista.cnh_categoria || "—"}</dd>
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>Validade CNH</dt>
                 <dd style={{ margin: 0, color: "#1f2937" }}>{formatarData(fichaMotorista.cnh_validade)}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Possui NOPP?</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{simOuNao(!!fichaMotorista.possui_nopp)}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Validade NOPP</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>
+                  {fichaMotorista.possui_nopp ? formatarData(fichaMotorista.nopp_validade) : "—"}
+                </dd>
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>Cadastrado em</dt>
                 <dd style={{ margin: 0, color: "#1f2937" }}>{formatarDataHora(fichaMotorista.created_at)}</dd>
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>ID</dt>

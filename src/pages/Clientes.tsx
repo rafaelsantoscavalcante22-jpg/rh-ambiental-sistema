@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import MainLayout from "../layouts/MainLayout";
@@ -26,6 +26,14 @@ type Cliente = {
   bairro: string | null;
   cidade: string | null;
   estado: string | null;
+
+  cep_faturamento: string | null;
+  rua_faturamento: string | null;
+  numero_faturamento: string | null;
+  complemento_faturamento: string | null;
+  bairro_faturamento: string | null;
+  cidade_faturamento: string | null;
+  estado_faturamento: string | null;
 
   endereco_coleta: string | null;
   endereco_faturamento: string | null;
@@ -67,8 +75,14 @@ type FormCliente = {
   cidade: string;
   estado: string;
 
-  endereco_coleta: string;
-  endereco_faturamento: string;
+  cep_faturamento: string;
+  rua_faturamento: string;
+  numero_faturamento: string;
+  complemento_faturamento: string;
+  bairro_faturamento: string;
+  cidade_faturamento: string;
+  estado_faturamento: string;
+
   email_nf: string;
 
   responsavel_nome: string;
@@ -104,8 +118,14 @@ const formInicial: FormCliente = {
   cidade: "",
   estado: "",
 
-  endereco_coleta: "",
-  endereco_faturamento: "",
+  cep_faturamento: "",
+  rua_faturamento: "",
+  numero_faturamento: "",
+  complemento_faturamento: "",
+  bairro_faturamento: "",
+  cidade_faturamento: "",
+  estado_faturamento: "",
+
   email_nf: "",
 
   responsavel_nome: "",
@@ -133,7 +153,7 @@ function formatarData(data?: string | null) {
   return `${partes[2]}/${partes[1]}/${partes[0]}`;
 }
 
-/** Endereço para relatório: prioriza campos estruturados; senão texto livre de coleta/faturamento. */
+/** Endereço de coleta para relatório: estruturado; senão texto livre legado. */
 function formatarEnderecoRelatorio(c: Cliente): string {
   const partes: string[] = [];
   const linha = [c.rua?.trim(), c.numero?.trim()].filter(Boolean).join(", ");
@@ -145,9 +165,56 @@ function formatarEnderecoRelatorio(c: Cliente): string {
   if (c.cep?.trim()) partes.push(`CEP ${c.cep.trim()}`);
   const estruturado = partes.join(" · ");
   if (estruturado) return estruturado;
-  const livre = (c.endereco_coleta || c.endereco_faturamento || "").trim();
+  const livre = (c.endereco_coleta || "").trim();
   if (livre) return livre;
   return "-";
+}
+
+/** Endereço de faturamento para relatório: estruturado; senão texto livre legado. */
+function formatarEnderecoFaturamentoRelatorio(c: Cliente): string {
+  const partes: string[] = [];
+  const linha = [c.rua_faturamento?.trim(), c.numero_faturamento?.trim()].filter(Boolean).join(", ");
+  if (linha) partes.push(linha);
+  if (c.complemento_faturamento?.trim()) partes.push(c.complemento_faturamento.trim());
+  if (c.bairro_faturamento?.trim()) partes.push(c.bairro_faturamento.trim());
+  const uf = c.estado_faturamento?.trim();
+  if (uf) partes.push(uf);
+  if (c.cep_faturamento?.trim()) partes.push(`CEP ${c.cep_faturamento.trim()}`);
+  const estruturado = partes.join(" · ");
+  if (estruturado) return estruturado;
+  const livre = (c.endereco_faturamento || "").trim();
+  if (livre) return livre;
+  return "-";
+}
+
+/** Texto livre em uma linha, alinhado ao padrão visual do cadastro (rua, nº - CEP, demais partes). */
+function montarEnderecoTextoLivreDosCamposEstruturados(p: {
+  cep: string;
+  rua: string;
+  numero: string;
+  complemento: string;
+  bairro: string;
+  cidade: string;
+  estado: string;
+}): string {
+  const rua = p.rua.trim();
+  const numero = p.numero.trim();
+  const cep = p.cep.trim();
+  const complemento = p.complemento.trim();
+  const bairro = p.bairro.trim();
+  const cidade = p.cidade.trim();
+  const estado = p.estado.trim();
+
+  const linhaRuaNum = [rua, numero].filter(Boolean).join(", ");
+  let out = linhaRuaNum;
+  if (cep) {
+    out = out ? `${out} - ${cep}` : cep;
+  }
+  const tail = [complemento, bairro, cidade, estado].filter(Boolean);
+  if (tail.length) {
+    out = out ? `${out}, ${tail.join(", ")}` : tail.join(", ");
+  }
+  return out;
 }
 
 function formatarCNPJ(valor: string) {
@@ -209,6 +276,13 @@ type ImportRow = Partial<{
   bairro: string;
   cidade: string;
   estado: string;
+  cep_faturamento: string;
+  rua_faturamento: string;
+  numero_faturamento: string;
+  complemento_faturamento: string;
+  bairro_faturamento: string;
+  cidade_faturamento: string;
+  estado_faturamento: string;
   endereco_coleta: string;
   endereco_faturamento: string;
   email_nf: string;
@@ -250,6 +324,20 @@ const IMPORT_HEADER_ALIASES: Record<string, keyof ImportRow> = {
   endereco_coleta: "endereco_coleta",
   "endereco faturamento": "endereco_faturamento",
   endereco_faturamento: "endereco_faturamento",
+  "cep faturamento": "cep_faturamento",
+  cep_faturamento: "cep_faturamento",
+  "rua faturamento": "rua_faturamento",
+  rua_faturamento: "rua_faturamento",
+  "numero faturamento": "numero_faturamento",
+  numero_faturamento: "numero_faturamento",
+  "complemento faturamento": "complemento_faturamento",
+  complemento_faturamento: "complemento_faturamento",
+  "bairro faturamento": "bairro_faturamento",
+  bairro_faturamento: "bairro_faturamento",
+  "cidade faturamento": "cidade_faturamento",
+  cidade_faturamento: "cidade_faturamento",
+  "estado faturamento": "estado_faturamento",
+  estado_faturamento: "estado_faturamento",
   "email nf": "email_nf",
   email_nf: "email_nf",
   responsavel: "responsavel_nome",
@@ -317,12 +405,28 @@ function montarResiduosDoCliente(cliente: Cliente): ResiduoForm[] {
   }));
 }
 
-/** Listagem / relatório: sem colunas opcionais recentes, para não falhar se a migração ainda não foi aplicada. */
-const CLIENTES_SELECT_LIST =
-  "id, nome, razao_social, cnpj, status, cep, rua, numero, complemento, bairro, cidade, estado, endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade";
+const CLIENTES_SELECT_CORE =
+  "id, nome, razao_social, cnpj, status, cep, rua, numero, complemento, bairro, cidade, estado";
 
-const CLIENTES_SELECT_FULL =
-  CLIENTES_SELECT_LIST + ", status_ativo_desde, status_inativo_desde";
+const CLIENTES_SELECT_FAT_ENDERECO =
+  "cep_faturamento, rua_faturamento, numero_faturamento, complemento_faturamento, bairro_faturamento, cidade_faturamento, estado_faturamento";
+
+const CLIENTES_SELECT_TAIL =
+  "endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade";
+
+function montarClientesSelectPrincipalLegacy(incluirFatEstruturado: boolean): string {
+  return incluirFatEstruturado
+    ? `${CLIENTES_SELECT_CORE}, ${CLIENTES_SELECT_FAT_ENDERECO}, ${CLIENTES_SELECT_TAIL}`
+    : `${CLIENTES_SELECT_CORE}, ${CLIENTES_SELECT_TAIL}`;
+}
+
+function montarOrFilterBuscaClientesLegacy(s: string, incluirColunasFat: boolean): string {
+  const base = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%`;
+  const rest = incluirColunasFat
+    ? `,cidade_faturamento.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,rua.ilike.%${s}%,rua_faturamento.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`
+    : `,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,rua.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
+  return base + rest;
+}
 
 /** Migração `20260427140000_clientes_status_datas.sql` ainda não aplicada no Supabase. */
 function isMissingClientesStatusDateColumnsError(
@@ -333,6 +437,22 @@ function isMissingClientesStatusDateColumnsError(
   return (
     (msg.includes("status_ativo_desde") || msg.includes("status_inativo_desde")) &&
     (msg.includes("schema cache") || msg.includes("could not find"))
+  );
+}
+
+function isMissingFaturamentoEstruturadoColumnsError(
+  error: { message?: string } | null | undefined
+): boolean {
+  const msg = (error?.message ?? "").toLowerCase();
+  if (!msg) return false;
+  return (
+    msg.includes("cep_faturamento") ||
+    msg.includes("rua_faturamento") ||
+    msg.includes("numero_faturamento") ||
+    msg.includes("complemento_faturamento") ||
+    msg.includes("bairro_faturamento") ||
+    msg.includes("cidade_faturamento") ||
+    msg.includes("estado_faturamento")
   );
 }
 
@@ -357,6 +477,7 @@ export default function Clientes() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [alternandoStatusId, setAlternandoStatusId] = useState<string | null>(null);
   const [form, setForm] = useState<FormCliente>(formInicial);
+  const faturamentoEstruturadoColDisponivelRef = useRef(true);
 
   const termoFiltro = useMemo(() => buscaDebounced.trim(), [buscaDebounced]);
 
@@ -378,20 +499,46 @@ export default function Clientes() {
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
-    let countQ = supabase.from("clientes").select("id", { count: "exact", head: true });
-    let dataQ = supabase.from("clientes").select(CLIENTES_SELECT_LIST).order("nome", { ascending: true });
+    const montarQueries = (listStr: string, incluirColunasFat: boolean) => {
+      let countQ = supabase.from("clientes").select("id", { count: "exact", head: true });
+      let dataQ = supabase.from("clientes").select(listStr).order("nome", { ascending: true });
 
-    if (termoFiltro) {
-      const s = sanitizeIlikePattern(termoFiltro);
-      const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
-      countQ = countQ.or(orFilter);
-      dataQ = dataQ.or(orFilter);
-    }
+      if (termoFiltro) {
+        const s = sanitizeIlikePattern(termoFiltro);
+        const orFilter = montarOrFilterBuscaClientesLegacy(s, incluirColunasFat);
+        countQ = countQ.or(orFilter);
+        dataQ = dataQ.or(orFilter);
+      }
+      return { countQ, dataQ };
+    };
 
-    const [{ count, error: errCount }, { data, error }] = await Promise.all([
+    let fat = faturamentoEstruturadoColDisponivelRef.current;
+
+    const executarFetch = () => {
+      const listStr = montarClientesSelectPrincipalLegacy(fat);
+      return montarQueries(listStr, fat);
+    };
+
+    let { countQ, dataQ } = executarFetch();
+
+    let [{ count, error: errCount }, { data, error }] = await Promise.all([
       countQ,
       dataQ.range(from, to),
     ]);
+
+    while (error) {
+      if (fat && isMissingFaturamentoEstruturadoColumnsError(error)) {
+        faturamentoEstruturadoColDisponivelRef.current = false;
+        fat = false;
+        ({ countQ, dataQ } = executarFetch());
+        [{ count, error: errCount }, { data, error }] = await Promise.all([
+          countQ,
+          dataQ.range(from, to),
+        ]);
+        continue;
+      }
+      break;
+    }
 
     if (errCount) {
       console.error("Erro ao contar clientes:", errCount);
@@ -401,31 +548,71 @@ export default function Clientes() {
 
     if (error) {
       console.error("Erro ao buscar clientes:", error);
+      const listMin = montarClientesSelectPrincipalLegacy(false);
+      let cqMin = supabase.from("clientes").select("id", { count: "exact", head: true });
+      let dqMin = supabase.from("clientes").select(listMin).order("nome", { ascending: true });
+      if (termoFiltro) {
+        const s = sanitizeIlikePattern(termoFiltro);
+        const orFilter = montarOrFilterBuscaClientesLegacy(s, false);
+        cqMin = cqMin.or(orFilter);
+        dqMin = dqMin.or(orFilter);
+      }
+      try {
+        const [cRes, dRes] = await Promise.all([cqMin, dqMin.range(from, to)]);
+        if (!dRes.error && Array.isArray(dRes.data)) {
+          if (!cRes.error && typeof cRes.count === "number") {
+            setTotalCount(cRes.count);
+          }
+          faturamentoEstruturadoColDisponivelRef.current = false;
+          setClientes((dRes.data as unknown as Cliente[]) || []);
+          setLoading(false);
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
       setClientes([]);
       setLoading(false);
       return;
     }
 
-    setClientes((data as Cliente[]) || []);
+    setClientes((data as unknown as Cliente[]) || []);
     setLoading(false);
   }, [page, pageSize, termoFiltro]);
 
   const fetchClientesRelatorio = useCallback(async (): Promise<Cliente[]> => {
     const PAGE = 1000;
-    let dataQ = supabase.from("clientes").select(CLIENTES_SELECT_LIST).order("nome", { ascending: true });
+    const montarDataQ = (listStr: string, incluirColunasFat: boolean) => {
+      let dataQ = supabase.from("clientes").select(listStr).order("nome", { ascending: true });
+      if (termoFiltro) {
+        const s = sanitizeIlikePattern(termoFiltro);
+        const orFilter = montarOrFilterBuscaClientesLegacy(s, incluirColunasFat);
+        dataQ = dataQ.or(orFilter);
+      }
+      return dataQ;
+    };
 
-    if (termoFiltro) {
-      const s = sanitizeIlikePattern(termoFiltro);
-      const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
-      dataQ = dataQ.or(orFilter);
-    }
+    let fat = faturamentoEstruturadoColDisponivelRef.current;
 
     const out: Cliente[] = [];
     for (let from = 0; ; from += PAGE) {
       const to = from + PAGE - 1;
-      const { data, error } = await dataQ.range(from, to);
+      let listStr = montarClientesSelectPrincipalLegacy(fat);
+      let dataQ = montarDataQ(listStr, fat);
+      let { data, error } = await dataQ.range(from, to);
+      while (error) {
+        if (fat && isMissingFaturamentoEstruturadoColumnsError(error)) {
+          faturamentoEstruturadoColDisponivelRef.current = false;
+          fat = false;
+          listStr = montarClientesSelectPrincipalLegacy(fat);
+          dataQ = montarDataQ(listStr, fat);
+          ({ data, error } = await dataQ.range(from, to));
+          continue;
+        }
+        break;
+      }
       if (error) throw error;
-      const chunk = ((data as Cliente[]) || []).filter(Boolean);
+      const chunk = ((data as unknown as Cliente[]) || []).filter(Boolean);
       out.push(...chunk);
       if (chunk.length < PAGE) break;
     }
@@ -470,7 +657,8 @@ export default function Clientes() {
           "Razão social",
           "CNPJ",
           "Cidade",
-          "Endereço",
+          "Endereço de Coleta",
+          "Endereço de Faturamento",
           "Responsável",
           "Telefone",
           "E-mail",
@@ -486,6 +674,7 @@ export default function Clientes() {
           c.cnpj ?? "",
           c.cidade ?? "-",
           formatarEnderecoRelatorio(c),
+          formatarEnderecoFaturamentoRelatorio(c),
           c.responsavel_nome?.trim() || "-",
           c.telefone?.trim() || "-",
           c.email?.trim() || "-",
@@ -500,19 +689,20 @@ export default function Clientes() {
         margin: { left: 40, right: 40 },
         tableWidth: "auto",
         columnStyles: {
-          0: { cellWidth: 62 },
-          1: { cellWidth: 72 },
-          2: { cellWidth: 58 },
-          3: { cellWidth: 44 },
-          4: { cellWidth: 78 },
-          5: { cellWidth: 48 },
-          6: { cellWidth: 46 },
-          7: { cellWidth: 54 },
+          0: { cellWidth: 56 },
+          1: { cellWidth: 64 },
+          2: { cellWidth: 52 },
+          3: { cellWidth: 40 },
+          4: { cellWidth: 64 },
+          5: { cellWidth: 64 },
+          6: { cellWidth: 44 },
+          7: { cellWidth: 42 },
           8: { cellWidth: 50 },
-          9: { cellWidth: 44 },
-          10: { cellWidth: 34 },
-          11: { cellWidth: 40 },
-          12: { cellWidth: 34 },
+          9: { cellWidth: 46 },
+          10: { cellWidth: 40 },
+          11: { cellWidth: 32 },
+          12: { cellWidth: 36 },
+          13: { cellWidth: 32 },
         },
       });
 
@@ -532,11 +722,21 @@ export default function Clientes() {
       "razao_social",
       "cnpj",
       "status",
+      "cep",
+      "rua",
+      "numero",
+      "complemento",
+      "bairro",
       "cidade",
       "estado",
+      "cep_faturamento",
+      "rua_faturamento",
+      "numero_faturamento",
+      "complemento_faturamento",
+      "bairro_faturamento",
+      "cidade_faturamento",
+      "estado_faturamento",
       "email_nf",
-      "endereco_coleta",
-      "endereco_faturamento",
       "responsavel_nome",
       "telefone",
       "email",
@@ -553,11 +753,21 @@ export default function Clientes() {
       "Cliente Exemplo LTDA",
       "00.000.000/0000-00",
       "Ativo",
+      "01310-100",
+      "Av. Paulista",
+      "1000",
+      "Sala 1",
+      "Bela Vista",
+      "São Paulo",
+      "SP",
+      "01310-100",
+      "Av. Paulista",
+      "1000",
+      "Sala 1",
+      "Bela Vista",
       "São Paulo",
       "SP",
       "nf@cliente.com.br",
-      "",
-      "",
       "Fulano",
       "(11) 99999-9999",
       "contato@cliente.com.br",
@@ -586,6 +796,7 @@ export default function Clientes() {
         "cnpj",
         "status",
         "endereco_coleta",
+        "endereco_faturamento",
         "email_nf",
         "tipo_residuo",
         "classificacao",
@@ -600,7 +811,8 @@ export default function Clientes() {
           c.razao_social ?? "",
           c.cnpj ?? "",
           c.status ?? "Ativo",
-          c.endereco_coleta ?? "",
+          formatarEnderecoRelatorio(c),
+          formatarEnderecoFaturamentoRelatorio(c),
           c.email_nf ?? "",
           c.tipo_residuo ?? "",
           c.classificacao ?? "",
@@ -740,6 +952,24 @@ export default function Clientes() {
         const updates: Array<{ id: string; payload: Record<string, unknown> }> = [];
 
         for (const r of rows) {
+          const textoColetaImp = montarEnderecoTextoLivreDosCamposEstruturados({
+            cep: r.cep || "",
+            rua: r.rua || "",
+            numero: r.numero || "",
+            complemento: r.complemento || "",
+            bairro: r.bairro || "",
+            cidade: r.cidade || "",
+            estado: r.estado || "",
+          });
+          const textoFatImp = montarEnderecoTextoLivreDosCamposEstruturados({
+            cep: r.cep_faturamento || r.cep || "",
+            rua: r.rua_faturamento || r.rua || "",
+            numero: r.numero_faturamento || r.numero || "",
+            complemento: r.complemento_faturamento || r.complemento || "",
+            bairro: r.bairro_faturamento || r.bairro || "",
+            cidade: r.cidade_faturamento || r.cidade || "",
+            estado: r.estado_faturamento || r.estado || "",
+          });
           const payload = {
             nome: r.nome!,
             razao_social: r.razao_social!,
@@ -752,8 +982,15 @@ export default function Clientes() {
             bairro: limparOuNull(r.bairro || ""),
             cidade: limparOuNull(r.cidade || ""),
             estado: limparOuNull(r.estado || ""),
-            endereco_coleta: limparOuNull(r.endereco_coleta || ""),
-            endereco_faturamento: limparOuNull(r.endereco_faturamento || ""),
+            cep_faturamento: limparOuNull(r.cep_faturamento || ""),
+            rua_faturamento: limparOuNull(r.rua_faturamento || ""),
+            numero_faturamento: limparOuNull(r.numero_faturamento || ""),
+            complemento_faturamento: limparOuNull(r.complemento_faturamento || ""),
+            bairro_faturamento: limparOuNull(r.bairro_faturamento || ""),
+            cidade_faturamento: limparOuNull(r.cidade_faturamento || ""),
+            estado_faturamento: limparOuNull(r.estado_faturamento || ""),
+            endereco_coleta: limparOuNull(r.endereco_coleta || textoColetaImp),
+            endereco_faturamento: limparOuNull(r.endereco_faturamento || textoFatImp),
             email_nf: limparOuNull(r.email_nf || ""),
             responsavel_nome: limparOuNull(r.responsavel_nome || ""),
             telefone: limparOuNull(r.telefone || ""),
@@ -822,11 +1059,8 @@ export default function Clientes() {
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) {
     const { name, value } = e.target;
-
-    setForm((prev) => ({
-      ...prev,
-      [name]: name === "cnpj" ? formatarCNPJ(value) : value,
-    }));
+    const rawValue = name === "cnpj" ? formatarCNPJ(value) : value;
+    setForm((prev) => ({ ...prev, [name]: rawValue }));
   }
 
   function handleResiduoChange(
@@ -905,8 +1139,14 @@ export default function Clientes() {
         cidade: row.cidade || "",
         estado: row.estado || "",
 
-        endereco_coleta: row.endereco_coleta || "",
-        endereco_faturamento: row.endereco_faturamento || "",
+        cep_faturamento: row.cep_faturamento ?? row.cep ?? "",
+        rua_faturamento: row.rua_faturamento ?? row.rua ?? "",
+        numero_faturamento: row.numero_faturamento ?? row.numero ?? "",
+        complemento_faturamento: row.complemento_faturamento ?? row.complemento ?? "",
+        bairro_faturamento: row.bairro_faturamento ?? row.bairro ?? "",
+        cidade_faturamento: row.cidade_faturamento ?? row.cidade ?? "",
+        estado_faturamento: row.estado_faturamento ?? row.estado ?? "",
+
         email_nf: row.email_nf || "",
 
         responsavel_nome: row.responsavel_nome || "",
@@ -925,16 +1165,30 @@ export default function Clientes() {
     hydrate(cliente);
 
     try {
+      let fat = faturamentoEstruturadoColDisponivelRef.current;
+      const lista = () => montarClientesSelectPrincipalLegacy(fat);
+      const completa = () => `${lista()}, status_ativo_desde, status_inativo_desde`;
+
       let fullRes = await supabase
         .from("clientes")
-        .select(CLIENTES_SELECT_FULL)
+        .select(completa())
         .eq("id", cliente.id)
         .maybeSingle();
+
+      if (fullRes.error && isMissingFaturamentoEstruturadoColumnsError(fullRes.error)) {
+        faturamentoEstruturadoColDisponivelRef.current = false;
+        fat = false;
+        fullRes = await supabase
+          .from("clientes")
+          .select(completa())
+          .eq("id", cliente.id)
+          .maybeSingle();
+      }
 
       if (fullRes.error && isMissingClientesStatusDateColumnsError(fullRes.error)) {
         fullRes = await supabase
           .from("clientes")
-          .select(CLIENTES_SELECT_LIST)
+          .select(lista())
           .eq("id", cliente.id)
           .maybeSingle();
       }
@@ -988,8 +1242,35 @@ export default function Clientes() {
       bairro: limparOuNull(form.bairro),
       cidade: limparOuNull(form.cidade),
       estado: limparOuNull(form.estado),
-      endereco_coleta: limparOuNull(form.endereco_coleta),
-      endereco_faturamento: limparOuNull(form.endereco_faturamento),
+      cep_faturamento: limparOuNull(form.cep_faturamento),
+      rua_faturamento: limparOuNull(form.rua_faturamento),
+      numero_faturamento: limparOuNull(form.numero_faturamento),
+      complemento_faturamento: limparOuNull(form.complemento_faturamento),
+      bairro_faturamento: limparOuNull(form.bairro_faturamento),
+      cidade_faturamento: limparOuNull(form.cidade_faturamento),
+      estado_faturamento: limparOuNull(form.estado_faturamento),
+      endereco_coleta: limparOuNull(
+        montarEnderecoTextoLivreDosCamposEstruturados({
+          cep: form.cep,
+          rua: form.rua,
+          numero: form.numero,
+          complemento: form.complemento,
+          bairro: form.bairro,
+          cidade: form.cidade,
+          estado: form.estado,
+        })
+      ),
+      endereco_faturamento: limparOuNull(
+        montarEnderecoTextoLivreDosCamposEstruturados({
+          cep: form.cep_faturamento,
+          rua: form.rua_faturamento,
+          numero: form.numero_faturamento,
+          complemento: form.complemento_faturamento,
+          bairro: form.bairro_faturamento,
+          cidade: form.cidade_faturamento,
+          estado: form.estado_faturamento,
+        })
+      ),
       email_nf: limparOuNull(form.email_nf),
       responsavel_nome: limparOuNull(form.responsavel_nome),
       telefone: limparOuNull(form.telefone),
@@ -1350,7 +1631,7 @@ export default function Clientes() {
                     marginBottom: "12px",
                   }}
                 >
-                  Endereço
+                  Endereço de Coleta
                 </div>
 
                 <div
@@ -1431,33 +1712,74 @@ export default function Clientes() {
                     marginBottom: "12px",
                   }}
                 >
-                  Coleta e faturamento
+                  Endereço de Faturamento
                 </div>
-                <p style={{ margin: "0 0 12px", fontSize: "13px", color: "#64748b", lineHeight: 1.45 }}>
-                  Endereços em texto livre para operação e faturamento (complementam o endereço estruturado acima).
-                </p>
+
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
+                    gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr",
+                    gap: "12px",
+                    marginBottom: "12px",
+                  }}
+                >
+                  <input
+                    name="cep_faturamento"
+                    value={form.cep_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="CEP"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="rua_faturamento"
+                    value={form.rua_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="Rua"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="numero_faturamento"
+                    value={form.numero_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="Número"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="complemento_faturamento"
+                    value={form.complemento_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="Complemento"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="bairro_faturamento"
+                    value={form.bairro_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="Bairro"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="cidade_faturamento"
+                    value={form.cidade_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="Cidade"
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr",
                     gap: "12px",
                   }}
                 >
-                  <textarea
-                    name="endereco_coleta"
-                    value={form.endereco_coleta}
+                  <input
+                    name="estado_faturamento"
+                    value={form.estado_faturamento}
                     onChange={handleInputChange}
-                    placeholder="Endereço de coleta (completo)"
-                    rows={4}
-                    style={textareaStyle}
-                  />
-                  <textarea
-                    name="endereco_faturamento"
-                    value={form.endereco_faturamento}
-                    onChange={handleInputChange}
-                    placeholder="Endereço de faturamento (completo)"
-                    rows={4}
-                    style={textareaStyle}
+                    placeholder="Estado"
+                    style={{ ...inputStyle, maxWidth: "240px" }}
                   />
                 </div>
               </div>
@@ -2167,15 +2489,6 @@ const inputStyle: React.CSSProperties = {
   fontSize: "14px",
   color: "#0f172a",
   boxSizing: "border-box",
-};
-
-const textareaStyle: React.CSSProperties = {
-  ...inputStyle,
-  height: "auto",
-  minHeight: "96px",
-  padding: "10px 12px",
-  resize: "vertical",
-  lineHeight: 1.45,
 };
 
 const thStyle: React.CSSProperties = {

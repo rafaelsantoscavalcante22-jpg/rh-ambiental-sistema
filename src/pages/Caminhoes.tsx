@@ -365,7 +365,7 @@ export default function Caminhoes() {
   async function handleCadastroRemoverFoto() {
     if (editingId) {
       if (!cadastroFotoServidor) return;
-      if (!window.confirm("Remover a fotografia deste caminhão?")) return;
+      if (!window.confirm("Remover a fotografia deste veículo?")) return;
       setCadastroFotoEnviando(true);
       try {
         const p = pathFromSupabasePublicUrl(cadastroFotoServidor, BUCKET_FOTO_CAMINHAO);
@@ -440,8 +440,8 @@ export default function Caminhoes() {
         error.code === "23505" || /duplicate key|unique constraint/i.test(error.message || "");
       alert(
         msgDuplicada
-          ? "Já existe um caminhão com esta placa. Use outra placa ou edite o registo existente."
-          : `Erro ao salvar caminhão.\n\nMensagem: ${error.message}${
+          ? "Já existe um veículo com esta placa. Use outra placa ou edite o registo existente."
+          : `Erro ao salvar veículo.\n\nMensagem: ${error.message}${
               error.details ? `\nDetalhes: ${error.details}` : ""
             }`
       );
@@ -454,14 +454,14 @@ export default function Caminhoes() {
       const fotoRes = await persistirFotoCaminhao(novoId, cadastroFotoPendente, null);
       if (!fotoRes.ok) {
         window.alert(
-          "O caminhão foi guardado, mas a foto não foi enviada. Pode anexá-la ao editar o registo."
+          "O veículo foi guardado, mas a foto não foi enviada. Pode anexá-la ao editar o registo."
         );
       }
     }
 
     const mensagem = editingId
-      ? "Caminhão atualizado com sucesso!"
-      : "Caminhão cadastrado com sucesso!";
+      ? "Veículo atualizado com sucesso!"
+      : "Veículo cadastrado com sucesso!";
 
     limparFormulario();
     setSalvando(false);
@@ -476,7 +476,7 @@ export default function Caminhoes() {
   }
 
   async function handleDelete(id: string) {
-    const confirmar = window.confirm("Deseja realmente excluir este caminhão?");
+    const confirmar = window.confirm("Deseja realmente excluir este veículo?");
     if (!confirmar) return;
 
     const { data: rowFoto } = await supabase
@@ -495,7 +495,7 @@ export default function Caminhoes() {
 
     if (error) {
       console.error("Erro ao remover caminhão:", error);
-      alert("Erro ao remover caminhão.");
+      alert("Erro ao remover veículo.");
       return;
     }
 
@@ -561,7 +561,7 @@ export default function Caminhoes() {
 
   async function handleRemoverFotoCaminhao() {
     if (!fichaCaminhao?.foto_url) return;
-    if (!window.confirm("Remover a fotografia deste caminhão?")) return;
+    if (!window.confirm("Remover a fotografia deste veículo?")) return;
 
     const p = pathFromSupabasePublicUrl(fichaCaminhao.foto_url, BUCKET_FOTO_CAMINHAO);
     if (p) {
@@ -658,11 +658,11 @@ export default function Caminhoes() {
                   color: "#0f172a",
                 }}
               >
-                Frota e cadastro de veículos
+                Veículos
               </h1>
               <p className="page-header__lead" style={{ margin: "6px 0 0" }}>
-                Frota e disponibilidade. Integração com <strong>Logística</strong> e outras etapas será
-                feita nas próximas fases.
+                Cadastro da frota e disponibilidade. Integração com <strong>Logística</strong> e outras etapas
+                será feita nas próximas fases.
               </p>
             </div>
 
@@ -684,7 +684,7 @@ export default function Caminhoes() {
                     marginBottom: "6px",
                   }}
                 >
-                  Total de caminhões
+                  Total de veículos
                 </div>
                 <div
                   style={{
@@ -712,7 +712,7 @@ export default function Caminhoes() {
                   alignSelf: "stretch",
                 }}
               >
-                Novo caminhão
+                Novo veículo
               </button>
             </div>
           </div>
@@ -740,7 +740,7 @@ export default function Caminhoes() {
                     color: "#0f172a",
                   }}
                 >
-                  {editingId ? "Editar caminhão" : "Novo caminhão"}
+                  {editingId ? "Editar veículo" : "Novo veículo"}
                 </div>
               </div>
 
@@ -845,7 +845,7 @@ export default function Caminhoes() {
                       lineHeight: 1.5,
                     }}
                   >
-                    Anexe uma imagem do caminhão (lateral ou 3/4). JPEG, PNG, WebP ou GIF; máximo 8 MB.
+                    Anexe uma imagem do veículo (lateral ou 3/4). JPEG, PNG, WebP ou GIF; máximo 8 MB.
                     {editingId
                       ? " A foto é guardada logo que escolhe o ficheiro."
                       : " Ao criar o registo, a foto é enviada automaticamente depois de guardar."}
@@ -859,7 +859,7 @@ export default function Caminhoes() {
                     >
                       <img
                         src={cadastroFotoBlobUrl ?? cadastroFotoServidor ?? ""}
-                        alt="Pré-visualização do caminhão"
+                        alt="Pré-visualização do veículo"
                         style={{
                           width: "100%",
                           maxHeight: "240px",
@@ -969,7 +969,7 @@ export default function Caminhoes() {
                       ? "Salvando..."
                       : editingId
                       ? "Salvar alterações"
-                      : "Adicionar caminhão"}
+                      : "Adicionar veículo"}
                   </button>
 
                   <button
@@ -1024,7 +1024,7 @@ export default function Caminhoes() {
                     color: "#0f172a",
                   }}
                 >
-                  Lista de caminhões
+                  Lista de veículos
                 </h2>
               </div>
 
@@ -1056,7 +1056,7 @@ export default function Caminhoes() {
                   fontSize: "14px",
                 }}
               >
-                Carregando caminhões...
+                Carregando veículos...
               </div>
             ) : (
               <div style={{ overflowX: "auto" }}>
@@ -1097,7 +1097,7 @@ export default function Caminhoes() {
                             onClick={() => void abrirFichaCaminhao(c)}
                             style={placaCaminhaoFichaBtnStyle}
                             title="Ver ficha e fotografia do veículo"
-                            aria-label={`Abrir ficha do caminhão ${c.placa}`}
+                            aria-label={`Abrir ficha do veículo ${c.placa}`}
                           >
                             {c.placa}
                           </button>
@@ -1109,7 +1109,7 @@ export default function Caminhoes() {
                         <td style={{ ...tdStyle, whiteSpace: "nowrap", verticalAlign: "middle" }}>
                           <div
                             role="group"
-                            aria-label="Ações do caminhão"
+                            aria-label="Ações do veículo"
                             style={{
                               display: "flex",
                               flexDirection: "row",
@@ -1170,7 +1170,7 @@ export default function Caminhoes() {
                             color: "#64748b",
                           }}
                         >
-                          Nenhum caminhão encontrado.
+                          Nenhum veículo encontrado.
                         </td>
                       </tr>
                     )}
@@ -1320,7 +1320,7 @@ export default function Caminhoes() {
                   color: "#0f172a",
                 }}
               >
-                Ficha do caminhão
+                Ficha do veículo
               </h2>
               <button
                 type="button"
@@ -1396,7 +1396,7 @@ export default function Caminhoes() {
                   Fotografia do veículo
                 </div>
                 <p style={{ margin: "0 0 12px", fontSize: "13px", color: "#64748b", lineHeight: 1.5 }}>
-                  Envie uma imagem do caminhão (lateral ou 3/4, por exemplo). Formatos: JPEG, PNG, WebP ou
+                  Envie uma imagem do veículo (lateral ou 3/4, por exemplo). Formatos: JPEG, PNG, WebP ou
                   GIF; máx. 8 MB.
                 </p>
 
@@ -1409,7 +1409,7 @@ export default function Caminhoes() {
                   >
                     <img
                       src={fichaCaminhao.foto_url}
-                      alt={`Caminhão ${fichaCaminhao.placa}`}
+                      alt={`Veículo ${fichaCaminhao.placa}`}
                       style={{
                         width: "100%",
                         maxHeight: "280px",

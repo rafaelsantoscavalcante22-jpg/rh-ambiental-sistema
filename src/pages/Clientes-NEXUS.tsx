@@ -28,6 +28,14 @@ type Cliente = {
   cidade: string | null;
   estado: string | null;
 
+  cep_faturamento: string | null;
+  rua_faturamento: string | null;
+  numero_faturamento: string | null;
+  complemento_faturamento: string | null;
+  bairro_faturamento: string | null;
+  cidade_faturamento: string | null;
+  estado_faturamento: string | null;
+
   endereco_coleta: string | null;
   endereco_faturamento: string | null;
   email_nf: string | null;
@@ -47,6 +55,9 @@ type Cliente = {
   status_inativo_desde: string | null;
 
   representante_rg_id?: string | null;
+  caminhao_id?: string | null;
+
+  equipamentos?: string | null;
 };
 
 type ResiduoForm = {
@@ -70,8 +81,14 @@ type FormCliente = {
   cidade: string;
   estado: string;
 
-  endereco_coleta: string;
-  endereco_faturamento: string;
+  cep_faturamento: string;
+  rua_faturamento: string;
+  numero_faturamento: string;
+  complemento_faturamento: string;
+  bairro_faturamento: string;
+  cidade_faturamento: string;
+  estado_faturamento: string;
+
   email_nf: string;
 
   responsavel_nome: string;
@@ -84,6 +101,9 @@ type FormCliente = {
   status_inativo_desde: string;
 
   representante_rg_id: string;
+  caminhao_id: string;
+
+  equipamentos: string;
 
   residuos: ResiduoForm[];
 };
@@ -109,8 +129,14 @@ const formInicial: FormCliente = {
   cidade: "",
   estado: "",
 
-  endereco_coleta: "",
-  endereco_faturamento: "",
+  cep_faturamento: "",
+  rua_faturamento: "",
+  numero_faturamento: "",
+  complemento_faturamento: "",
+  bairro_faturamento: "",
+  cidade_faturamento: "",
+  estado_faturamento: "",
+
   email_nf: "",
 
   responsavel_nome: "",
@@ -123,6 +149,9 @@ const formInicial: FormCliente = {
   status_inativo_desde: "",
 
   representante_rg_id: "",
+  caminhao_id: "",
+
+  equipamentos: "",
 
   residuos: [{ ...residuoInicial }],
 };
@@ -140,7 +169,7 @@ function formatarData(data?: string | null) {
   return `${partes[2]}/${partes[1]}/${partes[0]}`;
 }
 
-/** Endereço para relatório: prioriza campos estruturados; senão texto livre de coleta/faturamento. */
+/** Endereço de coleta para relatório: estruturado; senão texto livre legado. */
 function formatarEnderecoRelatorio(c: Cliente): string {
   const partes: string[] = [];
   const linha = [c.rua?.trim(), c.numero?.trim()].filter(Boolean).join(", ");
@@ -152,9 +181,56 @@ function formatarEnderecoRelatorio(c: Cliente): string {
   if (c.cep?.trim()) partes.push(`CEP ${c.cep.trim()}`);
   const estruturado = partes.join(" · ");
   if (estruturado) return estruturado;
-  const livre = (c.endereco_coleta || c.endereco_faturamento || "").trim();
+  const livre = (c.endereco_coleta || "").trim();
   if (livre) return livre;
   return "-";
+}
+
+/** Endereço de faturamento para relatório: estruturado; senão texto livre legado. */
+function formatarEnderecoFaturamentoRelatorio(c: Cliente): string {
+  const partes: string[] = [];
+  const linha = [c.rua_faturamento?.trim(), c.numero_faturamento?.trim()].filter(Boolean).join(", ");
+  if (linha) partes.push(linha);
+  if (c.complemento_faturamento?.trim()) partes.push(c.complemento_faturamento.trim());
+  if (c.bairro_faturamento?.trim()) partes.push(c.bairro_faturamento.trim());
+  const uf = c.estado_faturamento?.trim();
+  if (uf) partes.push(uf);
+  if (c.cep_faturamento?.trim()) partes.push(`CEP ${c.cep_faturamento.trim()}`);
+  const estruturado = partes.join(" · ");
+  if (estruturado) return estruturado;
+  const livre = (c.endereco_faturamento || "").trim();
+  if (livre) return livre;
+  return "-";
+}
+
+/** Texto livre em uma linha, alinhado ao padrão visual do cadastro (rua, nº - CEP, demais partes). */
+function montarEnderecoTextoLivreDosCamposEstruturados(p: {
+  cep: string;
+  rua: string;
+  numero: string;
+  complemento: string;
+  bairro: string;
+  cidade: string;
+  estado: string;
+}): string {
+  const rua = p.rua.trim();
+  const numero = p.numero.trim();
+  const cep = p.cep.trim();
+  const complemento = p.complemento.trim();
+  const bairro = p.bairro.trim();
+  const cidade = p.cidade.trim();
+  const estado = p.estado.trim();
+
+  const linhaRuaNum = [rua, numero].filter(Boolean).join(", ");
+  let out = linhaRuaNum;
+  if (cep) {
+    out = out ? `${out} - ${cep}` : cep;
+  }
+  const tail = [complemento, bairro, cidade, estado].filter(Boolean);
+  if (tail.length) {
+    out = out ? `${out}, ${tail.join(", ")}` : tail.join(", ");
+  }
+  return out;
 }
 
 function formatarCNPJ(valor: string) {
@@ -216,6 +292,13 @@ type ImportRow = Partial<{
   bairro: string;
   cidade: string;
   estado: string;
+  cep_faturamento: string;
+  rua_faturamento: string;
+  numero_faturamento: string;
+  complemento_faturamento: string;
+  bairro_faturamento: string;
+  cidade_faturamento: string;
+  estado_faturamento: string;
   endereco_coleta: string;
   endereco_faturamento: string;
   email_nf: string;
@@ -230,6 +313,7 @@ type ImportRow = Partial<{
   validade: string;
   status_ativo_desde: string;
   status_inativo_desde: string;
+  equipamentos: string;
 }>;
 
 const IMPORT_MAX_BYTES = 2 * 1024 * 1024; // 2MB (mitigação)
@@ -257,6 +341,20 @@ const IMPORT_HEADER_ALIASES: Record<string, keyof ImportRow> = {
   endereco_coleta: "endereco_coleta",
   "endereco faturamento": "endereco_faturamento",
   endereco_faturamento: "endereco_faturamento",
+  "cep faturamento": "cep_faturamento",
+  cep_faturamento: "cep_faturamento",
+  "rua faturamento": "rua_faturamento",
+  rua_faturamento: "rua_faturamento",
+  "numero faturamento": "numero_faturamento",
+  numero_faturamento: "numero_faturamento",
+  "complemento faturamento": "complemento_faturamento",
+  complemento_faturamento: "complemento_faturamento",
+  "bairro faturamento": "bairro_faturamento",
+  bairro_faturamento: "bairro_faturamento",
+  "cidade faturamento": "cidade_faturamento",
+  cidade_faturamento: "cidade_faturamento",
+  "estado faturamento": "estado_faturamento",
+  estado_faturamento: "estado_faturamento",
   "email nf": "email_nf",
   email_nf: "email_nf",
   responsavel: "responsavel_nome",
@@ -277,6 +375,9 @@ const IMPORT_HEADER_ALIASES: Record<string, keyof ImportRow> = {
   status_ativo_desde: "status_ativo_desde",
   "status inativo desde": "status_inativo_desde",
   status_inativo_desde: "status_inativo_desde",
+  equipamentos: "equipamentos",
+  equipamento: "equipamentos",
+  "equipamentos desejados": "equipamentos",
 };
 
 function dividirLista(valor?: string | null) {
@@ -324,17 +425,60 @@ function montarResiduosDoCliente(cliente: Cliente): ResiduoForm[] {
   }));
 }
 
-/** Listagem / relatório — base sem colunas opcionais recentes. */
-const CLIENTES_SELECT_LIST_BASE =
-  "id, nome, razao_social, cnpj, status, cep, rua, numero, complemento, bairro, cidade, estado, endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade";
+/** Núcleo + cauda sem endereço de faturamento estruturado (compatível antes da migration). */
+const CLIENTES_SELECT_CORE =
+  "id, nome, razao_social, cnpj, status, cep, rua, numero, complemento, bairro, cidade, estado";
 
-const CLIENTES_SELECT_LIST_WITH_REP = CLIENTES_SELECT_LIST_BASE + ", representante_rg_id";
+const CLIENTES_SELECT_FAT_ENDERECO =
+  "cep_faturamento, rua_faturamento, numero_faturamento, complemento_faturamento, bairro_faturamento, cidade_faturamento, estado_faturamento";
 
-const CLIENTES_SELECT_FULL_BASE =
-  CLIENTES_SELECT_LIST_BASE + ", status_ativo_desde, status_inativo_desde";
+const CLIENTES_SELECT_TAIL_SEM_EQUIP =
+  "endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade";
 
-const CLIENTES_SELECT_FULL_WITH_REP =
-  CLIENTES_SELECT_LIST_WITH_REP + ", status_ativo_desde, status_inativo_desde";
+function montarClientesSelectPrincipal(
+  incluirFatEstruturado: boolean,
+  incluirEquipamentos: boolean
+): string {
+  const tail = incluirEquipamentos
+    ? `${CLIENTES_SELECT_TAIL_SEM_EQUIP}, equipamentos`
+    : CLIENTES_SELECT_TAIL_SEM_EQUIP;
+  return incluirFatEstruturado
+    ? `${CLIENTES_SELECT_CORE}, ${CLIENTES_SELECT_FAT_ENDERECO}, ${tail}`
+    : `${CLIENTES_SELECT_CORE}, ${tail}`;
+}
+
+function montarClientesSelectList(
+  incluirRep: boolean,
+  incluirCaminhao: boolean,
+  incluirFatEstruturado: boolean,
+  incluirEquipamentos: boolean
+): string {
+  const partes = [montarClientesSelectPrincipal(incluirFatEstruturado, incluirEquipamentos)];
+  if (incluirRep) partes.push("representante_rg_id");
+  if (incluirCaminhao) partes.push("caminhao_id");
+  return partes.join(", ");
+}
+
+function montarClientesSelectFull(
+  incluirRep: boolean,
+  incluirCaminhao: boolean,
+  incluirFatEstruturado: boolean,
+  incluirEquipamentos: boolean
+): string {
+  return (
+    montarClientesSelectList(incluirRep, incluirCaminhao, incluirFatEstruturado, incluirEquipamentos) +
+    ", status_ativo_desde, status_inativo_desde"
+  );
+}
+
+/** Filtro de busca: colunas `*_faturamento` só se existirem no banco. */
+function montarOrFilterBuscaClientes(s: string, incluirColunasFat: boolean): string {
+  const base = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%`;
+  const rest = incluirColunasFat
+    ? `,cidade_faturamento.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,rua.ilike.%${s}%,rua_faturamento.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`
+    : `,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,rua.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
+  return base + rest;
+}
 
 /** Migração `20260427140000_clientes_status_datas.sql` ainda não aplicada no Supabase. */
 function isMissingClientesStatusDateColumnsError(
@@ -349,13 +493,65 @@ function isMissingClientesStatusDateColumnsError(
 }
 
 function isMissingRepresentanteRgColumnError(
+  error: { message?: string; code?: string } | null | undefined
+): boolean {
+  const msg = (error?.message ?? "").toLowerCase();
+  const code = String(error?.code ?? "");
+  if (code === "PGRST204" && msg.includes("representante_rg_id")) return true;
+  if (!msg.includes("representante_rg_id")) return false;
+  return (
+    msg.includes("schema cache") ||
+    msg.includes("could not find") ||
+    msg.includes("does not exist") ||
+    msg.includes("unknown column")
+  );
+}
+
+function isMissingCaminhaoIdColumnError(
+  error: { message?: string; code?: string } | null | undefined
+): boolean {
+  const msg = (error?.message ?? "").toLowerCase();
+  const code = String(error?.code ?? "");
+  if (code === "PGRST204" && msg.includes("caminhao_id")) return true;
+  if (!msg.includes("caminhao_id")) return false;
+  return (
+    msg.includes("schema cache") ||
+    msg.includes("could not find") ||
+    msg.includes("does not exist") ||
+    msg.includes("unknown column")
+  );
+}
+
+/** Migração `20260510120000_clientes_endereco_faturamento_estruturado.sql` ainda não aplicada. */
+function isMissingFaturamentoEstruturadoColumnsError(
   error: { message?: string } | null | undefined
 ): boolean {
   const msg = (error?.message ?? "").toLowerCase();
   if (!msg) return false;
   return (
-    msg.includes("representante_rg_id") &&
-    (msg.includes("schema cache") || msg.includes("could not find"))
+    msg.includes("cep_faturamento") ||
+    msg.includes("rua_faturamento") ||
+    msg.includes("numero_faturamento") ||
+    msg.includes("complemento_faturamento") ||
+    msg.includes("bairro_faturamento") ||
+    msg.includes("cidade_faturamento") ||
+    msg.includes("estado_faturamento")
+  );
+}
+
+/** Migração `20260511120000_clientes_equipamentos.sql` ainda não aplicada. */
+function isMissingEquipamentosColumnError(
+  error: { message?: string; code?: string } | null | undefined
+): boolean {
+  const msg = (error?.message ?? "").toLowerCase();
+  const code = String(error?.code ?? "");
+  if (code === "PGRST204" && msg.includes("equipamentos")) return true;
+  if (!msg.includes("equipamentos")) return false;
+  return (
+    msg.includes("schema cache") ||
+    msg.includes("could not find") ||
+    msg.includes("does not exist") ||
+    msg.includes("unknown column")
   );
 }
 
@@ -386,9 +582,19 @@ export default function Clientes() {
   /** Migração `20260508120000_clientes_representante_rg_id.sql` ainda não aplicada no Supabase. */
   const representanteRgColDisponivelRef = useRef(true);
   const [mostrarSelectRepresentanteRg, setMostrarSelectRepresentanteRg] = useState(true);
+  /** Migração `20260509120000_clientes_caminhao_id.sql` ainda não aplicada no Supabase. */
+  const caminhaoIdColDisponivelRef = useRef(true);
+  const [mostrarSelectVeiculo, setMostrarSelectVeiculo] = useState(true);
+  /** Migração `20260510120000_clientes_endereco_faturamento_estruturado.sql` ainda não aplicada. */
+  const faturamentoEstruturadoColDisponivelRef = useRef(true);
+  /** Migração `20260511120000_clientes_equipamentos.sql` ainda não aplicada. */
+  const equipamentosColDisponivelRef = useRef(true);
 
   type RepresentanteRgOpcao = { id: string; nome: string };
   const [representantesRg, setRepresentantesRg] = useState<RepresentanteRgOpcao[]>([]);
+
+  type VeiculoCaminhaoOpcao = { id: string; placa: string; modelo: string | null };
+  const [veiculosCaminhoes, setVeiculosCaminhoes] = useState<VeiculoCaminhaoOpcao[]>([]);
 
   const termoFiltro = useMemo(() => buscaDebounced.trim(), [buscaDebounced]);
 
@@ -403,6 +609,13 @@ export default function Clientes() {
       setMostrarCadastro(true);
     },
   });
+
+  /** Alinha representante com a ref. Veículo: select fica sempre visível; o aviso de migração usa o estado. */
+  useEffect(() => {
+    if (!mostrarCadastro) return;
+    setMostrarSelectRepresentanteRg(representanteRgColDisponivelRef.current);
+    setMostrarSelectVeiculo(true);
+  }, [mostrarCadastro]);
 
   const abrirPainelDetalhesCliente = useCallback((c: Cliente) => {
     setPainelDetalheCliente(c);
@@ -427,15 +640,53 @@ export default function Clientes() {
     })();
   }, []);
 
+  const recarregarVeiculosCaminhoes = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("caminhoes")
+      .select("id, placa, modelo")
+      .order("placa", { ascending: true });
+    if (error) {
+      console.warn("Erro ao listar veículos (frota):", error);
+      return;
+    }
+    setVeiculosCaminhoes(
+      ((data as Array<{ id: string; placa: string; modelo: string | null }> | null) ?? []).map((v) => ({
+        id: v.id,
+        placa: v.placa,
+        modelo: v.modelo ?? null,
+      }))
+    );
+  }, []);
+
+  useEffect(() => {
+    void recarregarVeiculosCaminhoes();
+  }, [recarregarVeiculosCaminhoes]);
+
   const rotuloRepresentanteRgCliente = useCallback(
     (c: Cliente) => {
       const rid = c.representante_rg_id;
-      if (!rid) return "—";
-      const hit = representantesRg.find((r) => r.id === rid);
-      if (hit) return hit.nome;
-      return "Representante (indisponível na lista)";
+      if (rid) {
+        const hit = representantesRg.find((r) => r.id === rid);
+        if (hit) return hit.nome;
+        return "Representante (indisponível na lista)";
+      }
+      return c.responsavel_nome?.trim() || "—";
     },
     [representantesRg]
+  );
+
+  const rotuloVeiculoCliente = useCallback(
+    (c: Cliente) => {
+      const vid = c.caminhao_id;
+      if (!vid) return "—";
+      const hit = veiculosCaminhoes.find((v) => v.id === vid);
+      if (hit) {
+        const m = hit.modelo?.trim();
+        return m ? `${hit.placa} — ${m}` : hit.placa;
+      }
+      return "Veículo (indisponível na lista)";
+    },
+    [veiculosCaminhoes]
   );
 
   useEffect(() => {
@@ -444,24 +695,80 @@ export default function Clientes() {
     let cancelled = false;
     void (async () => {
       try {
-        const usarRep = representanteRgColDisponivelRef.current;
-        const fullPick = usarRep ? CLIENTES_SELECT_FULL_WITH_REP : CLIENTES_SELECT_FULL_BASE;
-        const listPick = usarRep ? CLIENTES_SELECT_LIST_WITH_REP : CLIENTES_SELECT_LIST_BASE;
+        let rep = representanteRgColDisponivelRef.current;
+        let cam = caminhaoIdColDisponivelRef.current;
+        let fat = faturamentoEstruturadoColDisponivelRef.current;
+        let eq = equipamentosColDisponivelRef.current;
 
-        let fullRes = await supabase.from("clientes").select(fullPick).eq("id", id).maybeSingle();
+        const runFull = () =>
+          supabase
+            .from("clientes")
+            .select(montarClientesSelectFull(rep, cam, fat, eq))
+            .eq("id", id)
+            .maybeSingle();
+        const runList = () =>
+          supabase
+            .from("clientes")
+            .select(montarClientesSelectList(rep, cam, fat, eq))
+            .eq("id", id)
+            .maybeSingle();
+
+        let fullRes = await runFull();
 
         if (fullRes.error && isMissingRepresentanteRgColumnError(fullRes.error)) {
           representanteRgColDisponivelRef.current = false;
           setMostrarSelectRepresentanteRg(false);
-          fullRes = await supabase
-            .from("clientes")
-            .select(CLIENTES_SELECT_FULL_BASE)
-            .eq("id", id)
-            .maybeSingle();
+          rep = false;
+          fullRes = await runFull();
+        }
+
+        if (fullRes.error && isMissingCaminhaoIdColumnError(fullRes.error)) {
+          caminhaoIdColDisponivelRef.current = false;
+          setMostrarSelectVeiculo(false);
+          cam = false;
+          fullRes = await runFull();
+        }
+
+        if (fullRes.error && isMissingFaturamentoEstruturadoColumnsError(fullRes.error)) {
+          faturamentoEstruturadoColDisponivelRef.current = false;
+          fat = false;
+          fullRes = await runFull();
+        }
+
+        if (fullRes.error && isMissingEquipamentosColumnError(fullRes.error)) {
+          equipamentosColDisponivelRef.current = false;
+          eq = false;
+          fullRes = await runFull();
         }
 
         if (fullRes.error && isMissingClientesStatusDateColumnsError(fullRes.error)) {
-          fullRes = await supabase.from("clientes").select(listPick).eq("id", id).maybeSingle();
+          fullRes = await runList();
+        }
+
+        if (fullRes.error && isMissingRepresentanteRgColumnError(fullRes.error)) {
+          representanteRgColDisponivelRef.current = false;
+          setMostrarSelectRepresentanteRg(false);
+          rep = false;
+          fullRes = await runList();
+        }
+
+        if (fullRes.error && isMissingCaminhaoIdColumnError(fullRes.error)) {
+          caminhaoIdColDisponivelRef.current = false;
+          setMostrarSelectVeiculo(false);
+          cam = false;
+          fullRes = await runList();
+        }
+
+        if (fullRes.error && isMissingFaturamentoEstruturadoColumnsError(fullRes.error)) {
+          faturamentoEstruturadoColDisponivelRef.current = false;
+          fat = false;
+          fullRes = await runList();
+        }
+
+        if (fullRes.error && isMissingEquipamentosColumnError(fullRes.error)) {
+          equipamentosColDisponivelRef.current = false;
+          eq = false;
+          fullRes = await runList();
         }
 
         if (fullRes.error && isMissingRepresentanteRgColumnError(fullRes.error)) {
@@ -469,7 +776,7 @@ export default function Clientes() {
           setMostrarSelectRepresentanteRg(false);
           fullRes = await supabase
             .from("clientes")
-            .select(CLIENTES_SELECT_LIST_BASE)
+            .select(montarClientesSelectList(false, false, fat, eq))
             .eq("id", id)
             .maybeSingle();
         }
@@ -500,39 +807,80 @@ export default function Clientes() {
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
-    const montarQueries = (listStr: string) => {
+    const montarQueries = (listStr: string, incluirColunasFat: boolean) => {
       let countQ = supabase.from("clientes").select("id", { count: "exact", head: true });
       let dataQ = supabase.from("clientes").select(listStr).order("nome", { ascending: true });
 
       if (termoFiltro) {
         const s = sanitizeIlikePattern(termoFiltro);
-        const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
+        const orFilter = montarOrFilterBuscaClientes(s, incluirColunasFat);
         countQ = countQ.or(orFilter);
         dataQ = dataQ.or(orFilter);
       }
       return { countQ, dataQ };
     };
 
-    let usarRep = representanteRgColDisponivelRef.current;
-    let listStr = usarRep ? CLIENTES_SELECT_LIST_WITH_REP : CLIENTES_SELECT_LIST_BASE;
-    let { countQ, dataQ } = montarQueries(listStr);
+    let rep = representanteRgColDisponivelRef.current;
+    let cam = caminhaoIdColDisponivelRef.current;
+    let fat = faturamentoEstruturadoColDisponivelRef.current;
+    let eq = equipamentosColDisponivelRef.current;
+
+    const executarFetch = () => {
+      const listStr = montarClientesSelectList(rep, cam, fat, eq);
+      return montarQueries(listStr, fat);
+    };
+
+    let { countQ, dataQ } = executarFetch();
 
     let [{ count, error: errCount }, { data, error }] = await Promise.all([
       countQ,
       dataQ.range(from, to),
     ]);
 
-    if (error && usarRep && isMissingRepresentanteRgColumnError(error)) {
-      representanteRgColDisponivelRef.current = false;
-      setMostrarSelectRepresentanteRg(false);
-      usarRep = false;
-      listStr = CLIENTES_SELECT_LIST_BASE;
-      const q2 = montarQueries(listStr);
-      ({ countQ, dataQ } = q2);
-      [{ count, error: errCount }, { data, error }] = await Promise.all([
-        countQ,
-        dataQ.range(from, to),
-      ]);
+    while (error) {
+      if (rep && isMissingRepresentanteRgColumnError(error)) {
+        representanteRgColDisponivelRef.current = false;
+        setMostrarSelectRepresentanteRg(false);
+        rep = false;
+        ({ countQ, dataQ } = executarFetch());
+        [{ count, error: errCount }, { data, error }] = await Promise.all([
+          countQ,
+          dataQ.range(from, to),
+        ]);
+        continue;
+      }
+      if (cam && isMissingCaminhaoIdColumnError(error)) {
+        caminhaoIdColDisponivelRef.current = false;
+        setMostrarSelectVeiculo(false);
+        cam = false;
+        ({ countQ, dataQ } = executarFetch());
+        [{ count, error: errCount }, { data, error }] = await Promise.all([
+          countQ,
+          dataQ.range(from, to),
+        ]);
+        continue;
+      }
+      if (fat && isMissingFaturamentoEstruturadoColumnsError(error)) {
+        faturamentoEstruturadoColDisponivelRef.current = false;
+        fat = false;
+        ({ countQ, dataQ } = executarFetch());
+        [{ count, error: errCount }, { data, error }] = await Promise.all([
+          countQ,
+          dataQ.range(from, to),
+        ]);
+        continue;
+      }
+      if (eq && isMissingEquipamentosColumnError(error)) {
+        equipamentosColDisponivelRef.current = false;
+        eq = false;
+        ({ countQ, dataQ } = executarFetch());
+        [{ count, error: errCount }, { data, error }] = await Promise.all([
+          countQ,
+          dataQ.range(from, to),
+        ]);
+        continue;
+      }
+      break;
     }
 
     if (errCount) {
@@ -543,45 +891,94 @@ export default function Clientes() {
 
     if (error) {
       console.error("Erro ao buscar clientes:", error);
+      const listMin = montarClientesSelectList(false, false, false, false);
+      const { countQ: cqMin, dataQ: dqMin } = montarQueries(listMin, false);
+      try {
+        const [cRes, dRes] = await Promise.all([cqMin, dqMin.range(from, to)]);
+        if (!dRes.error && Array.isArray(dRes.data)) {
+          if (!cRes.error && typeof cRes.count === "number") {
+            setTotalCount(cRes.count);
+          }
+          // Sucesso com select mínimo não prova que rep/cam/fat estão ausentes no banco
+          // (a falha anterior pode ser outra). Mantém UI e refs para o formulário.
+          setClientes((dRes.data as unknown as Cliente[]) || []);
+          setLoading(false);
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
       setClientes([]);
       setLoading(false);
       return;
     }
 
-    setClientes((data as Cliente[]) || []);
+    setClientes((data as unknown as Cliente[]) || []);
     setLoading(false);
   }, [page, pageSize, termoFiltro]);
 
   const fetchClientesRelatorio = useCallback(async (): Promise<Cliente[]> => {
     const PAGE = 1000;
-    const montarDataQ = (listStr: string) => {
+    const montarDataQ = (listStr: string, incluirColunasFat: boolean) => {
       let dataQ = supabase.from("clientes").select(listStr).order("nome", { ascending: true });
       if (termoFiltro) {
         const s = sanitizeIlikePattern(termoFiltro);
-        const orFilter = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%`;
+        const orFilter = montarOrFilterBuscaClientes(s, incluirColunasFat);
         dataQ = dataQ.or(orFilter);
       }
       return dataQ;
     };
 
-    let usarRep = representanteRgColDisponivelRef.current;
-    let listStr = usarRep ? CLIENTES_SELECT_LIST_WITH_REP : CLIENTES_SELECT_LIST_BASE;
-    let dataQ = montarDataQ(listStr);
+    let rep = representanteRgColDisponivelRef.current;
+    let cam = caminhaoIdColDisponivelRef.current;
+    let fat = faturamentoEstruturadoColDisponivelRef.current;
+    let eq = equipamentosColDisponivelRef.current;
 
     const out: Cliente[] = [];
     for (let from = 0; ; from += PAGE) {
       const to = from + PAGE - 1;
+      let listStr = montarClientesSelectList(rep, cam, fat, eq);
+      let dataQ = montarDataQ(listStr, fat);
       let { data, error } = await dataQ.range(from, to);
-      if (error && usarRep && isMissingRepresentanteRgColumnError(error)) {
-        representanteRgColDisponivelRef.current = false;
-        setMostrarSelectRepresentanteRg(false);
-        usarRep = false;
-        listStr = CLIENTES_SELECT_LIST_BASE;
-        dataQ = montarDataQ(listStr);
-        ({ data, error } = await dataQ.range(from, to));
+      while (error) {
+        if (rep && isMissingRepresentanteRgColumnError(error)) {
+          representanteRgColDisponivelRef.current = false;
+          setMostrarSelectRepresentanteRg(false);
+          rep = false;
+          listStr = montarClientesSelectList(rep, cam, fat, eq);
+          dataQ = montarDataQ(listStr, fat);
+          ({ data, error } = await dataQ.range(from, to));
+          continue;
+        }
+        if (cam && isMissingCaminhaoIdColumnError(error)) {
+          caminhaoIdColDisponivelRef.current = false;
+          setMostrarSelectVeiculo(false);
+          cam = false;
+          listStr = montarClientesSelectList(rep, cam, fat, eq);
+          dataQ = montarDataQ(listStr, fat);
+          ({ data, error } = await dataQ.range(from, to));
+          continue;
+        }
+        if (fat && isMissingFaturamentoEstruturadoColumnsError(error)) {
+          faturamentoEstruturadoColDisponivelRef.current = false;
+          fat = false;
+          listStr = montarClientesSelectList(rep, cam, fat, eq);
+          dataQ = montarDataQ(listStr, fat);
+          ({ data, error } = await dataQ.range(from, to));
+          continue;
+        }
+        if (eq && isMissingEquipamentosColumnError(error)) {
+          equipamentosColDisponivelRef.current = false;
+          eq = false;
+          listStr = montarClientesSelectList(rep, cam, fat, eq);
+          dataQ = montarDataQ(listStr, fat);
+          ({ data, error } = await dataQ.range(from, to));
+          continue;
+        }
+        break;
       }
       if (error) throw error;
-      const chunk = ((data as Cliente[]) || []).filter(Boolean);
+      const chunk = ((data as unknown as Cliente[]) || []).filter(Boolean);
       out.push(...chunk);
       if (chunk.length < PAGE) break;
     }
@@ -626,13 +1023,15 @@ export default function Clientes() {
           "Razão social",
           "CNPJ",
           "Cidade",
-          "Endereço",
-          "Responsável",
+          "Endereço de Coleta",
+          "Endereço de Faturamento",
+          "Representante RG",
           "Telefone",
           "E-mail",
           "E-mail NF",
           "Resíduo",
           "Classe",
+          "Equipamentos",
           "Licença válida até",
           "Status",
         ]],
@@ -642,12 +1041,14 @@ export default function Clientes() {
           c.cnpj ?? "",
           c.cidade ?? "-",
           formatarEnderecoRelatorio(c),
-          c.responsavel_nome?.trim() || "-",
+          formatarEnderecoFaturamentoRelatorio(c),
+          rotuloRepresentanteRgCliente(c),
           c.telefone?.trim() || "-",
           c.email?.trim() || "-",
           c.email_nf?.trim() || "-",
           c.tipo_residuo ?? "-",
           c.classificacao ?? "-",
+          (c.equipamentos ?? "").trim() || "-",
           formatarData(c.validade),
           c.status ?? "Ativo",
         ]),
@@ -656,19 +1057,21 @@ export default function Clientes() {
         margin: { left: 40, right: 40 },
         tableWidth: "auto",
         columnStyles: {
-          0: { cellWidth: 62 },
-          1: { cellWidth: 72 },
-          2: { cellWidth: 58 },
-          3: { cellWidth: 44 },
-          4: { cellWidth: 78 },
-          5: { cellWidth: 48 },
-          6: { cellWidth: 46 },
-          7: { cellWidth: 54 },
+          0: { cellWidth: 56 },
+          1: { cellWidth: 64 },
+          2: { cellWidth: 52 },
+          3: { cellWidth: 40 },
+          4: { cellWidth: 64 },
+          5: { cellWidth: 64 },
+          6: { cellWidth: 44 },
+          7: { cellWidth: 42 },
           8: { cellWidth: 50 },
-          9: { cellWidth: 44 },
-          10: { cellWidth: 34 },
-          11: { cellWidth: 40 },
-          12: { cellWidth: 34 },
+          9: { cellWidth: 46 },
+          10: { cellWidth: 40 },
+          11: { cellWidth: 32 },
+          12: { cellWidth: 44 },
+          13: { cellWidth: 36 },
+          14: { cellWidth: 32 },
         },
       });
 
@@ -680,7 +1083,7 @@ export default function Clientes() {
     } finally {
       setGerandoRelatorio(false);
     }
-  }, [fetchClientesRelatorio, termoFiltro]);
+  }, [fetchClientesRelatorio, termoFiltro, rotuloRepresentanteRgCliente]);
 
   const handleBaixarModeloExcel = useCallback(() => {
     const headers = [
@@ -688,11 +1091,21 @@ export default function Clientes() {
       "razao_social",
       "cnpj",
       "status",
+      "cep",
+      "rua",
+      "numero",
+      "complemento",
+      "bairro",
       "cidade",
       "estado",
+      "cep_faturamento",
+      "rua_faturamento",
+      "numero_faturamento",
+      "complemento_faturamento",
+      "bairro_faturamento",
+      "cidade_faturamento",
+      "estado_faturamento",
       "email_nf",
-      "endereco_coleta",
-      "endereco_faturamento",
       "responsavel_nome",
       "telefone",
       "email",
@@ -702,6 +1115,7 @@ export default function Clientes() {
       "frequencia_coleta",
       "licenca_numero",
       "validade",
+      "equipamentos",
     ];
 
     const exemplo = [
@@ -709,11 +1123,21 @@ export default function Clientes() {
       "Cliente Exemplo LTDA",
       "00.000.000/0000-00",
       "Ativo",
+      "01310-100",
+      "Av. Paulista",
+      "1000",
+      "Sala 1",
+      "Bela Vista",
+      "São Paulo",
+      "SP",
+      "01310-100",
+      "Av. Paulista",
+      "1000",
+      "Sala 1",
+      "Bela Vista",
       "São Paulo",
       "SP",
       "nf@cliente.com.br",
-      "",
-      "",
       "Fulano",
       "(11) 99999-9999",
       "contato@cliente.com.br",
@@ -723,6 +1147,7 @@ export default function Clientes() {
       "semanal",
       "",
       "2026-12-31",
+      "",
     ];
 
     const ws = XLSX.utils.aoa_to_sheet([headers, exemplo]);
@@ -742,11 +1167,13 @@ export default function Clientes() {
         "cnpj",
         "status",
         "endereco_coleta",
+        "endereco_faturamento",
         "email_nf",
         "tipo_residuo",
         "classificacao",
         "licenca_numero",
         "validade",
+        "equipamentos",
       ];
 
       const aoa = [
@@ -756,12 +1183,14 @@ export default function Clientes() {
           c.razao_social ?? "",
           c.cnpj ?? "",
           c.status ?? "Ativo",
-          c.endereco_coleta ?? "",
+          formatarEnderecoRelatorio(c),
+          formatarEnderecoFaturamentoRelatorio(c),
           c.email_nf ?? "",
           c.tipo_residuo ?? "",
           c.classificacao ?? "",
           c.licenca_numero ?? "",
           c.validade ?? "",
+          c.equipamentos ?? "",
         ]),
       ];
 
@@ -896,6 +1325,24 @@ export default function Clientes() {
         const updates: Array<{ id: string; payload: Record<string, unknown> }> = [];
 
         for (const r of rows) {
+          const textoColetaImp = montarEnderecoTextoLivreDosCamposEstruturados({
+            cep: r.cep || "",
+            rua: r.rua || "",
+            numero: r.numero || "",
+            complemento: r.complemento || "",
+            bairro: r.bairro || "",
+            cidade: r.cidade || "",
+            estado: r.estado || "",
+          });
+          const textoFatImp = montarEnderecoTextoLivreDosCamposEstruturados({
+            cep: r.cep_faturamento || r.cep || "",
+            rua: r.rua_faturamento || r.rua || "",
+            numero: r.numero_faturamento || r.numero || "",
+            complemento: r.complemento_faturamento || r.complemento || "",
+            bairro: r.bairro_faturamento || r.bairro || "",
+            cidade: r.cidade_faturamento || r.cidade || "",
+            estado: r.estado_faturamento || r.estado || "",
+          });
           const payload = {
             nome: r.nome!,
             razao_social: r.razao_social!,
@@ -908,8 +1355,15 @@ export default function Clientes() {
             bairro: limparOuNull(r.bairro || ""),
             cidade: limparOuNull(r.cidade || ""),
             estado: limparOuNull(r.estado || ""),
-            endereco_coleta: limparOuNull(r.endereco_coleta || ""),
-            endereco_faturamento: limparOuNull(r.endereco_faturamento || ""),
+            cep_faturamento: limparOuNull(r.cep_faturamento || ""),
+            rua_faturamento: limparOuNull(r.rua_faturamento || ""),
+            numero_faturamento: limparOuNull(r.numero_faturamento || ""),
+            complemento_faturamento: limparOuNull(r.complemento_faturamento || ""),
+            bairro_faturamento: limparOuNull(r.bairro_faturamento || ""),
+            cidade_faturamento: limparOuNull(r.cidade_faturamento || ""),
+            estado_faturamento: limparOuNull(r.estado_faturamento || ""),
+            endereco_coleta: limparOuNull(r.endereco_coleta || textoColetaImp),
+            endereco_faturamento: limparOuNull(r.endereco_faturamento || textoFatImp),
             email_nf: limparOuNull(r.email_nf || ""),
             responsavel_nome: limparOuNull(r.responsavel_nome || ""),
             telefone: limparOuNull(r.telefone || ""),
@@ -922,6 +1376,7 @@ export default function Clientes() {
             validade: limparOuNull(r.validade || ""),
             status_ativo_desde: limparOuNull(r.status_ativo_desde || ""),
             status_inativo_desde: limparOuNull(r.status_inativo_desde || ""),
+            equipamentos: limparOuNull(r.equipamentos || ""),
           };
 
           const id = existingMap.get(r.cnpj!);
@@ -978,11 +1433,17 @@ export default function Clientes() {
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) {
     const { name, value } = e.target;
-
-    setForm((prev) => ({
-      ...prev,
-      [name]: name === "cnpj" ? formatarCNPJ(value) : value,
-    }));
+    const rawValue = name === "cnpj" ? formatarCNPJ(value) : value;
+    setForm((prev) => {
+      if (name === "representante_rg_id") {
+        const nomeRep =
+          rawValue.trim() === ""
+            ? ""
+            : representantesRg.find((r) => r.id === rawValue)?.nome ?? prev.responsavel_nome;
+        return { ...prev, representante_rg_id: rawValue, responsavel_nome: nomeRep };
+      }
+      return { ...prev, [name]: rawValue };
+    });
   }
 
   function handleResiduoChange(
@@ -1054,15 +1515,28 @@ export default function Clientes() {
       cidade: row.cidade || "",
       estado: row.estado || "",
 
-      endereco_coleta: row.endereco_coleta || "",
-      endereco_faturamento: row.endereco_faturamento || "",
+      cep_faturamento: row.cep_faturamento ?? row.cep ?? "",
+      rua_faturamento: row.rua_faturamento ?? row.rua ?? "",
+      numero_faturamento: row.numero_faturamento ?? row.numero ?? "",
+      complemento_faturamento: row.complemento_faturamento ?? row.complemento ?? "",
+      bairro_faturamento: row.bairro_faturamento ?? row.bairro ?? "",
+      cidade_faturamento: row.cidade_faturamento ?? row.cidade ?? "",
+      estado_faturamento: row.estado_faturamento ?? row.estado ?? "",
+
       email_nf: row.email_nf || "",
 
-      responsavel_nome: row.responsavel_nome || "",
+      responsavel_nome:
+        row.responsavel_nome?.trim() ||
+        (row.representante_rg_id
+          ? representantesRg.find((r) => r.id === row.representante_rg_id)?.nome ?? ""
+          : ""),
       telefone: row.telefone || "",
       email: row.email || "",
 
       representante_rg_id: row.representante_rg_id ?? "",
+      caminhao_id: row.caminhao_id ?? "",
+
+      equipamentos: row.equipamentos ?? "",
 
       licenca_numero: row.licenca_numero || "",
       validade: row.validade || "",
@@ -1098,24 +1572,80 @@ export default function Clientes() {
 
   async function sincronizarClienteRemotoNoFormulario(clienteId: string) {
     try {
-      const usarRep = representanteRgColDisponivelRef.current;
-      const fullPick = usarRep ? CLIENTES_SELECT_FULL_WITH_REP : CLIENTES_SELECT_FULL_BASE;
-      const listPick = usarRep ? CLIENTES_SELECT_LIST_WITH_REP : CLIENTES_SELECT_LIST_BASE;
+      let rep = representanteRgColDisponivelRef.current;
+      let cam = caminhaoIdColDisponivelRef.current;
+      let fat = faturamentoEstruturadoColDisponivelRef.current;
+      let eq = equipamentosColDisponivelRef.current;
 
-      let fullRes = await supabase.from("clientes").select(fullPick).eq("id", clienteId).maybeSingle();
+      const runFull = () =>
+        supabase
+          .from("clientes")
+          .select(montarClientesSelectFull(rep, cam, fat, eq))
+          .eq("id", clienteId)
+          .maybeSingle();
+      const runList = () =>
+        supabase
+          .from("clientes")
+          .select(montarClientesSelectList(rep, cam, fat, eq))
+          .eq("id", clienteId)
+          .maybeSingle();
+
+      let fullRes = await runFull();
 
       if (fullRes.error && isMissingRepresentanteRgColumnError(fullRes.error)) {
         representanteRgColDisponivelRef.current = false;
         setMostrarSelectRepresentanteRg(false);
-        fullRes = await supabase
-          .from("clientes")
-          .select(CLIENTES_SELECT_FULL_BASE)
-          .eq("id", clienteId)
-          .maybeSingle();
+        rep = false;
+        fullRes = await runFull();
+      }
+
+      if (fullRes.error && isMissingCaminhaoIdColumnError(fullRes.error)) {
+        caminhaoIdColDisponivelRef.current = false;
+        setMostrarSelectVeiculo(false);
+        cam = false;
+        fullRes = await runFull();
+      }
+
+      if (fullRes.error && isMissingFaturamentoEstruturadoColumnsError(fullRes.error)) {
+        faturamentoEstruturadoColDisponivelRef.current = false;
+        fat = false;
+        fullRes = await runFull();
+      }
+
+      if (fullRes.error && isMissingEquipamentosColumnError(fullRes.error)) {
+        equipamentosColDisponivelRef.current = false;
+        eq = false;
+        fullRes = await runFull();
       }
 
       if (fullRes.error && isMissingClientesStatusDateColumnsError(fullRes.error)) {
-        fullRes = await supabase.from("clientes").select(listPick).eq("id", clienteId).maybeSingle();
+        fullRes = await runList();
+      }
+
+      if (fullRes.error && isMissingRepresentanteRgColumnError(fullRes.error)) {
+        representanteRgColDisponivelRef.current = false;
+        setMostrarSelectRepresentanteRg(false);
+        rep = false;
+        fullRes = await runList();
+      }
+
+      if (fullRes.error && isMissingCaminhaoIdColumnError(fullRes.error)) {
+        caminhaoIdColDisponivelRef.current = false;
+        setMostrarSelectVeiculo(false);
+        cam = false;
+        fullRes = await runList();
+      }
+
+      if (fullRes.error && isMissingFaturamentoEstruturadoColumnsError(fullRes.error)) {
+        faturamentoEstruturadoColDisponivelRef.current = false;
+        fat = false;
+        fullRes = await runList();
+      }
+
+      if (fullRes.error && isMissingEquipamentosColumnError(fullRes.error)) {
+        equipamentosColDisponivelRef.current = false;
+        eq = false;
+        fullRes = await runList();
       }
 
       if (fullRes.error && isMissingRepresentanteRgColumnError(fullRes.error)) {
@@ -1123,7 +1653,7 @@ export default function Clientes() {
         setMostrarSelectRepresentanteRg(false);
         fullRes = await supabase
           .from("clientes")
-          .select(CLIENTES_SELECT_LIST_BASE)
+          .select(montarClientesSelectList(false, false, fat, eq))
           .eq("id", clienteId)
           .maybeSingle();
       }
@@ -1182,8 +1712,35 @@ export default function Clientes() {
       bairro: limparOuNull(form.bairro),
       cidade: limparOuNull(form.cidade),
       estado: limparOuNull(form.estado),
-      endereco_coleta: limparOuNull(form.endereco_coleta),
-      endereco_faturamento: limparOuNull(form.endereco_faturamento),
+      cep_faturamento: limparOuNull(form.cep_faturamento),
+      rua_faturamento: limparOuNull(form.rua_faturamento),
+      numero_faturamento: limparOuNull(form.numero_faturamento),
+      complemento_faturamento: limparOuNull(form.complemento_faturamento),
+      bairro_faturamento: limparOuNull(form.bairro_faturamento),
+      cidade_faturamento: limparOuNull(form.cidade_faturamento),
+      estado_faturamento: limparOuNull(form.estado_faturamento),
+      endereco_coleta: limparOuNull(
+        montarEnderecoTextoLivreDosCamposEstruturados({
+          cep: form.cep,
+          rua: form.rua,
+          numero: form.numero,
+          complemento: form.complemento,
+          bairro: form.bairro,
+          cidade: form.cidade,
+          estado: form.estado,
+        })
+      ),
+      endereco_faturamento: limparOuNull(
+        montarEnderecoTextoLivreDosCamposEstruturados({
+          cep: form.cep_faturamento,
+          rua: form.rua_faturamento,
+          numero: form.numero_faturamento,
+          complemento: form.complemento_faturamento,
+          bairro: form.bairro_faturamento,
+          cidade: form.cidade_faturamento,
+          estado: form.estado_faturamento,
+        })
+      ),
       email_nf: limparOuNull(form.email_nf),
       responsavel_nome: limparOuNull(form.responsavel_nome),
       telefone: limparOuNull(form.telefone),
@@ -1203,16 +1760,25 @@ export default function Clientes() {
     };
 
     let usarRepresentante = representanteRgColDisponivelRef.current;
+    /** Inclui caminhao_id no payload se a ref indicar coluna OU se o utilizador escolheu veículo (ref pode estar errada após fetch). */
+    let usarCaminhao =
+      caminhaoIdColDisponivelRef.current || form.caminhao_id.trim() !== "";
+    let usarEquipamentos =
+      equipamentosColDisponivelRef.current || form.equipamentos.trim() !== "";
     let usarStatusDatas = true;
 
     const montarPayloadSalvar = (): Record<string, unknown> => {
-      const comRep = usarRepresentante
-        ? {
-            ...payloadCamposPrincipais,
-            representante_rg_id: form.representante_rg_id.trim() || null,
-          }
-        : payloadCamposPrincipais;
-      return usarStatusDatas ? { ...comRep, ...statusDatasExtras } : comRep;
+      let corpo: Record<string, unknown> = { ...payloadCamposPrincipais };
+      if (usarRepresentante) {
+        corpo.representante_rg_id = form.representante_rg_id.trim() || null;
+      }
+      if (usarCaminhao) {
+        corpo.caminhao_id = form.caminhao_id.trim() || null;
+      }
+      if (usarEquipamentos) {
+        corpo.equipamentos = limparOuNull(form.equipamentos);
+      }
+      return usarStatusDatas ? { ...corpo, ...statusDatasExtras } : corpo;
     };
 
     const executarSalvar = (payload: Record<string, unknown>) =>
@@ -1229,9 +1795,20 @@ export default function Clientes() {
       response = await executarSalvar(montarPayloadSalvar());
     }
 
+    if (response.error && usarCaminhao && isMissingCaminhaoIdColumnError(response.error)) {
+      caminhaoIdColDisponivelRef.current = false;
+      setMostrarSelectVeiculo(false);
+      usarCaminhao = false;
+      response = await executarSalvar(montarPayloadSalvar());
+    }
+
     if (response.error && usarStatusDatas && isMissingClientesStatusDateColumnsError(response.error)) {
       usarStatusDatas = false;
       usarRepresentante = representanteRgColDisponivelRef.current;
+      usarCaminhao =
+        caminhaoIdColDisponivelRef.current || form.caminhao_id.trim() !== "";
+      usarEquipamentos =
+        equipamentosColDisponivelRef.current || form.equipamentos.trim() !== "";
       response = await executarSalvar(montarPayloadSalvar());
     }
 
@@ -1239,6 +1816,19 @@ export default function Clientes() {
       representanteRgColDisponivelRef.current = false;
       setMostrarSelectRepresentanteRg(false);
       usarRepresentante = false;
+      response = await executarSalvar(montarPayloadSalvar());
+    }
+
+    if (response.error && usarCaminhao && isMissingCaminhaoIdColumnError(response.error)) {
+      caminhaoIdColDisponivelRef.current = false;
+      setMostrarSelectVeiculo(false);
+      usarCaminhao = false;
+      response = await executarSalvar(montarPayloadSalvar());
+    }
+
+    if (response.error && usarEquipamentos && isMissingEquipamentosColumnError(response.error)) {
+      equipamentosColDisponivelRef.current = false;
+      usarEquipamentos = false;
       response = await executarSalvar(montarPayloadSalvar());
     }
 
@@ -1537,32 +2127,71 @@ export default function Clientes() {
                     <option value="Inativo">Inativo</option>
                   </select>
                 </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: "12px",
-                    marginTop: "12px",
-                  }}
-                >
-                  <input
-                    type="date"
-                    name="status_ativo_desde"
-                    value={form.status_ativo_desde}
-                    onChange={handleInputChange}
-                    aria-label="Ativo desde"
-                    title="Ativo desde (opcional)"
-                    style={inputStyle}
-                  />
-                  <input
-                    type="date"
-                    name="status_inativo_desde"
-                    value={form.status_inativo_desde}
-                    onChange={handleInputChange}
-                    aria-label="Inativo desde"
-                    title="Inativo desde (opcional)"
-                    style={inputStyle}
-                  />
+                <div style={{ marginTop: "14px" }}>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      color: "#64748b",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Histórico de status <span style={{ fontWeight: 500 }}>(opcional)</span>
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                      gap: "12px",
+                    }}
+                  >
+                    <div>
+                      <label
+                        htmlFor="cliente-status-ativo-desde"
+                        style={{
+                          display: "block",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          color: "#475569",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        Ativo desde
+                      </label>
+                      <input
+                        id="cliente-status-ativo-desde"
+                        type="date"
+                        name="status_ativo_desde"
+                        value={form.status_ativo_desde}
+                        onChange={handleInputChange}
+                        aria-label="Ativo desde"
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="cliente-status-inativo-desde"
+                        style={{
+                          display: "block",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          color: "#475569",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        Inativo desde
+                      </label>
+                      <input
+                        id="cliente-status-inativo-desde"
+                        type="date"
+                        name="status_inativo_desde"
+                        value={form.status_inativo_desde}
+                        onChange={handleInputChange}
+                        aria-label="Inativo desde"
+                        style={inputStyle}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1575,7 +2204,7 @@ export default function Clientes() {
                     marginBottom: "12px",
                   }}
                 >
-                  Endereço
+                  Endereço de Coleta
                 </div>
 
                 <div
@@ -1656,33 +2285,74 @@ export default function Clientes() {
                     marginBottom: "12px",
                   }}
                 >
-                  Coleta e faturamento
+                  Endereço de Faturamento
                 </div>
-                <p style={{ margin: "0 0 12px", fontSize: "13px", color: "#64748b", lineHeight: 1.45 }}>
-                  Endereços em texto livre para operação e faturamento (complementam o endereço estruturado acima).
-                </p>
+
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
+                    gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr",
+                    gap: "12px",
+                    marginBottom: "12px",
+                  }}
+                >
+                  <input
+                    name="cep_faturamento"
+                    value={form.cep_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="CEP"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="rua_faturamento"
+                    value={form.rua_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="Rua"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="numero_faturamento"
+                    value={form.numero_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="Número"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="complemento_faturamento"
+                    value={form.complemento_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="Complemento"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="bairro_faturamento"
+                    value={form.bairro_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="Bairro"
+                    style={inputStyle}
+                  />
+                  <input
+                    name="cidade_faturamento"
+                    value={form.cidade_faturamento}
+                    onChange={handleInputChange}
+                    placeholder="Cidade"
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr",
                     gap: "12px",
                   }}
                 >
-                  <textarea
-                    name="endereco_coleta"
-                    value={form.endereco_coleta}
+                  <input
+                    name="estado_faturamento"
+                    value={form.estado_faturamento}
                     onChange={handleInputChange}
-                    placeholder="Endereço de coleta (completo)"
-                    rows={4}
-                    style={textareaStyle}
-                  />
-                  <textarea
-                    name="endereco_faturamento"
-                    value={form.endereco_faturamento}
-                    onChange={handleInputChange}
-                    placeholder="Endereço de faturamento (completo)"
-                    rows={4}
-                    style={textareaStyle}
+                    placeholder="Estado"
+                    style={{ ...inputStyle, maxWidth: "240px" }}
                   />
                 </div>
               </div>
@@ -1696,7 +2366,7 @@ export default function Clientes() {
                     marginBottom: "12px",
                   }}
                 >
-                  Responsável
+                  Representante RG
                 </div>
 
                 <div
@@ -1706,13 +2376,32 @@ export default function Clientes() {
                     gap: "12px",
                   }}
                 >
-                  <input
-                    name="responsavel_nome"
-                    value={form.responsavel_nome}
-                    onChange={handleInputChange}
-                    placeholder="Nome do responsável"
-                    style={inputStyle}
-                  />
+                  {mostrarSelectRepresentanteRg ? (
+                    <select
+                      id="cliente-representante-rg"
+                      name="representante_rg_id"
+                      value={form.representante_rg_id}
+                      onChange={handleInputChange}
+                      aria-label="Representante RG"
+                      style={selectStyle}
+                    >
+                      <option value="">Selecione o representante RG</option>
+                      {representantesRg.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.nome}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      name="responsavel_nome"
+                      value={form.responsavel_nome}
+                      onChange={handleInputChange}
+                      placeholder="Nome do responsável"
+                      style={inputStyle}
+                      aria-label="Representante RG (texto — base sem coluna no banco)"
+                    />
+                  )}
 
                   <input
                     name="telefone"
@@ -1731,6 +2420,12 @@ export default function Clientes() {
                   />
                 </div>
 
+                {mostrarSelectRepresentanteRg ? (
+                  <p style={{ margin: "10px 0 0", fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Cadastro em <strong>Cadastros → Representante RG</strong>.
+                  </p>
+                ) : null}
+
                 <div style={{ marginTop: "12px" }}>
                   <input
                     name="email_nf"
@@ -1741,39 +2436,116 @@ export default function Clientes() {
                   />
                 </div>
 
-                {mostrarSelectRepresentanteRg ? (
-                  <div style={{ marginTop: "16px" }}>
-                    <label
-                      htmlFor="cliente-representante-rg"
+                <div style={{ marginTop: "22px" }}>
+                  <div
+                    style={{
+                      fontSize: "15px",
+                      fontWeight: 800,
+                      color: "#334155",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    Veículo
+                  </div>
+                  {!mostrarSelectVeiculo ? (
+                    <p
                       style={{
-                        display: "block",
-                        fontSize: "13px",
-                        fontWeight: 700,
-                        color: "#475569",
-                        marginBottom: "8px",
+                        margin: "0 0 12px",
+                        fontSize: "12px",
+                        color: "#92400e",
+                        lineHeight: 1.45,
+                        background: "#fffbeb",
+                        border: "1px solid #fcd34d",
+                        borderRadius: "8px",
+                        padding: "10px 12px",
                       }}
                     >
-                      Representante RG
-                    </label>
-                    <select
-                      id="cliente-representante-rg"
-                      name="representante_rg_id"
-                      value={form.representante_rg_id}
-                      onChange={handleInputChange}
-                      style={selectStyle}
-                    >
-                      <option value="">— Nenhum —</option>
-                      {representantesRg.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.nome}
-                        </option>
-                      ))}
-                    </select>
-                    <p style={{ margin: "8px 0 0", fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
-                      Cadastro em <strong>Cadastros → Representante RG</strong>.
+                      Ao guardar, se aparecer erro sobre <strong>caminhao_id</strong>, aplique a
+                      migração no Supabase (coluna na tabela <strong>clientes</strong>). A frota
+                      cadastra-se em <strong>Cadastros → Veículos</strong>; pode escolher o veículo
+                      abaixo — a gravação do vínculo depende dessa coluna existir.
                     </p>
+                  ) : null}
+                  <label
+                    htmlFor="cliente-veiculo-select"
+                    style={{
+                      display: "block",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      color: "#475569",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Selecionar veículo
+                  </label>
+                  <select
+                    id="cliente-veiculo-select"
+                    name="caminhao_id"
+                    value={form.caminhao_id}
+                    onChange={handleInputChange}
+                    aria-label="Veículo da frota (tabela caminhoes)"
+                    style={selectStyle}
+                  >
+                    <option value="">Selecione o veículo</option>
+                    {veiculosCaminhoes.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.modelo?.trim() ? `${v.placa} — ${v.modelo.trim()}` : v.placa}
+                      </option>
+                    ))}
+                  </select>
+                  <p
+                    style={{
+                      margin: "8px 0 0",
+                      fontSize: "12px",
+                      color: "#64748b",
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    Lista ligada ao cadastro em <strong>Cadastros → Veículos</strong>. Para incluir
+                    ou editar veículos, use essa página.
+                  </p>
+                </div>
+
+                <div style={{ marginTop: "22px" }}>
+                  <div
+                    style={{
+                      fontSize: "15px",
+                      fontWeight: 800,
+                      color: "#334155",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    Equipamentos
                   </div>
-                ) : null}
+                  <label
+                    htmlFor="cliente-equipamentos"
+                    style={{
+                      display: "block",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      color: "#475569",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Lista de equipamentos desejados
+                  </label>
+                  <textarea
+                    id="cliente-equipamentos"
+                    name="equipamentos"
+                    value={form.equipamentos}
+                    onChange={handleInputChange}
+                    placeholder="Ex.: caçamba 3 m³, lona, EPIs..."
+                    rows={4}
+                    style={{
+                      ...inputStyle,
+                      width: "100%",
+                      minHeight: "96px",
+                      resize: "vertical",
+                      fontFamily: "inherit",
+                      lineHeight: 1.45,
+                    }}
+                  />
+                </div>
               </div>
 
               <div>
@@ -2487,19 +3259,14 @@ export default function Clientes() {
                     {[painelDetalheCliente.cidade, painelDetalheCliente.estado].filter(Boolean).join(" / ") || "—"}
                   </div>
 
-                  <div style={{ color: "#64748b", fontWeight: 700 }}>Endereço</div>
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Endereço de Coleta</div>
                   <div style={{ color: "#0f172a", lineHeight: 1.45, wordBreak: "break-word" }}>
                     {formatarEnderecoRelatorio(painelDetalheCliente)}
                   </div>
 
-                  <div style={{ color: "#64748b", fontWeight: 700 }}>Endereço coleta (texto)</div>
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Endereço de Faturamento</div>
                   <div style={{ color: "#0f172a", lineHeight: 1.45, wordBreak: "break-word" }}>
-                    {painelDetalheCliente.endereco_coleta?.trim() || "—"}
-                  </div>
-
-                  <div style={{ color: "#64748b", fontWeight: 700 }}>Endereço faturamento</div>
-                  <div style={{ color: "#0f172a", lineHeight: 1.45, wordBreak: "break-word" }}>
-                    {painelDetalheCliente.endereco_faturamento?.trim() || "—"}
+                    {formatarEnderecoFaturamentoRelatorio(painelDetalheCliente)}
                   </div>
 
                   <div style={{ color: "#64748b", fontWeight: 700 }}>E-mail</div>
@@ -2511,11 +3278,16 @@ export default function Clientes() {
                   <div style={{ color: "#64748b", fontWeight: 700 }}>Telefone</div>
                   <div>{painelDetalheCliente.telefone?.trim() || "—"}</div>
 
-                  <div style={{ color: "#64748b", fontWeight: 700 }}>Responsável</div>
-                  <div>{painelDetalheCliente.responsavel_nome?.trim() || "—"}</div>
-
                   <div style={{ color: "#64748b", fontWeight: 700 }}>Representante RG</div>
                   <div>{rotuloRepresentanteRgCliente(painelDetalheCliente)}</div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Veículo</div>
+                  <div>{rotuloVeiculoCliente(painelDetalheCliente)}</div>
+
+                  <div style={{ color: "#64748b", fontWeight: 700 }}>Equipamentos</div>
+                  <div style={{ lineHeight: 1.45, wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
+                    {painelDetalheCliente.equipamentos?.trim() || "—"}
+                  </div>
 
                   <div style={{ color: "#64748b", fontWeight: 700 }}>Resíduo / classe</div>
                   <div style={{ lineHeight: 1.45, wordBreak: "break-word" }}>
@@ -2600,15 +3372,6 @@ const inputStyle: React.CSSProperties = {
 const selectStyle: React.CSSProperties = {
   ...inputStyle,
   cursor: "pointer",
-};
-
-const textareaStyle: React.CSSProperties = {
-  ...inputStyle,
-  height: "auto",
-  minHeight: "96px",
-  padding: "10px 12px",
-  resize: "vertical",
-  lineHeight: 1.45,
 };
 
 const thStyle: React.CSSProperties = {

@@ -12,7 +12,7 @@ export const ROTAS_SISTEMA: { path: string; label: string }[] = [
   { path: '/clientes', label: 'Clientes' },
   { path: '/motoristas', label: 'Motoristas' },
   { path: '/representantes-rg', label: 'Representante RG' },
-  { path: '/caminhoes', label: 'Caminhões' },
+  { path: '/caminhoes', label: 'Veículos' },
   { path: '/programacao', label: 'Programação' },
   { path: '/mtr', label: 'MTR' },
   { path: '/controle-massa', label: 'Pesagem e Ticket' },

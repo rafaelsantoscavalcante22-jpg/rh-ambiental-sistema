@@ -107,6 +107,13 @@ type ClienteRow = {
   estado: string | null;
   endereco_coleta: string | null;
   endereco_faturamento: string | null;
+  cep_faturamento: string | null;
+  rua_faturamento: string | null;
+  numero_faturamento: string | null;
+  complemento_faturamento: string | null;
+  bairro_faturamento: string | null;
+  cidade_faturamento: string | null;
+  estado_faturamento: string | null;
   email_nf: string | null;
   responsavel_nome: string | null;
   telefone: string | null;
@@ -135,6 +142,13 @@ function scoreCliente(c: ClienteRow): number {
     "bairro",
     "cidade",
     "estado",
+    "cep_faturamento",
+    "rua_faturamento",
+    "numero_faturamento",
+    "complemento_faturamento",
+    "bairro_faturamento",
+    "cidade_faturamento",
+    "estado_faturamento",
     "responsavel_nome",
     "telefone",
     "email",
@@ -211,6 +225,13 @@ function mergePayload(base: ClienteRow, group: ClienteRow[]): Record<string, unk
     estado: merged.estado?.trim() || null,
     endereco_coleta: merged.endereco_coleta?.trim() || null,
     endereco_faturamento: merged.endereco_faturamento?.trim() || null,
+    cep_faturamento: merged.cep_faturamento?.trim() || null,
+    rua_faturamento: merged.rua_faturamento?.trim() || null,
+    numero_faturamento: merged.numero_faturamento?.trim() || null,
+    complemento_faturamento: merged.complemento_faturamento?.trim() || null,
+    bairro_faturamento: merged.bairro_faturamento?.trim() || null,
+    cidade_faturamento: merged.cidade_faturamento?.trim() || null,
+    estado_faturamento: merged.estado_faturamento?.trim() || null,
     email_nf: merged.email_nf?.trim() || null,
     responsavel_nome: merged.responsavel_nome?.trim() || null,
     telefone: merged.telefone?.trim() || null,
@@ -241,7 +262,7 @@ async function main() {
   const PAGE = 1000;
   const all: ClienteRow[] = [];
   const select =
-    "id, nome, razao_social, cnpj, status, cep, rua, numero, complemento, bairro, cidade, estado, endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade";
+    "id, nome, razao_social, cnpj, status, cep, rua, numero, complemento, bairro, cidade, estado, cep_faturamento, rua_faturamento, numero_faturamento, complemento_faturamento, bairro_faturamento, cidade_faturamento, estado_faturamento, endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade";
 
   for (let from = 0; ; from += PAGE) {
     const to = from + PAGE - 1;
