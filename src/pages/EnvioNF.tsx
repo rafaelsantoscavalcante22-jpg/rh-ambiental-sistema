@@ -1129,14 +1129,20 @@ export default function EnvioNF() {
               </button>
             </div>
             <p style={{ margin: '12px 0 0', fontSize: '12px', color: '#64748b', maxWidth: '820px' }}>
-              <strong>Outlook/Hotmail:</strong> ative 2FA e crie uma <strong>senha de app</strong>. No Supabase → Edge
-              Functions → Secrets defina <code style={{ fontSize: '11px' }}>OUTLOOK_USER</code> (ex.:{' '}
-              <code style={{ fontSize: '11px' }}>faturamentorgambiental@hotmail.com</code>) e{' '}
-              <code style={{ fontSize: '11px' }}>OUTLOOK_APP_PASSWORD</code>. Se <code style={{ fontSize: '11px' }}>OUTLOOK_USER</code>{' '}
-              existir, o envio usa Outlook; caso contrário usa <strong>Resend</strong> com{' '}
-              <code style={{ fontSize: '11px' }}>RESEND_API_KEY</code>. Publique{' '}
-              <code style={{ fontSize: '11px' }}>send-nf-email</code>. Opcional:{' '}
-              <code style={{ fontSize: '11px' }}>NF_EMAIL_FROM</code> (remetente).
+              <strong>Outlook/Hotmail (SMTP):</strong> ative 2FA e uma <strong>senha de app</strong>. Nos Secrets:
+              <code style={{ fontSize: '11px' }}> OUTLOOK_USER </code> e{' '}
+              <code style={{ fontSize: '11px' }}> OUTLOOK_APP_PASSWORD </code>. Use SMTP na porta <strong>465</strong>{' '}
+              (as Edge Functions do Supabase bloqueiam <strong>587</strong>).{' '}
+              <strong>Atenção:</strong> o SMTP da Microsoft pode ficar <strong>vários minutos</strong> pendurado nas Edge Functions (ex.: ~135s até responder).{' '}
+              <strong>Resend</strong> (HTTPS) resolve isso: defina <code style={{ fontSize: '11px' }}> RESEND_API_KEY </code>; com{' '}
+              <code style={{ fontSize: '11px' }}> EMAIL_PROVIDER=auto </code> (padrão), se existir Resend e Outlook, o envio usa{' '}
+              <strong>Resend</strong>. Para forçar só Resend: <code style={{ fontSize: '11px' }}> EMAIL_PROVIDER=resend </code>.
+              Opcional: <code style={{ fontSize: '11px' }}> NF_EMAIL_FROM </code> (domínio verificado na Resend, ex.{' '}
+              <code style={{ fontSize: '11px' }}>@rgambiental.com.br</code>),{' '}
+              <code style={{ fontSize: '11px' }}> NF_EMAIL_REPLY_TO </code> (ex.: Hotmail do faturamento — só para respostas),{' '}
+              <code style={{ fontSize: '11px' }}> OUTLOOK_SMTP_HOST </code> /{' '}
+              <code style={{ fontSize: '11px' }}> OUTLOOK_SMTP_PORT </code>. Publique{' '}
+              <code style={{ fontSize: '11px' }}>send-nf-email</code>.
             </p>
           </div>
 

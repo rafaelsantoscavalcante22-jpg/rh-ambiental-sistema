@@ -592,6 +592,7 @@ export default function PosVenda() {
     }
     return out
   }, [clientes, idsComColeta, hoje])
+  void destaquesRegiao
 
   const contagensPorZona = useMemo(() => {
     const acc = contagensZonaSpInicial()

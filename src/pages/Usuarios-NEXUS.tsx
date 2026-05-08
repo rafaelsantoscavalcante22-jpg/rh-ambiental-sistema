@@ -126,6 +126,7 @@ export default function Usuarios() {
   const [salvandoPaginas, setSalvandoPaginas] = useState(false)
 
   const souAdministrador = cargoEhAdministrador(meuCargo)
+  void souAdministrador
   /** Rota restrita a Administrador + Diretoria; enquanto o cargo carrega, permite a UI (a Edge Function revalida). */
   const podeGerenciar = meuCargo === null || cargoPodeGerirUsuarios(meuCargo)
   const podeCriarOuExcluir = meuCargo === null || cargoPodeCriarOuExcluirUsuario(meuCargo)

@@ -295,7 +295,6 @@ export default function FinanceiroContasPagar() {
       })
       if (insErr) throw insErr
     }
-    void user
   }
 
   async function handleSalvar(e: React.FormEvent) {
@@ -383,7 +382,7 @@ export default function FinanceiroContasPagar() {
     }
   }
 
-  async function handleRemoverAnexo(row: ContaPagarRow, anexo: ContaPagarAnexo) {
+  async function handleRemoverAnexo(_row: ContaPagarRow, anexo: ContaPagarAnexo) {
     if (!podeMutar) return
     if (!window.confirm(`Remover anexo «${anexo.nome_arquivo}»?`)) return
     setErro('')

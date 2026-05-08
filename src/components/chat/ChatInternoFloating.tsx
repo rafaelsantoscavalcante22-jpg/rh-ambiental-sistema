@@ -79,6 +79,8 @@ type Props = {
   naoLidasBadge: number
 }
 
+const CHAT_NOTIFICACAO_AUDIO_SRC = '/msn-sound_1.mp3'
+
 export function ChatInternoFloating({ naoLidasBadge }: Props) {
   const { open, setOpen, pendingUserId, clearPendingUserId } = useChatFloat()
   const { isOnline } = usePresencaAoVivo()
@@ -240,6 +242,8 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
   const channelListRef = useRef<RealtimeChannel | null>(null)
   const conversaIdRef = useRef<string | null>(null)
   const meuIdRef = useRef<string | null>(null)
+  const openRef = useRef<boolean>(false)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   useEffect(() => {
     conversaIdRef.current = conversaId
   }, [conversaId])
@@ -247,6 +251,52 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
   useEffect(() => {
     meuIdRef.current = meuId
   }, [meuId])
+
+  useEffect(() => {
+    openRef.current = open
+  }, [open])
+
+  const tocarNotificacao = useCallback(() => {
+    if (typeof window === 'undefined') return
+    try {
+      if (!audioRef.current) {
+        const a = new Audio(CHAT_NOTIFICACAO_AUDIO_SRC)
+        a.preload = 'auto'
+        audioRef.current = a
+      }
+      const a = audioRef.current
+      if (!a) return
+      a.currentTime = 0
+      void a.play().catch(() => {
+        // Autoplay pode ser bloqueado; ignorar silenciosamente.
+      })
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  // “Aquece” o áudio no primeiro gesto do usuário para reduzir bloqueio de autoplay.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onFirstGesture = () => {
+      if (audioRef.current) return
+      try {
+        const a = new Audio(CHAT_NOTIFICACAO_AUDIO_SRC)
+        a.preload = 'auto'
+        audioRef.current = a
+      } catch {
+        /* ignore */
+      }
+      window.removeEventListener('pointerdown', onFirstGesture)
+      window.removeEventListener('keydown', onFirstGesture)
+    }
+    window.addEventListener('pointerdown', onFirstGesture, { once: true })
+    window.addEventListener('keydown', onFirstGesture, { once: true })
+    return () => {
+      window.removeEventListener('pointerdown', onFirstGesture)
+      window.removeEventListener('keydown', onFirstGesture)
+    }
+  }, [])
 
   const recarregarConversas = useCallback(async () => {
     const uid = meuIdRef.current
@@ -369,15 +419,20 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
   }, [meuId, open])
 
   useEffect(() => {
-    if (!meuId || !open) return
+    if (!meuId) return
 
     const ch = supabase
       .channel('chat-float-mensagens-global')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'chat_mensagens' },
-        () => {
-          void recarregarConversas()
+        (payload) => {
+          const row = payload.new as ChatMensagem
+          const uid = meuIdRef.current
+          if (uid && row?.remetente_id && row.remetente_id !== uid) {
+            tocarNotificacao()
+          }
+          if (openRef.current) void recarregarConversas()
         }
       )
       .subscribe()
@@ -387,7 +442,7 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
       void ch.unsubscribe()
       channelListRef.current = null
     }
-  }, [meuId, open, recarregarConversas])
+  }, [meuId, recarregarConversas, tocarNotificacao])
 
   useEffect(() => {
     void channelThreadRef.current?.unsubscribe()
@@ -428,6 +483,9 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
             return [...prev, row]
           })
           const uid = meuIdRef.current
+          if (uid && row?.remetente_id && row.remetente_id !== uid) {
+            tocarNotificacao()
+          }
           if (uid && conversaIdRef.current === conversaId) {
             void chatMarcarLida(conversaId, uid)
             void recarregarConversas()

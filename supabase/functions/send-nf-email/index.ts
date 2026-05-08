@@ -108,6 +108,28 @@ ${observacaoUser ? `<p><strong>Observação:</strong> ${observacaoUser.replace(/
 `.trim();
 }
 
+/** Ligação SMTP Outlook — host/porta configuráveis (Microsoft pode dar timeout a partir de IPs de datacenter). */
+function resolverOutlookSmtp(): { hostname: string; port: number; tls: boolean } {
+  const hostname = Deno.env.get("OUTLOOK_SMTP_HOST")?.trim() ||
+    "smtp-mail.outlook.com";
+  const portRaw = Deno.env.get("OUTLOOK_SMTP_PORT")?.trim();
+  const port = portRaw ? Number(portRaw) : 465;
+  if (!Number.isFinite(port) || port < 1 || port > 65535) {
+    throw new Error("Secret OUTLOOK_SMTP_PORT inválida.");
+  }
+  if (port === 25 || port === 587) {
+    throw new Error(
+      "Portas SMTP 25 e 587 estão bloqueadas nas Supabase Edge Functions. Use 465 (TLS implícito) ou defina EMAIL_PROVIDER=resend com RESEND_API_KEY.",
+    );
+  }
+  const tlsRaw = Deno.env.get("OUTLOOK_SMTP_TLS")?.trim().toLowerCase();
+  let tls: boolean;
+  if (tlsRaw === "false") tls = false;
+  else if (tlsRaw === "true") tls = true;
+  else tls = port === 465;
+  return { hostname, port, tls };
+}
+
 function resolverProvedor(): {
   provedor: ProvedorEnvio;
   outlookUser?: string;
@@ -116,22 +138,77 @@ function resolverProvedor(): {
   fromEmail: string;
   erroConfig?: string;
 } {
+  const pref = (Deno.env.get("EMAIL_PROVIDER")?.trim().toLowerCase() || "auto");
   const outlookUser = Deno.env.get("OUTLOOK_USER")?.trim();
   const outlookAppPassword = Deno.env.get("OUTLOOK_APP_PASSWORD")?.trim();
   const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
   const fromRaw = Deno.env.get("NF_EMAIL_FROM")?.trim();
 
-  if (outlookUser && outlookAppPassword) {
-    const fromEmail = fromRaw && fromRaw.includes("@")
-      ? fromRaw
-      : `RG Ambiental <${outlookUser}>`;
-    return { provedor: "outlook", outlookUser, outlookAppPassword, fromEmail };
+  const temOutlook = !!(outlookUser && outlookAppPassword);
+  const temResend = !!resendKey;
+
+  const fromOutlookDefault = () =>
+    fromRaw && fromRaw.includes("@") ? fromRaw : `RG Ambiental <${outlookUser}>`;
+  const fromResendDefault = () =>
+    fromRaw || "RG Ambiental <onboarding@resend.dev>";
+
+  if (pref === "resend") {
+    if (!temResend) {
+      return {
+        provedor: "resend",
+        fromEmail: "",
+        erroConfig:
+          "EMAIL_PROVIDER=resend mas RESEND_API_KEY não está definida nos Secrets.",
+      };
+    }
+    return {
+      provedor: "resend",
+      resendKey,
+      fromEmail: fromResendDefault(),
+    };
   }
 
-  if (resendKey) {
-    const fromEmail = fromRaw ||
-      "RG Ambiental <onboarding@resend.dev>";
-    return { provedor: "resend", resendKey, fromEmail };
+  if (pref === "outlook") {
+    if (!temOutlook) {
+      return {
+        provedor: "outlook",
+        fromEmail: "",
+        erroConfig:
+          "EMAIL_PROVIDER=outlook mas OUTLOOK_USER / OUTLOOK_APP_PASSWORD incompletos.",
+      };
+    }
+    return {
+      provedor: "outlook",
+      outlookUser,
+      outlookAppPassword,
+      fromEmail: fromOutlookDefault(),
+    };
+  }
+
+  // auto — na Cloud, SMTP Outlook/Hotmail costuma ficar pendurado minutos; se existir Resend, usa HTTPS primeiro.
+  if (temResend && temOutlook) {
+    return {
+      provedor: "resend",
+      resendKey,
+      fromEmail: fromResendDefault(),
+    };
+  }
+
+  if (temOutlook) {
+    return {
+      provedor: "outlook",
+      outlookUser,
+      outlookAppPassword,
+      fromEmail: fromOutlookDefault(),
+    };
+  }
+
+  if (temResend) {
+    return {
+      provedor: "resend",
+      resendKey,
+      fromEmail: fromResendDefault(),
+    };
   }
 
   return {
@@ -139,8 +216,8 @@ function resolverProvedor(): {
     fromEmail: "",
     erroConfig:
       "Nenhum provedor de e-mail configurado. No Supabase: Edge Functions → Secrets — " +
-      "opção A (Outlook/Hotmail): OUTLOOK_USER e OUTLOOK_APP_PASSWORD (senha de app, com 2FA ativo). " +
-      "opção B (Resend): RESEND_API_KEY. Opcional: NF_EMAIL_FROM (ex.: RG Ambiental <nf@dominio.com>).",
+      "Outlook: OUTLOOK_USER + OUTLOOK_APP_PASSWORD (pode dar timeout a partir do Supabase; ver EMAIL_PROVIDER). " +
+      "Recomendado na Cloud: RESEND_API_KEY (com auto, Resend tem prioridade se Outlook também existir). Opcional: NF_EMAIL_FROM.",
   };
 }
 
@@ -167,6 +244,9 @@ Deno.serve(async (req: Request) => {
       code: "EMAIL_PROVIDER_NOT_CONFIGURED",
     });
   }
+
+  /** Respostas dos destinatários (ex.: caixa Hotmail do faturamento); o From deve ser domínio verificado na Resend. */
+  const nfReplyTo = Deno.env.get("NF_EMAIL_REPLY_TO")?.trim() || null;
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
@@ -252,12 +332,12 @@ Deno.serve(async (req: Request) => {
   let smtp: SMTPClient | null = null;
   if (cfg.provedor === "outlook" && cfg.outlookUser && cfg.outlookAppPassword) {
     try {
+      const smtpOpts = resolverOutlookSmtp();
       smtp = new SMTPClient({
         connection: {
-          hostname: "smtp-mail.outlook.com",
-          port: 587,
-          // STARTTLS (587) — denomailer usa STARTTLS quando tls=false.
-          tls: false,
+          hostname: smtpOpts.hostname,
+          port: smtpOpts.port,
+          tls: smtpOpts.tls,
           auth: {
             username: cfg.outlookUser,
             password: cfg.outlookAppPassword,
@@ -265,7 +345,7 @@ Deno.serve(async (req: Request) => {
         },
       });
     } catch (e) {
-      return jsonResponse(req,500, {
+      return jsonResponse(req, 500, {
         error: `Falha ao iniciar SMTP Outlook: ${
           e instanceof Error ? e.message : String(e)
         }`,
@@ -317,6 +397,7 @@ Deno.serve(async (req: Request) => {
             to: email,
             subject: assunto,
             html,
+            ...(nfReplyTo ? { replyTo: nfReplyTo } : {}),
             ...(denomailerAttachments
               ? { attachments: denomailerAttachments }
               : {}),
@@ -352,6 +433,7 @@ Deno.serve(async (req: Request) => {
               to: [email],
               subject: assunto,
               html,
+              ...(nfReplyTo ? { reply_to: nfReplyTo } : {}),
               ...(resendAttachments ? { attachments: resendAttachments } : {}),
             }),
           });
