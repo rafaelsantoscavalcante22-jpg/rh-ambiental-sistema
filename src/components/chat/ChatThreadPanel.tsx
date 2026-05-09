@@ -35,8 +35,27 @@ export function ChatThreadPanel({
   const [texto, setTexto] = useState('')
   const [menuMaisAberto, setMenuMaisAberto] = useState(false)
   const fRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const menuMaisRef = useRef<HTMLDivElement>(null)
+
+  function focarComposer() {
+    let frames = 0
+    const run = () => {
+      const el = textareaRef.current
+      if (!el) return
+      if (el.disabled && frames < 40) {
+        frames += 1
+        requestAnimationFrame(run)
+        return
+      }
+      if (el.disabled) return
+      el.focus()
+      const len = el.value.length
+      el.setSelectionRange(len, len)
+    }
+    requestAnimationFrame(run)
+  }
 
   useEffect(() => {
     if (!menuMaisAberto) return
@@ -73,6 +92,8 @@ export function ChatThreadPanel({
       await onEnviarTexto(t)
     } catch {
       setTexto(t)
+    } finally {
+      focarComposer()
     }
   }
 
@@ -165,6 +186,8 @@ export function ChatThreadPanel({
             } catch (err) {
               console.error(err)
               window.alert('Não foi possível enviar o anexo.')
+            } finally {
+              focarComposer()
             }
           }}
         />
@@ -184,6 +207,7 @@ export function ChatThreadPanel({
           </svg>
         </button>
         <textarea
+          ref={textareaRef}
           className="chat-interno-textarea"
           rows={1}
           placeholder="Escreva uma mensagem…"
