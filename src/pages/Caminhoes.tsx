@@ -343,7 +343,7 @@ export default function Caminhoes() {
 
     if (term) {
       const s = sanitizeIlikePattern(term);
-      const orFilter = `placa.ilike.%${s}%,modelo.ilike.%${s}%,tipo.ilike.%${s}%,rodizio.ilike.%${s}%,status_disponibilidade.ilike.%${s}%,renavam.ilike.%${s}%,peso_tara.ilike.%${s}%,quant_ibcs.ilike.%${s}%,tipo_caixa.ilike.%${s}%`;
+      const orFilter = `placa.ilike.%${s}%,modelo.ilike.%${s}%,tipo.ilike.%${s}%,rodizio.ilike.%${s}%,status_disponibilidade.ilike.%${s}%,renavam.ilike.%${s}%,peso_tara.ilike.%${s}%,peso_bruto.ilike.%${s}%,cmt.ilike.%${s}%,quant_ibcs.ilike.%${s}%,tipo_caixa.ilike.%${s}%`;
       countQ = countQ.or(orFilter);
       dataQ = dataQ.or(orFilter);
     }
@@ -1778,7 +1778,7 @@ export default function Caminhoes() {
               <input
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
-                placeholder="Busca (placa, modelo, RENAVAM, tara, IBCs…)"
+                placeholder="Busca (placa, modelo, tara, bruto, CMT, RENAVAM…)"
                 style={{
                   width: "360px",
                   maxWidth: "100%",
@@ -1824,6 +1824,9 @@ export default function Caminhoes() {
                       <th style={thStyle}>Placa</th>
                       <th style={thStyle}>Motorista</th>
                       <th style={thStyle}>Modelo</th>
+                      <th style={thStyle}>Tara</th>
+                      <th style={thStyle}>P. bruto</th>
+                      <th style={thStyle}>CMT</th>
                       <th style={thStyle}>Tipo</th>
                       <th style={thStyle}>Rodízio</th>
                       <th style={thStyle}>CRLV</th>
@@ -1865,6 +1868,15 @@ export default function Caminhoes() {
                             : "—"}
                         </td>
                         <td style={tdStyle}>{c.modelo || "-"}</td>
+                        <td style={{ ...tdStyle, fontSize: "13px", whiteSpace: "nowrap" }}>
+                          {c.peso_tara || "—"}
+                        </td>
+                        <td style={{ ...tdStyle, fontSize: "13px", whiteSpace: "nowrap" }}>
+                          {c.peso_bruto || "—"}
+                        </td>
+                        <td style={{ ...tdStyle, fontSize: "13px", whiteSpace: "nowrap" }}>
+                          {c.cmt || "—"}
+                        </td>
                         <td style={tdStyle}>{c.tipo || "-"}</td>
                         <td style={tdStyle}>{c.rodizio || "-"}</td>
                         <td style={tdStyle}>{formatarData(c.crlv_validade)}</td>
@@ -1929,7 +1941,7 @@ export default function Caminhoes() {
                     {caminhoes.length === 0 && (
                       <tr>
                         <td
-                          colSpan={8}
+                          colSpan={11}
                           style={{
                             textAlign: "center",
                             padding: "28px 12px",
