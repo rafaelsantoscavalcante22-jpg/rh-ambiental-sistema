@@ -33,6 +33,7 @@ type ProgramacaoRow = {
   observacoes: string | null
   coleta_fixa: boolean | null
   periodicidade: string | null
+  programacao_serie_id: string | null
   status_programacao: ProgramacaoStatus | null
   coleta_id: string | null
   created_at: string | null
@@ -49,6 +50,7 @@ type ProgramacaoItem = {
   observacoes: string
   coletaFixa: boolean
   periodicidade: string
+  programacaoSerieId: string | null
   statusProgramacao: ProgramacaoStatus
   coletaId: string
   mtrId: string
@@ -64,6 +66,8 @@ type FormState = {
   observacoes: string
   coletaFixa: boolean
   periodicidade: string
+  /** Série de recorrência (coleta fixa semanal); definido ao gravar ou vindo da linha editada. */
+  programacaoSerieId: string | null
 }
 
 type CalendarCell = {
@@ -92,6 +96,7 @@ const initialFormState: FormState = {
   observacoes: '',
   coletaFixa: false,
   periodicidade: '',
+  programacaoSerieId: null,
 }
 
 /** Catálogo fixo de tipos de caminhão (valor salvo = texto da opção). */
@@ -337,6 +342,35 @@ function getStatusStyle(status: ProgramacaoStatus) {
 function gerarNumeroProgramacao(totalAtual: number) {
   const proximo = totalAtual + 1
   return String(proximo).padStart(3, '0')
+}
+
+/** Alinhado a `programacao_periodicidade_e_semanal` no Supabase. */
+function periodicidadeESemanal(periodicidade: string | null | undefined): boolean {
+  const t = String(periodicidade ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+  if (!t) return false
+  if (t.includes('quinzenal')) return false
+  return t.includes('semanal') || t === 'semana' || t.includes('weekly')
+}
+
+async function executarExpansaoColetasFixasSemanais(): Promise<void> {
+  const { error } = await supabase.rpc('programacao_manter_fixas_semanais', { p_horizonte_semanas: 53 })
+  if (error) {
+    console.warn('[programação] programacao_manter_fixas_semanais:', error.message)
+  }
+}
+
+/** Mapeia textos legados para o valor do select de periodicidade. */
+function normalizarPeriodicidadeUi(p: string): string {
+  const tl = p.trim().toLowerCase()
+  if (!tl) return ''
+  if (tl.includes('semanal') || tl.includes('semana') || tl.includes('weekly')) return 'Semanal'
+  if (tl.includes('quinzenal') || tl.includes('quinz')) return 'Quinzenal'
+  if (tl.includes('mensal')) return 'Mensal'
+  return p.trim()
 }
 
 function getSupabaseErrorMessage(error: unknown) {
@@ -608,7 +642,7 @@ export default function Programacao() {
       const { data: programacoesData, error: programacoesError } = await supabase
         .from('programacoes')
         .select(
-          'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, periodicidade, status_programacao, coleta_id, created_at'
+          'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, periodicidade, programacao_serie_id, status_programacao, coleta_id, created_at'
         )
         .gte('data_programada', rangeIni)
         .lte('data_programada', rangeFim)
@@ -684,7 +718,8 @@ export default function Programacao() {
           tipoServico: row.tipo_servico || '',
           observacoes: row.observacoes || '',
           coletaFixa: row.coleta_fixa ?? false,
-          periodicidade: row.periodicidade || '',
+          periodicidade: normalizarPeriodicidadeUi(row.periodicidade || ''),
+          programacaoSerieId: row.programacao_serie_id ?? null,
           statusProgramacao: statusDerivado,
           coletaId,
           mtrId,
@@ -836,6 +871,7 @@ export default function Programacao() {
       observacoes: item.observacoes,
       coletaFixa: item.coletaFixa,
       periodicidade: item.periodicidade,
+      programacaoSerieId: item.programacaoSerieId,
     })
     setErro('')
     setSucesso('')
@@ -924,6 +960,12 @@ export default function Programacao() {
         return
       }
 
+      const semanal =
+        formEdicaoModal.coletaFixa && periodicidadeESemanal(formEdicaoModal.periodicidade)
+      const programacaoSerieId = semanal
+        ? formEdicaoModal.programacaoSerieId?.trim() || crypto.randomUUID()
+        : null
+
       const payload = {
         cliente_id: formEdicaoModal.clienteId,
         cliente: clienteSelecionado.nome,
@@ -933,6 +975,7 @@ export default function Programacao() {
         observacoes: formEdicaoModal.observacoes.trim() || null,
         coleta_fixa: formEdicaoModal.coletaFixa,
         periodicidade: formEdicaoModal.coletaFixa ? formEdicaoModal.periodicidade.trim() || null : null,
+        programacao_serie_id: programacaoSerieId,
         updated_at: new Date().toISOString(),
       }
 
@@ -941,6 +984,10 @@ export default function Programacao() {
       if (error) {
         console.error('ERRO SUPABASE AO ATUALIZAR PROGRAMAÇÃO:', error)
         throw error
+      }
+
+      if (semanal) {
+        await executarExpansaoColetasFixasSemanais()
       }
 
       setSucesso('Programação atualizada com sucesso.')
@@ -990,6 +1037,14 @@ export default function Programacao() {
         return
       }
 
+      const semanal = form.coletaFixa && periodicidadeESemanal(form.periodicidade)
+      let programacaoSerieIdParaGravar: string | null = null
+      if (semanal) {
+        programacaoSerieIdParaGravar = form.id
+          ? form.programacaoSerieId?.trim() || crypto.randomUUID()
+          : crypto.randomUUID()
+      }
+
       const payloadBase = {
         cliente_id: form.clienteId,
         cliente: clienteSelecionado.nome,
@@ -999,6 +1054,7 @@ export default function Programacao() {
         observacoes: form.observacoes.trim() || null,
         coleta_fixa: form.coletaFixa,
         periodicidade: form.coletaFixa ? form.periodicidade.trim() || null : null,
+        programacao_serie_id: programacaoSerieIdParaGravar,
         updated_at: new Date().toISOString(),
       }
 
@@ -1011,6 +1067,10 @@ export default function Programacao() {
         if (error) {
           console.error('ERRO SUPABASE AO ATUALIZAR PROGRAMAÇÃO:', error)
           throw error
+        }
+
+        if (semanal) {
+          await executarExpansaoColetasFixasSemanais()
         }
 
         setSucesso('Programação atualizada com sucesso.')
@@ -1028,6 +1088,10 @@ export default function Programacao() {
         if (error) {
           console.error('ERRO SUPABASE AO INSERIR PROGRAMAÇÃO:', error)
           throw error
+        }
+
+        if (semanal) {
+          await executarExpansaoColetasFixasSemanais()
         }
 
         setSucesso('A programação foi criada com sucesso.')
@@ -1312,13 +1376,28 @@ export default function Programacao() {
         {f.coletaFixa && (
           <div>
             <label style={labelStyle}>Periodicidade</label>
-            <input
-              type="text"
-              value={f.periodicidade}
+            <select
+              value={['Semanal', 'Quinzenal', 'Mensal'].includes(f.periodicidade) ? f.periodicidade : ''}
               onChange={(event) => patch('periodicidade', event.target.value)}
-              placeholder="Ex: semanal, quinzenal, toda segunda"
               style={inputStyle}
-            />
+              aria-label="Periodicidade da coleta fixa"
+            >
+              <option value="">— Selecione —</option>
+              <option value="Semanal">Semanal (mesmo dia da semana)</option>
+              <option value="Quinzenal">Quinzenal</option>
+              <option value="Mensal">Mensal</option>
+            </select>
+            {f.periodicidade && !['Semanal', 'Quinzenal', 'Mensal'].includes(f.periodicidade) ? (
+              <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#b45309', lineHeight: 1.4 }}>
+                Valor guardado: <strong>{f.periodicidade}</strong>. Escolha uma opção acima para padronizar.
+              </p>
+            ) : null}
+            {periodicidadeESemanal(f.periodicidade) ? (
+              <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#64748b', lineHeight: 1.45 }}>
+                Com <strong>Semanal</strong>, o sistema cria automaticamente as visitas no mesmo dia da
+                semana que a data programada (até cerca de um ano à frente, após guardar).
+              </p>
+            ) : null}
           </div>
         )}
       </>
