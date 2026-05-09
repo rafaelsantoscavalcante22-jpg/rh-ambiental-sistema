@@ -312,6 +312,31 @@ export async function chatTotalMensagensNaoLidas(): Promise<number> {
   return total
 }
 
+/**
+ * Apaga todas as mensagens da conversa (e anexos em `chat-anexos`).
+ * Só utilizadores com cargo de administrador que participam na conversa (RLS via RPC).
+ */
+export async function chatAdminApagarHistoricoConversa(conversaId: string): Promise<void> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) throw new Error('Sessão inválida.')
+
+  const { error } = await supabase.rpc('chat_admin_apagar_historico_conversa', {
+    p_conversa_id: conversaId,
+  })
+  if (error) {
+    const msg = [error.message, error.details].filter(Boolean).join(' — ')
+    if (/forbidden|42501/i.test(msg)) {
+      throw new Error('Apenas administradores podem excluir o histórico desta conversa.')
+    }
+    if (/not_participant/i.test(msg)) {
+      throw new Error('Não é participante desta conversa.')
+    }
+    throw normalizarErroChat(error)
+  }
+}
+
 export async function chatMarcarLida(conversaId: string, meuId: string): Promise<void> {
   const {
     data: { user },

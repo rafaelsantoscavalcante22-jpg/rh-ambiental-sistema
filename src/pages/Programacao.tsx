@@ -33,6 +33,7 @@ type ProgramacaoRow = {
   observacoes: string | null
   coleta_fixa: boolean | null
   periodicidade: string | null
+  programacao_dias_semana: number[] | null
   programacao_serie_id: string | null
   status_programacao: ProgramacaoStatus | null
   coleta_id: string | null
@@ -50,6 +51,8 @@ type ProgramacaoItem = {
   observacoes: string
   coletaFixa: boolean
   periodicidade: string
+  /** ISO 1=Seg … 7=Dom */
+  diasSemanaColetaFixa: number[]
   programacaoSerieId: string | null
   statusProgramacao: ProgramacaoStatus
   coletaId: string
@@ -66,6 +69,8 @@ type FormState = {
   observacoes: string
   coletaFixa: boolean
   periodicidade: string
+  /** ISO 1=Seg … 7=Dom */
+  diasSemanaColetaFixa: number[]
   /** Série de recorrência (coleta fixa semanal); definido ao gravar ou vindo da linha editada. */
   programacaoSerieId: string | null
 }
@@ -96,6 +101,7 @@ const initialFormState: FormState = {
   observacoes: '',
   coletaFixa: false,
   periodicidade: '',
+  diasSemanaColetaFixa: [],
   programacaoSerieId: null,
 }
 
@@ -122,6 +128,29 @@ const TIPOS_CAMINHAO_GRUPOS: readonly { titulo: string; opcoes: readonly string[
 const TIPOS_CAMINHAO_CATALOGO = new Set(
   TIPOS_CAMINHAO_GRUPOS.flatMap((g) => g.opcoes as string[])
 )
+
+/** Dias da semana (ISO 1=Segunda … 7=Domingo), alinhado ao Postgres ISODOW. */
+const DIAS_SEMANA_COLETA_FIXA: readonly { iso: number; label: string }[] = [
+  { iso: 1, label: 'Segunda-feira' },
+  { iso: 2, label: 'Terça-feira' },
+  { iso: 3, label: 'Quarta-feira' },
+  { iso: 4, label: 'Quinta-feira' },
+  { iso: 5, label: 'Sexta-feira' },
+  { iso: 6, label: 'Sábado' },
+  { iso: 7, label: 'Domingo' },
+] as const
+
+function parseDiasSemanaArray(raw: unknown): number[] {
+  if (!raw || !Array.isArray(raw)) return []
+  return [...new Set(raw.map((x) => Number(x)).filter((n) => n >= 1 && n <= 7))].sort((a, b) => a - b)
+}
+
+function isoDowFromIsoDate(isoDate: string): number {
+  const d = new Date(`${isoDate.slice(0, 10)}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return 1
+  const w = d.getDay()
+  return w === 0 ? 7 : w
+}
 
 function formatDate(date: string) {
   if (!date) return '-'
@@ -356,6 +385,44 @@ function periodicidadeESemanal(periodicidade: string | null | undefined): boolea
   return t.includes('semanal') || t === 'semana' || t.includes('weekly')
 }
 
+function inferirDiasSemanaColetaFixa(
+  raw: unknown,
+  dataProgramada: string | null | undefined,
+  coletaFixa: boolean | null | undefined,
+  periodicidade: string | null | undefined
+): number[] {
+  const fromDb = parseDiasSemanaArray(raw)
+  if (fromDb.length > 0) return fromDb
+  if (coletaFixa && periodicidadeESemanal(periodicidade || '') && dataProgramada && dataProgramada.length >= 10) {
+    return [isoDowFromIsoDate(dataProgramada)]
+  }
+  return []
+}
+
+function formatarDiasSemanaResumo(dias: number[]): string {
+  if (!dias.length) return ''
+  const order = DIAS_SEMANA_COLETA_FIXA.map((x) => x.iso)
+  const sorted = [...dias].filter((d) => d >= 1 && d <= 7).sort((a, b) => order.indexOf(a) - order.indexOf(b))
+  const abbr = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
+  return sorted.map((i) => abbr[i] ?? i).join(', ')
+}
+
+function textoPeriodicidadeLista(item: ProgramacaoItem): string {
+  const d = formatarDiasSemanaResumo(item.diasSemanaColetaFixa)
+  if (d) return d
+  return item.periodicidade || '—'
+}
+
+function deveExpandirColetaFixaSemanal(
+  coletaFixa: boolean,
+  dias: number[],
+  periodicidade: string
+): boolean {
+  if (!coletaFixa) return false
+  if (dias.length > 0) return true
+  return periodicidadeESemanal(periodicidade)
+}
+
 async function executarExpansaoColetasFixasSemanais(): Promise<void> {
   const { error } = await supabase.rpc('programacao_manter_fixas_semanais', { p_horizonte_semanas: 53 })
   if (error) {
@@ -568,6 +635,18 @@ export default function Programacao() {
     return () => window.clearTimeout(t)
   }, [sucesso])
 
+  useEffect(() => {
+    if (!modalNovaProgramacaoAberto || !form.coletaFixa || form.diasSemanaColetaFixa.length > 0) return
+    const d = form.dataProgramada
+    if (!d || d.length < 10) return
+    const iso = isoDowFromIsoDate(d)
+    setForm((p) =>
+      p.coletaFixa && p.diasSemanaColetaFixa.length === 0 && p.dataProgramada === d
+        ? { ...p, diasSemanaColetaFixa: [iso] }
+        : p
+    )
+  }, [modalNovaProgramacaoAberto, form.coletaFixa, form.dataProgramada, form.diasSemanaColetaFixa.length])
+
   const itemContextoResolvido = useMemo(
     () =>
       resolverProgramacaoContexto(programacoes, {
@@ -642,7 +721,7 @@ export default function Programacao() {
       const { data: programacoesData, error: programacoesError } = await supabase
         .from('programacoes')
         .select(
-          'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, periodicidade, programacao_serie_id, status_programacao, coleta_id, created_at'
+          'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, periodicidade, programacao_dias_semana, programacao_serie_id, status_programacao, coleta_id, created_at'
         )
         .gte('data_programada', rangeIni)
         .lte('data_programada', rangeFim)
@@ -719,6 +798,12 @@ export default function Programacao() {
           observacoes: row.observacoes || '',
           coletaFixa: row.coleta_fixa ?? false,
           periodicidade: normalizarPeriodicidadeUi(row.periodicidade || ''),
+          diasSemanaColetaFixa: inferirDiasSemanaColetaFixa(
+            row.programacao_dias_semana,
+            row.data_programada,
+            row.coleta_fixa,
+            row.periodicidade
+          ),
           programacaoSerieId: row.programacao_serie_id ?? null,
           statusProgramacao: statusDerivado,
           coletaId,
@@ -871,6 +956,7 @@ export default function Programacao() {
       observacoes: item.observacoes,
       coletaFixa: item.coletaFixa,
       periodicidade: item.periodicidade,
+      diasSemanaColetaFixa: [...item.diasSemanaColetaFixa],
       programacaoSerieId: item.programacaoSerieId,
     })
     setErro('')
@@ -945,6 +1031,11 @@ export default function Programacao() {
         return
       }
 
+      if (formEdicaoModal.coletaFixa && formEdicaoModal.diasSemanaColetaFixa.length === 0) {
+        setErro('Selecione pelo menos um dia da semana (Segunda a Domingo) para a coleta fixa.')
+        return
+      }
+
       if (!formEdicaoModal.id) {
         setErro('Identificador da programação ausente.')
         return
@@ -960,9 +1051,15 @@ export default function Programacao() {
         return
       }
 
-      const semanal =
-        formEdicaoModal.coletaFixa && periodicidadeESemanal(formEdicaoModal.periodicidade)
-      const programacaoSerieId = semanal
+      const diasGravar = [...new Set(formEdicaoModal.diasSemanaColetaFixa)]
+        .filter((n) => n >= 1 && n <= 7)
+        .sort((a, b) => a - b)
+      const expandir = deveExpandirColetaFixaSemanal(
+        formEdicaoModal.coletaFixa,
+        diasGravar,
+        formEdicaoModal.periodicidade
+      )
+      const programacaoSerieId = expandir
         ? formEdicaoModal.programacaoSerieId?.trim() || crypto.randomUUID()
         : null
 
@@ -974,7 +1071,8 @@ export default function Programacao() {
         tipo_servico: formEdicaoModal.tipoServico.trim(),
         observacoes: formEdicaoModal.observacoes.trim() || null,
         coleta_fixa: formEdicaoModal.coletaFixa,
-        periodicidade: formEdicaoModal.coletaFixa ? formEdicaoModal.periodicidade.trim() || null : null,
+        periodicidade: formEdicaoModal.coletaFixa ? (diasGravar.length > 0 ? 'Semanal' : formEdicaoModal.periodicidade.trim() || null) : null,
+        programacao_dias_semana: formEdicaoModal.coletaFixa && diasGravar.length > 0 ? diasGravar : null,
         programacao_serie_id: programacaoSerieId,
         updated_at: new Date().toISOString(),
       }
@@ -986,7 +1084,7 @@ export default function Programacao() {
         throw error
       }
 
-      if (semanal) {
+      if (expandir) {
         await executarExpansaoColetasFixasSemanais()
       }
 
@@ -1027,6 +1125,11 @@ export default function Programacao() {
         return
       }
 
+      if (form.coletaFixa && form.diasSemanaColetaFixa.length === 0) {
+        setErro('Selecione pelo menos um dia da semana (Segunda a Domingo) para a coleta fixa.')
+        return
+      }
+
       setSalvando(true)
 
       const clienteSelecionado = clientes.find((cliente) => cliente.id === form.clienteId)
@@ -1037,9 +1140,16 @@ export default function Programacao() {
         return
       }
 
-      const semanal = form.coletaFixa && periodicidadeESemanal(form.periodicidade)
+      const diasGravarForm = [...new Set(form.diasSemanaColetaFixa)]
+        .filter((n) => n >= 1 && n <= 7)
+        .sort((a, b) => a - b)
+      const expandirForm = deveExpandirColetaFixaSemanal(
+        form.coletaFixa,
+        diasGravarForm,
+        form.periodicidade
+      )
       let programacaoSerieIdParaGravar: string | null = null
-      if (semanal) {
+      if (expandirForm) {
         programacaoSerieIdParaGravar = form.id
           ? form.programacaoSerieId?.trim() || crypto.randomUUID()
           : crypto.randomUUID()
@@ -1053,7 +1163,13 @@ export default function Programacao() {
         tipo_servico: form.tipoServico.trim(),
         observacoes: form.observacoes.trim() || null,
         coleta_fixa: form.coletaFixa,
-        periodicidade: form.coletaFixa ? form.periodicidade.trim() || null : null,
+        periodicidade: form.coletaFixa
+          ? diasGravarForm.length > 0
+            ? 'Semanal'
+            : form.periodicidade.trim() || null
+          : null,
+        programacao_dias_semana:
+          form.coletaFixa && diasGravarForm.length > 0 ? diasGravarForm : null,
         programacao_serie_id: programacaoSerieIdParaGravar,
         updated_at: new Date().toISOString(),
       }
@@ -1069,7 +1185,7 @@ export default function Programacao() {
           throw error
         }
 
-        if (semanal) {
+        if (expandirForm) {
           await executarExpansaoColetasFixasSemanais()
         }
 
@@ -1090,7 +1206,7 @@ export default function Programacao() {
           throw error
         }
 
-        if (semanal) {
+        if (expandirForm) {
           await executarExpansaoColetasFixasSemanais()
         }
 
@@ -1367,7 +1483,14 @@ export default function Programacao() {
             <input
               type="checkbox"
               checked={f.coletaFixa}
-              onChange={(event) => patch('coletaFixa', event.target.checked)}
+              onChange={(event) => {
+                const v = event.target.checked
+                if (!v) {
+                  patch('diasSemanaColetaFixa', [])
+                  patch('periodicidade', '')
+                }
+                patch('coletaFixa', v)
+              }}
             />
             Coleta fixa
           </label>
@@ -1375,29 +1498,51 @@ export default function Programacao() {
 
         {f.coletaFixa && (
           <div>
-            <label style={labelStyle}>Periodicidade</label>
-            <select
-              value={['Semanal', 'Quinzenal', 'Mensal'].includes(f.periodicidade) ? f.periodicidade : ''}
-              onChange={(event) => patch('periodicidade', event.target.value)}
-              style={inputStyle}
-              aria-label="Periodicidade da coleta fixa"
+            <label style={labelStyle}>Dias da semana</label>
+            <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#64748b', lineHeight: 1.45 }}>
+              Marque os dias da semana em que esta coleta deve repetir. O sistema gera as programações
+              futuras nesses dias (até cerca de um ano à frente, após guardar).
+            </p>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                padding: '12px 14px',
+                border: '1px solid #e2e8f0',
+                borderRadius: 10,
+                background: '#f8fafc',
+              }}
+              role="group"
+              aria-label="Dias da semana para coleta fixa"
             >
-              <option value="">— Selecione —</option>
-              <option value="Semanal">Semanal (mesmo dia da semana)</option>
-              <option value="Quinzenal">Quinzenal</option>
-              <option value="Mensal">Mensal</option>
-            </select>
-            {f.periodicidade && !['Semanal', 'Quinzenal', 'Mensal'].includes(f.periodicidade) ? (
-              <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#b45309', lineHeight: 1.4 }}>
-                Valor guardado: <strong>{f.periodicidade}</strong>. Escolha uma opção acima para padronizar.
-              </p>
-            ) : null}
-            {periodicidadeESemanal(f.periodicidade) ? (
-              <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#64748b', lineHeight: 1.45 }}>
-                Com <strong>Semanal</strong>, o sistema cria automaticamente as visitas no mesmo dia da
-                semana que a data programada (até cerca de um ano à frente, após guardar).
-              </p>
-            ) : null}
+              {DIAS_SEMANA_COLETA_FIXA.map(({ iso, label }) => (
+                <label
+                  key={iso}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: '#334155',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={f.diasSemanaColetaFixa.includes(iso)}
+                    onChange={() => {
+                      const s = new Set(f.diasSemanaColetaFixa)
+                      if (s.has(iso)) s.delete(iso)
+                      else s.add(iso)
+                      patch('diasSemanaColetaFixa', [...s].sort((a, b) => a - b))
+                    }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
           </div>
         )}
       </>
@@ -1971,7 +2116,7 @@ export default function Programacao() {
                               </span>
                               <span>
                                 <span style={itemMetaKeyStyle}>Per.</span>{' '}
-                                {item.periodicidade || '—'}
+                                {textoPeriodicidadeLista(item)}
                               </span>
                               <span style={itemMetaSepStyle} aria-hidden>
                                 ·

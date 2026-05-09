@@ -17,7 +17,25 @@ function parseArgs(argv: string[]): Args {
     const key = k.slice(2);
     const val = argv[i + 1];
     if (!val || val.startsWith("--")) continue;
-    (args as any)[key] = val;
+    switch (key) {
+      case "name":
+        args.name = val;
+        break;
+      case "email":
+        args.email = val;
+        break;
+      case "password":
+        args.password = val;
+        break;
+      case "cargo":
+        args.cargo = val;
+        break;
+      case "status":
+        args.status = val;
+        break;
+      default:
+        break;
+    }
     i++;
   }
 
@@ -94,7 +112,6 @@ if (!userId) {
     );
   }
 
-  // eslint-disable-next-line no-console
   console.log(`Auth user already exists: ${found.id}`);
 
   await upsertProfile(found.id);
@@ -102,7 +119,6 @@ if (!userId) {
   process.exit(0);
 }
 
-// eslint-disable-next-line no-console
 console.log(`Auth user created: ${userId}`);
 
 await upsertProfile(userId);
@@ -116,7 +132,9 @@ async function upsertProfile(id: string) {
     .eq("table_name", "usuarios");
   if (colsErr) throw colsErr;
 
-  const cols = new Set((colsRows ?? []).map((r: any) => String(r.column_name)));
+  const cols = new Set(
+    (colsRows ?? []).map((r: { column_name: unknown }) => String(r.column_name ?? "")),
+  );
 
   const colNome = pickColumn(cols, ["nome", "name", "nome_completo", "nomeCompleto"]);
   const colEmail = pickColumn(cols, ["email", "email_usuario", "emailUsuario"]);
@@ -134,26 +152,17 @@ async function upsertProfile(id: string) {
     .upsert(payload, { onConflict: "id" });
   if (upsertErr) throw upsertErr;
 
-  // eslint-disable-next-line no-console
   console.log(`Profile upserted in public.usuarios (id=${id}).`);
 }
 
 function printCredentials() {
-  // eslint-disable-next-line no-console
   console.log("");
-  // eslint-disable-next-line no-console
   console.log("== Admin user credentials ==");
-  // eslint-disable-next-line no-console
   console.log(`name: ${name}`);
-  // eslint-disable-next-line no-console
   console.log(`email: ${email}`);
-  // eslint-disable-next-line no-console
   console.log(`password: ${password}`);
-  // eslint-disable-next-line no-console
   console.log(`cargo: ${cargo}`);
-  // eslint-disable-next-line no-console
   console.log(`status: ${status}`);
-  // eslint-disable-next-line no-console
   console.log("============================");
 }
 

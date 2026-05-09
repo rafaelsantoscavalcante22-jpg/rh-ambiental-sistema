@@ -11,6 +11,10 @@ type Props = {
   presencaOutro: PresencaStatus
   mensagens: ChatMensagem[]
   enviando: boolean
+  /** Só administradores: mostra o menu com exclusão de histórico. */
+  podeApagarHistorico?: boolean
+  apagandoHistorico?: boolean
+  onApagarHistorico?: () => void
   onEnviarTexto: (texto: string) => Promise<void>
   onEnviarFicheiro: (f: File, legenda: string) => Promise<void>
 }
@@ -22,12 +26,37 @@ export function ChatThreadPanel({
   presencaOutro,
   mensagens,
   enviando,
+  podeApagarHistorico = false,
+  apagandoHistorico = false,
+  onApagarHistorico,
   onEnviarTexto,
   onEnviarFicheiro,
 }: Props) {
   const [texto, setTexto] = useState('')
+  const [menuMaisAberto, setMenuMaisAberto] = useState(false)
   const fRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const menuMaisRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuMaisAberto) return
+    const onDown = (e: MouseEvent) => {
+      if (menuMaisRef.current && !menuMaisRef.current.contains(e.target as Node)) {
+        setMenuMaisAberto(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [menuMaisAberto])
+
+  useEffect(() => {
+    if (!menuMaisAberto) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuMaisAberto(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [menuMaisAberto])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -50,21 +79,60 @@ export function ChatThreadPanel({
   return (
     <section className="chat-interno-thread" aria-label="Mensagens">
       <header className="chat-interno-thread__head">
-        <ChatAvatar nome={outroNome} fotoUrl={outroFoto} size={48} />
-        <div className="chat-interno-thread__head-text">
-          <h2 className="chat-interno-thread__title">{outroNome}</h2>
-          <p
-            className={
-              presencaOutro === 'online'
-                ? 'chat-interno-status chat-interno-status--on'
-                : presencaOutro === 'ausente'
-                  ? 'chat-interno-status chat-interno-status--ausente'
-                  : 'chat-interno-status chat-interno-status--offline'
-            }
-          >
-            {etiquetaPresenca(presencaOutro)}
-          </p>
+        <div className="chat-interno-thread__head-main">
+          <ChatAvatar nome={outroNome} fotoUrl={outroFoto} size={48} />
+          <div className="chat-interno-thread__head-text">
+            <h2 className="chat-interno-thread__title">{outroNome}</h2>
+            <p
+              className={
+                presencaOutro === 'online'
+                  ? 'chat-interno-status chat-interno-status--on'
+                  : presencaOutro === 'ausente'
+                    ? 'chat-interno-status chat-interno-status--ausente'
+                    : 'chat-interno-status chat-interno-status--offline'
+              }
+            >
+              {etiquetaPresenca(presencaOutro)}
+            </p>
+          </div>
         </div>
+        {podeApagarHistorico && onApagarHistorico ? (
+          <div className="chat-interno-thread__menu-wrap" ref={menuMaisRef}>
+            <button
+              type="button"
+              className="chat-interno-thread__menu-trigger"
+              aria-label="Mais opções da conversa"
+              aria-expanded={menuMaisAberto}
+              aria-haspopup="menu"
+              disabled={apagandoHistorico || enviando}
+              onClick={() => setMenuMaisAberto((v) => !v)}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <circle cx="12" cy="6" r="1.85" />
+                <circle cx="12" cy="12" r="1.85" />
+                <circle cx="12" cy="18" r="1.85" />
+              </svg>
+            </button>
+            {menuMaisAberto ? (
+              <ul className="chat-interno-thread__dropdown" role="menu">
+                <li role="none">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="chat-interno-thread__dropdown-danger"
+                    disabled={apagandoHistorico}
+                    onClick={() => {
+                      setMenuMaisAberto(false)
+                      onApagarHistorico()
+                    }}
+                  >
+                    Excluir histórico da conversa…
+                  </button>
+                </li>
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       <div ref={scrollRef} className="chat-interno-thread__scroll">

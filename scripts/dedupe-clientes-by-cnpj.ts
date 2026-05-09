@@ -303,8 +303,7 @@ async function main() {
   let totalWillDelete = 0;
   let totalGroupsDone = 0;
 
-  for (const [groupKey, group] of dupGroups) {
-    const cnpjDigits = groupKey.split("|")[0] || "";
+  for (const [, group] of dupGroups) {
     const keep = pickBest(group);
     const others = group.filter((g) => g.id !== keep.id);
     const delIds = others.map((o) => o.id);

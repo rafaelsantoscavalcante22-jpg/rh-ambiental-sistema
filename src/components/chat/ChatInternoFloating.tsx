@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
 import {
+  chatAdminApagarHistoricoConversa,
   chatCarregarConversas,
   chatCarregarMensagens,
   chatEnviarAnexo,
@@ -11,6 +12,8 @@ import {
   chatListarUsuariosAtivos,
   chatMarcarLida,
 } from '../../lib/chat'
+import { cargoEhAdministrador } from '../../lib/workflowPermissions'
+import { usePerfilUsuario } from '../../contexts/PerfilUsuarioContext'
 import { normalizarPresencaStatus } from '../../lib/presencaStatus'
 import type { ChatConversaLista, ChatMensagem, ChatUsuarioLista } from '../../types/chat'
 import { useChatFloat } from '../../contexts/ChatFloatContext'
@@ -84,6 +87,8 @@ const CHAT_NOTIFICACAO_AUDIO_SRC = '/msn-sound_1.mp3'
 export function ChatInternoFloating({ naoLidasBadge }: Props) {
   const { open, setOpen, pendingUserId, clearPendingUserId } = useChatFloat()
   const { isOnline } = usePresencaAoVivo()
+  const { usuario } = usePerfilUsuario()
+  const podeApagarHistoricoChat = cargoEhAdministrador(usuario?.cargo)
 
   const fabRef = useRef<HTMLButtonElement | null>(null)
   const [fabPos, setFabPos] = useState<FabPos | null>(() => {
@@ -113,6 +118,7 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
   const [outroIdPainel, setOutroIdPainel] = useState<string | null>(null)
   const [mensagens, setMensagens] = useState<ChatMensagem[]>([])
   const [enviando, setEnviando] = useState(false)
+  const [apagandoHistorico, setApagandoHistorico] = useState(false)
   const [abrindoComPessoa, setAbrindoComPessoa] = useState(false)
 
   const [temaCabecalho, setTemaCabecalho] = useState<ChatHeadThemeId>(() =>
@@ -590,6 +596,25 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
     }
   }
 
+  const handleApagarHistoricoConversa = useCallback(async () => {
+    if (!conversaId || !podeApagarHistoricoChat) return
+    const ok = window.confirm(
+      'Excluir todo o histórico desta conversa? As mensagens e anexos serão removidos de forma irreversível para todos os participantes.'
+    )
+    if (!ok) return
+    setApagandoHistorico(true)
+    setErro('')
+    try {
+      await chatAdminApagarHistoricoConversa(conversaId)
+      setMensagens([])
+      await recarregarConversas()
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Não foi possível excluir o histórico.')
+    } finally {
+      setApagandoHistorico(false)
+    }
+  }, [conversaId, podeApagarHistoricoChat, recarregarConversas])
+
   const fechar = useCallback(() => {
     setOpen(false)
   }, [setOpen])
@@ -732,7 +757,10 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
                   outroFoto={outroMeta?.foto_url ?? null}
                   presencaOutro={presencaOutro}
                   mensagens={mensagens}
-                  enviando={enviando}
+                  enviando={enviando || apagandoHistorico}
+                  podeApagarHistorico={podeApagarHistoricoChat}
+                  apagandoHistorico={apagandoHistorico}
+                  onApagarHistorico={() => void handleApagarHistoricoConversa()}
                   onEnviarTexto={handleEnviarTexto}
                   onEnviarFicheiro={handleEnviarFicheiro}
                 />
