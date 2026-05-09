@@ -351,21 +351,110 @@ function textoServicoCalendario(item: ProgramacaoItem): string | null {
   return t
 }
 
-function getStatusStyle(status: ProgramacaoStatus) {
+type ProgramacaoStatusVisual = {
+  backgroundColor: string
+  color: string
+  /** Borda suave em volta da etiqueta */
+  border: string
+  /** Faixa à esquerda do cartão / pré-visualização */
+  stripeColor: string
+  /** Ponto na etiqueta de status */
+  dotColor: string
+}
+
+const programacaoStatusTagStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '7px',
+  padding: '6px 11px',
+  borderRadius: '8px',
+  fontSize: '12px',
+  fontWeight: 700,
+  whiteSpace: 'nowrap',
+  letterSpacing: '-0.01em',
+  lineHeight: 1,
+  flexShrink: 0,
+}
+
+function getStatusStyle(status: ProgramacaoStatus): ProgramacaoStatusVisual {
   switch (status) {
     case 'PENDENTE':
-      return { backgroundColor: '#fef3c7', color: '#b45309' }
+      return {
+        backgroundColor: '#fffbeb',
+        color: '#78350f',
+        border: '1px solid rgba(245, 158, 11, 0.42)',
+        stripeColor: '#f59e0b',
+        dotColor: '#d97706',
+      }
     case 'QUADRO_ATUALIZADO':
-      return { backgroundColor: '#dbeafe', color: '#1d4ed8' }
+      return {
+        backgroundColor: '#eff6ff',
+        color: '#1e3a8a',
+        border: '1px solid rgba(59, 130, 246, 0.38)',
+        stripeColor: '#3b82f6',
+        dotColor: '#2563eb',
+      }
     case 'EM_COLETA':
-      return { backgroundColor: '#ede9fe', color: '#6d28d9' }
+      return {
+        backgroundColor: '#f5f3ff',
+        color: '#5b21b6',
+        border: '1px solid rgba(139, 92, 246, 0.38)',
+        stripeColor: '#8b5cf6',
+        dotColor: '#7c3aed',
+      }
     case 'CONCLUIDA':
-      return { backgroundColor: '#dcfce7', color: '#15803d' }
+      return {
+        backgroundColor: '#f0fdf4',
+        color: '#14532d',
+        border: '1px solid rgba(34, 197, 94, 0.35)',
+        stripeColor: '#22c55e',
+        dotColor: '#16a34a',
+      }
     case 'CANCELADA':
-      return { backgroundColor: '#fee2e2', color: '#dc2626' }
+      return {
+        backgroundColor: '#fef2f2',
+        color: '#991b1b',
+        border: '1px solid rgba(239, 68, 68, 0.35)',
+        stripeColor: '#ef4444',
+        dotColor: '#dc2626',
+      }
     default:
-      return { backgroundColor: '#e5e7eb', color: '#374151' }
+      return {
+        backgroundColor: '#f9fafb',
+        color: '#374151',
+        border: '1px solid #e5e7eb',
+        stripeColor: '#9ca3af',
+        dotColor: '#6b7280',
+      }
   }
+}
+
+function ProgramacaoStatusLabel({ status }: { status: ProgramacaoStatus }) {
+  const s = getStatusStyle(status)
+  return (
+    <span
+      style={{
+        ...programacaoStatusTagStyle,
+        backgroundColor: s.backgroundColor,
+        color: s.color,
+        border: s.border,
+        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+      }}
+    >
+      <span
+        style={{
+          width: 7,
+          height: 7,
+          borderRadius: 999,
+          backgroundColor: s.dotColor,
+          flexShrink: 0,
+          boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.35)',
+        }}
+        aria-hidden
+      />
+      {STATUS_LABELS[status]}
+    </span>
+  )
 }
 
 function gerarNumeroProgramacao(totalAtual: number) {
@@ -1921,7 +2010,7 @@ export default function Programacao() {
                                 borderRadius: '8px',
                                 background: '#ffffff',
                                 border: '1px solid #e8ecf1',
-                                borderLeft: `3px solid ${statusStyle.color}`,
+                                borderLeft: `3px solid ${statusStyle.stripeColor}`,
                               }}
                               title={`${item.clienteNome}${
                                 sec ? ` · ${sec}` : ''
@@ -2040,7 +2129,7 @@ export default function Programacao() {
                             id={`prog-agenda-${item.id}`}
                             style={{
                               ...itemAgendaStyle,
-                              borderLeft: `3px solid ${statusStyle.color}`,
+                              borderLeft: `3px solid ${statusStyle.stripeColor}`,
                               ...(emDestaqueContexto
                                 ? {
                                     boxShadow: '0 0 0 2px rgba(34, 197, 94, 0.35)',
@@ -2080,17 +2169,9 @@ export default function Programacao() {
                                   </span>
                                 </div>
                               </div>
-                              <span
-                                style={{
-                                  ...statusBadgeStyle,
-                                  backgroundColor: statusStyle.backgroundColor,
-                                  color: statusStyle.color,
-                                  flexShrink: 0,
-                                  alignSelf: 'flex-start',
-                                }}
-                              >
-                                {STATUS_LABELS[item.statusProgramacao]}
-                              </span>
+                              <div style={{ alignSelf: 'flex-start' }}>
+                                <ProgramacaoStatusLabel status={item.statusProgramacao} />
+                              </div>
                             </div>
 
                             <div style={itemAgendaMetaStripStyle}>
@@ -2320,19 +2401,20 @@ export default function Programacao() {
                         borderRadius: '14px',
                         padding: '14px 16px',
                         background: '#ffffff',
-                        borderLeft: `4px solid ${statusStyle.color}`,
+                        borderLeft: `4px solid ${statusStyle.stripeColor}`,
                       }}
                     >
                       <div
                         style={{
                           display: 'flex',
                           justifyContent: 'space-between',
+                          alignItems: 'flex-start',
                           gap: '12px',
                           flexWrap: 'wrap',
                           marginBottom: '10px',
                         }}
                       >
-                        <div>
+                        <div style={{ minWidth: 0 }}>
                           <div
                             style={{
                               fontSize: '12px',
@@ -2352,15 +2434,9 @@ export default function Programacao() {
                             </div>
                           ) : null}
                         </div>
-                        <span
-                          style={{
-                            ...statusBadgeStyle,
-                            backgroundColor: statusStyle.backgroundColor,
-                            color: statusStyle.color,
-                          }}
-                        >
-                          {STATUS_LABELS[item.statusProgramacao]}
-                        </span>
+                        <div style={{ alignSelf: 'flex-start' }}>
+                          <ProgramacaoStatusLabel status={item.statusProgramacao} />
+                        </div>
                       </div>
 
                       <div
@@ -2373,7 +2449,7 @@ export default function Programacao() {
                       >
                         <span
                           style={{
-                            ...statusBadgeStyle,
+                            ...statusBadgeCompactStyle,
                             backgroundColor: item.mtrId ? '#dbeafe' : '#f1f5f9',
                             color: item.mtrId ? '#1d4ed8' : '#64748b',
                           }}
@@ -2382,7 +2458,7 @@ export default function Programacao() {
                         </span>
                         <span
                           style={{
-                            ...statusBadgeStyle,
+                            ...statusBadgeCompactStyle,
                             backgroundColor: item.coletaId ? '#dcfce7' : '#f1f5f9',
                             color: item.coletaId ? '#15803d' : '#64748b',
                           }}
@@ -2719,7 +2795,7 @@ export default function Programacao() {
                             key={item.id}
                             style={{
                               ...itemAgendaStyle,
-                              borderLeft: `3px solid ${statusStyle.color}`,
+                              borderLeft: `3px solid ${statusStyle.stripeColor}`,
                             }}
                           >
                             <div style={itemAgendaMainRowStyle}>
@@ -2730,17 +2806,9 @@ export default function Programacao() {
                                 <div style={itemNumeroStyle}>Programação {item.numero || '—'}</div>
                                 <div style={itemClienteStyle}>{item.clienteNome}</div>
                               </div>
-                              <span
-                                style={{
-                                  ...statusBadgeStyle,
-                                  backgroundColor: statusStyle.backgroundColor,
-                                  color: statusStyle.color,
-                                  flexShrink: 0,
-                                  alignSelf: 'flex-start',
-                                }}
-                              >
-                                {STATUS_LABELS[item.statusProgramacao]}
-                              </span>
+                              <div style={{ alignSelf: 'flex-start' }}>
+                                <ProgramacaoStatusLabel status={item.statusProgramacao} />
+                              </div>
                             </div>
                             <div style={itemAgendaMetaStripStyle}>
                               <span>
@@ -3315,14 +3383,6 @@ const itemClienteStyle: CSSProperties = {
   lineHeight: 1.25,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
-}
-
-const statusBadgeStyle: CSSProperties = {
-  padding: '6px 11px',
-  borderRadius: '999px',
-  fontSize: '12px',
-  fontWeight: 700,
-  whiteSpace: 'nowrap',
 }
 
 const acoesRowCompactStyle: CSSProperties = {
