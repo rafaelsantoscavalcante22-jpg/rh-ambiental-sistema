@@ -6,6 +6,14 @@ import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from "../lib/coletasQueryLimits"
 import { sanitizeIlikePattern } from "../lib/sanitizeIlike";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { limparSessionDraftKey, useCadastroFormDraft } from "../lib/useCadastroFormDraft";
+import {
+  apenasDigitos,
+  formatarPlacaDigitacao,
+  formatarRenavamDigitacao,
+  placaParaBanco,
+  validarPlacaBr,
+  validarRenavamBasico,
+} from "../lib/brasilCadastro";
 
 type Caminhao = {
   id: string;
@@ -20,6 +28,13 @@ type Caminhao = {
   cipp_numero: string | null;
   cipp_arquivo_url: string | null;
   foto_url: string | null;
+  renavam: string | null;
+  peso_tara: string | null;
+  peso_bruto: string | null;
+  cmt: string | null;
+  quant_ibcs: string | null;
+  tipo_caixa: string | null;
+  motorista_id: string | null;
   created_at: string | null;
 };
 
@@ -33,6 +48,13 @@ type FormCaminhao = {
   crlv_validade_br: string;
   civ_numero: string;
   cipp_numero: string;
+  renavam: string;
+  peso_tara: string;
+  peso_bruto: string;
+  cmt: string;
+  quant_ibcs: string;
+  tipo_caixa: string;
+  motorista_id: string;
 };
 
 const STATUS_DISPONIBILIDADE_OPCOES = [
@@ -51,20 +73,18 @@ const formInicial: FormCaminhao = {
   crlv_validade_br: "",
   civ_numero: "",
   cipp_numero: "",
+  renavam: "",
+  peso_tara: "",
+  peso_bruto: "",
+  cmt: "",
+  quant_ibcs: "",
+  tipo_caixa: "",
+  motorista_id: "",
 };
 
 function limparOuNull(valor: string) {
   const texto = valor.trim();
   return texto === "" ? null : texto;
-}
-
-/** Normaliza placa para maiúsculas e remove espaços (Mercosul / formato antigo). */
-function formatarPlacaDigitacao(valor: string) {
-  return valor.toUpperCase().replace(/\s+/g, "").slice(0, 8);
-}
-
-function apenasDigitos(s: string) {
-  return s.replace(/\D/g, "");
 }
 
 /** Máscara de data dd/mm/aaaa durante a digitação. */
@@ -192,12 +212,15 @@ const placaCaminhaoFichaBtnStyle: CSSProperties = {
 };
 
 const CAMINHOES_SELECT =
-  "id, placa, modelo, tipo, rodizio, status_disponibilidade, crlv_validade, civ_numero, civ_arquivo_url, cipp_numero, cipp_arquivo_url, foto_url, created_at";
+  "id, placa, modelo, tipo, rodizio, status_disponibilidade, crlv_validade, civ_numero, civ_arquivo_url, cipp_numero, cipp_arquivo_url, foto_url, renavam, peso_tara, peso_bruto, cmt, quant_ibcs, tipo_caixa, motorista_id, created_at";
 
 const CAMINHOES_CADASTRO_DRAFT_KEY = "rg-ambiental-caminhoes-cadastro-draft";
 
+type MotoristaOpcao = { id: string; nome: string };
+
 export default function Caminhoes() {
   const [caminhoes, setCaminhoes] = useState<Caminhao[]>([]);
+  const [motoristasOpcoes, setMotoristasOpcoes] = useState<MotoristaOpcao[]>([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState("");
   const [page, setPage] = useState(1);
@@ -231,6 +254,12 @@ export default function Caminhoes() {
   const [cadastroCivPendente, setCadastroCivPendente] = useState<File | null>(null);
   const [cadastroCippPendente, setCadastroCippPendente] = useState<File | null>(null);
   const [cadastroCertEnviando, setCadastroCertEnviando] = useState<"civ" | "cipp" | null>(null);
+
+  const motoristaNomePorId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const o of motoristasOpcoes) m.set(o.id, o.nome);
+    return m;
+  }, [motoristasOpcoes]);
 
   const cadastroDraftData = useMemo(() => ({ form, editingId }), [form, editingId]);
   useCadastroFormDraft({
@@ -275,6 +304,30 @@ export default function Caminhoes() {
     },
   });
 
+  useEffect(() => {
+    let cancel = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from("motoristas")
+        .select("id, nome")
+        .order("nome", { ascending: true })
+        .limit(3000);
+      if (cancel) return;
+      if (error) {
+        console.error("Erro ao carregar motoristas (veículos):", error);
+        setMotoristasOpcoes([]);
+        return;
+      }
+      const rows = ((data as { id: string; nome: string }[]) || [])
+        .map((r) => ({ id: r.id, nome: String(r.nome ?? "").trim() }))
+        .filter((r) => r.nome.length > 0);
+      setMotoristasOpcoes(rows);
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, []);
+
   const fetchCaminhoes = useCallback(async () => {
     setLoading(true);
 
@@ -290,7 +343,7 @@ export default function Caminhoes() {
 
     if (term) {
       const s = sanitizeIlikePattern(term);
-      const orFilter = `placa.ilike.%${s}%,modelo.ilike.%${s}%,tipo.ilike.%${s}%,rodizio.ilike.%${s}%,status_disponibilidade.ilike.%${s}%`;
+      const orFilter = `placa.ilike.%${s}%,modelo.ilike.%${s}%,tipo.ilike.%${s}%,rodizio.ilike.%${s}%,status_disponibilidade.ilike.%${s}%,renavam.ilike.%${s}%,peso_tara.ilike.%${s}%,quant_ibcs.ilike.%${s}%,tipo_caixa.ilike.%${s}%`;
       countQ = countQ.or(orFilter);
       dataQ = dataQ.or(orFilter);
     }
@@ -322,6 +375,13 @@ export default function Caminhoes() {
         civ_arquivo_url: c.civ_arquivo_url ?? null,
         cipp_numero: c.cipp_numero ?? null,
         cipp_arquivo_url: c.cipp_arquivo_url ?? null,
+        renavam: c.renavam ?? null,
+        peso_tara: c.peso_tara ?? null,
+        peso_bruto: c.peso_bruto ?? null,
+        cmt: c.cmt ?? null,
+        quant_ibcs: c.quant_ibcs ?? null,
+        tipo_caixa: c.tipo_caixa ?? null,
+        motorista_id: c.motorista_id ?? null,
       }))
     );
     setLoading(false);
@@ -346,6 +406,10 @@ export default function Caminhoes() {
     }
     if (name === "crlv_validade_br") {
       setForm((prev) => ({ ...prev, crlv_validade_br: mascararDataDDMMAAAA(value) }));
+      return;
+    }
+    if (name === "renavam") {
+      setForm((prev) => ({ ...prev, renavam: formatarRenavamDigitacao(value) }));
       return;
     }
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -401,6 +465,13 @@ export default function Caminhoes() {
       crlv_validade_br: isoDateParaBRDisplay(c.crlv_validade),
       civ_numero: c.civ_numero || "",
       cipp_numero: c.cipp_numero || "",
+      renavam: c.renavam || "",
+      peso_tara: c.peso_tara || "",
+      peso_bruto: c.peso_bruto || "",
+      cmt: c.cmt || "",
+      quant_ibcs: c.quant_ibcs || "",
+      tipo_caixa: c.tipo_caixa || "",
+      motorista_id: c.motorista_id || "",
     });
     setEditingId(c.id);
     setMostrarCadastro(true);
@@ -685,10 +756,24 @@ export default function Caminhoes() {
   async function handleSalvar(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
-    const placa = formatarPlacaDigitacao(form.placa);
+    const placa = placaParaBanco(form.placa);
     if (!placa) {
       alert("Preencha a placa do veículo.");
       return;
+    }
+    if (!validarPlacaBr(placa)) {
+      alert("Placa inválida. Use o padrão antigo (ABC1234) ou Mercosul (ABC1D23).");
+      return;
+    }
+
+    const renavamLimpo = formatarRenavamDigitacao(form.renavam);
+    let renavam: string | null = null;
+    if (renavamLimpo.length > 0) {
+      if (!validarRenavamBasico(renavamLimpo)) {
+        alert("RENAVAM inválido. Informe entre 9 e 11 dígitos ou deixe em branco.");
+        return;
+      }
+      renavam = renavamLimpo;
     }
 
     const digitosCrlv = apenasDigitos(form.crlv_validade_br);
@@ -717,6 +802,13 @@ export default function Caminhoes() {
       crlv_validade,
       civ_numero: limparOuNull(form.civ_numero),
       cipp_numero: limparOuNull(form.cipp_numero),
+      renavam,
+      peso_tara: limparOuNull(form.peso_tara),
+      peso_bruto: limparOuNull(form.peso_bruto),
+      cmt: limparOuNull(form.cmt),
+      quant_ibcs: limparOuNull(form.quant_ibcs),
+      tipo_caixa: limparOuNull(form.tipo_caixa),
+      motorista_id: form.motorista_id.trim() || null,
     };
 
     let error: PostgrestError | null = null;
@@ -1175,6 +1267,84 @@ export default function Caminhoes() {
                         marginBottom: "12px",
                       }}
                     >
+                      Operação e vínculo
+                    </div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                        gap: "12px",
+                      }}
+                    >
+                      <select
+                        name="motorista_id"
+                        value={form.motorista_id}
+                        onChange={handleInputChange}
+                        style={{ ...inputStyle, gridColumn: "1 / -1" }}
+                      >
+                        <option value="">Motorista habitual (opcional)</option>
+                        {motoristasOpcoes.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.nome}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        name="renavam"
+                        value={form.renavam}
+                        onChange={handleInputChange}
+                        placeholder="RENAVAM (9 a 11 dígitos)"
+                        style={inputStyle}
+                        inputMode="numeric"
+                        autoComplete="off"
+                      />
+                      <input
+                        name="peso_tara"
+                        value={form.peso_tara}
+                        onChange={handleInputChange}
+                        placeholder="Peso tara (ex.: 10,91 T)"
+                        style={inputStyle}
+                      />
+                      <input
+                        name="peso_bruto"
+                        value={form.peso_bruto}
+                        onChange={handleInputChange}
+                        placeholder="Peso bruto"
+                        style={inputStyle}
+                      />
+                      <input
+                        name="cmt"
+                        value={form.cmt}
+                        onChange={handleInputChange}
+                        placeholder="CMT"
+                        style={inputStyle}
+                      />
+                      <input
+                        name="quant_ibcs"
+                        value={form.quant_ibcs}
+                        onChange={handleInputChange}
+                        placeholder="Quant. IBCs"
+                        style={inputStyle}
+                      />
+                      <input
+                        name="tipo_caixa"
+                        value={form.tipo_caixa}
+                        onChange={handleInputChange}
+                        placeholder="Tipo de caixa (ex.: 30 m³)"
+                        style={{ ...inputStyle, gridColumn: "1 / -1" }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: "18px" }}>
+                    <div
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: 800,
+                        color: "#334155",
+                        marginBottom: "12px",
+                      }}
+                    >
                       Documentação e certificações
                     </div>
                     <div
@@ -1608,7 +1778,7 @@ export default function Caminhoes() {
               <input
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
-                placeholder="Busca (placa, modelo, tipo, rodízio, status…)"
+                placeholder="Busca (placa, modelo, RENAVAM, tara, IBCs…)"
                 style={{
                   width: "360px",
                   maxWidth: "100%",
@@ -1652,6 +1822,7 @@ export default function Caminhoes() {
                       }}
                     >
                       <th style={thStyle}>Placa</th>
+                      <th style={thStyle}>Motorista</th>
                       <th style={thStyle}>Modelo</th>
                       <th style={thStyle}>Tipo</th>
                       <th style={thStyle}>Rodízio</th>
@@ -1687,6 +1858,11 @@ export default function Caminhoes() {
                           >
                             {c.placa}
                           </button>
+                        </td>
+                        <td style={{ ...tdStyle, maxWidth: "140px", fontSize: "13px" }}>
+                          {c.motorista_id
+                            ? motoristaNomePorId.get(c.motorista_id) ?? "—"
+                            : "—"}
                         </td>
                         <td style={tdStyle}>{c.modelo || "-"}</td>
                         <td style={tdStyle}>{c.tipo || "-"}</td>
@@ -1753,7 +1929,7 @@ export default function Caminhoes() {
                     {caminhoes.length === 0 && (
                       <tr>
                         <td
-                          colSpan={7}
+                          colSpan={8}
                           style={{
                             textAlign: "center",
                             padding: "28px 12px",
@@ -1948,6 +2124,24 @@ export default function Caminhoes() {
               >
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>Placa</dt>
                 <dd style={{ margin: 0, color: "#0f172a", fontWeight: 600 }}>{fichaCaminhao.placa}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Motorista habitual</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>
+                  {fichaCaminhao.motorista_id
+                    ? motoristaNomePorId.get(fichaCaminhao.motorista_id) ?? "—"
+                    : "—"}
+                </dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>RENAVAM</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.renavam || "—"}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Peso tara</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.peso_tara || "—"}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Peso bruto</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.peso_bruto || "—"}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>CMT</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.cmt || "—"}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Quant. IBCs</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.quant_ibcs || "—"}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Tipo de caixa</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.tipo_caixa || "—"}</dd>
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>Modelo</dt>
                 <dd style={{ margin: 0, color: "#1f2937" }}>{fichaCaminhao.modelo || "—"}</dd>
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>Tipo</dt>

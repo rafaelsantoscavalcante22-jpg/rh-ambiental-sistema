@@ -7,12 +7,13 @@ const ACCENT = '#0d9488'
 type MotoristaCadastroRow = {
   id: string
   nome: string
+  cpf: string
   cnh_numero: string
   cnh_categoria: string
 }
 
 function textoMotoristaParaBusca(m: MotoristaCadastroRow): string {
-  return [m.nome, m.cnh_numero, m.cnh_categoria].join(' ').toLowerCase()
+  return [m.nome, m.cpf, m.cnh_numero, m.cnh_categoria].join(' ').toLowerCase()
 }
 
 function motoristaCorrespondePesquisa(m: MotoristaCadastroRow, raw: string): boolean {
@@ -85,7 +86,7 @@ export default function ChecklistTransporte({
     void (async () => {
       const { data, error } = await supabase
         .from('motoristas')
-        .select('id, nome, cnh_numero, cnh_categoria')
+        .select('id, nome, cpf, cnh_numero, cnh_categoria')
         .order('nome', { ascending: true })
         .limit(2000)
       if (cancel) return
@@ -98,6 +99,7 @@ export default function ChecklistTransporte({
         .map((r) => ({
           id: String(r.id),
           nome: String(r.nome ?? '').trim(),
+          cpf: String(r.cpf ?? '').trim(),
           cnh_numero: String(r.cnh_numero ?? '').trim(),
           cnh_categoria: String(r.cnh_categoria ?? '').trim(),
         }))
@@ -293,7 +295,7 @@ export default function ChecklistTransporte({
                   htmlFor="ct-mot-busca"
                   style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: '6px' }}
                 >
-                  Pesquisar (nome, CNH, categoria)
+                  Pesquisar (nome, CPF, CNH, categoria)
                 </label>
                 <input
                   ref={buscaMotoristaInputRef}

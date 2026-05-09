@@ -43,6 +43,11 @@
     "admin:create-pateta": "tsx scripts/create-admin-user.ts --name Pateta --email pateta@empresa.local --cargo administrador",
     "admin:create-teste": "tsx scripts/create-admin-user.ts --name Teste --email teste@rgambiental.com --cargo administrador",
     "import:clientes:xlsx": "tsx scripts/import-clientes-from-xlsx.ts",
+    "import:motoristas-veiculos:rg": "tsx scripts/import-motoristas-veiculos-rg-xlsx.ts",
+    "db:cleanup:motoristas-caminhoes": "tsx scripts/apply-supabase-sql.ts supabase/sql_cleanup_motoristas_caminhoes_tudo.sql",
+    "cleanup:motoristas-caminhoes": "tsx scripts/cleanup-motoristas-caminhoes.ts --yes",
+    "seed:motoristas-rg-lista": "tsx scripts/seed-motoristas-rg-lista.ts",
+    "seed:caminhoes-rg-frota": "tsx scripts/seed-caminhoes-rg-frota.ts",
     "report:clientes:duplicados": "tsx scripts/report-clientes-duplicados.ts",
     "dedupe:clientes:cnpj": "tsx scripts/dedupe-clientes-by-cnpj.ts"
   },

@@ -9,10 +9,18 @@ import { limparSessionDraftKey, useCadastroFormDraft } from "../lib/useCadastroF
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { RgReportPdfIcon } from "../components/ui/RgReportPdfIcon";
+import {
+  formatarCPFDigitacao,
+  formatarCnhDigitacao,
+  formatarCpfParaArmazenar,
+  validarCPF,
+  validarCnhNumeroBasica,
+} from "../lib/brasilCadastro";
 
 type Motorista = {
   id: string;
   nome: string;
+  cpf: string | null;
   cnh_numero: string | null;
   cnh_categoria: string | null;
   cnh_validade: string | null;
@@ -24,6 +32,7 @@ type Motorista = {
 
 type FormMotorista = {
   nome: string;
+  cpf: string;
   cnh_numero: string;
   cnh_categoria: string;
   cnh_validade: string;
@@ -33,6 +42,7 @@ type FormMotorista = {
 
 const formInicial: FormMotorista = {
   nome: "",
+  cpf: "",
   cnh_numero: "",
   cnh_categoria: "",
   cnh_validade: "",
@@ -103,7 +113,7 @@ const nomeMotoristaFichaBtnStyle: CSSProperties = {
 };
 
 const MOTORISTAS_SELECT =
-  "id, nome, cnh_numero, cnh_categoria, cnh_validade, possui_nopp, nopp_validade, cnh_foto_url, created_at";
+  "id, nome, cpf, cnh_numero, cnh_categoria, cnh_validade, possui_nopp, nopp_validade, cnh_foto_url, created_at";
 
 const MOTORISTAS_CADASTRO_DRAFT_KEY = "rg-ambiental-motoristas-cadastro-draft";
 
@@ -154,7 +164,7 @@ export default function Motoristas() {
 
     if (term) {
       const s = sanitizeIlikePattern(term);
-      const orFilter = `nome.ilike.%${s}%,cnh_numero.ilike.%${s}%,cnh_categoria.ilike.%${s}%`;
+      const orFilter = `nome.ilike.%${s}%,cpf.ilike.%${s}%,cnh_numero.ilike.%${s}%,cnh_categoria.ilike.%${s}%`;
       countQ = countQ.or(orFilter);
       dataQ = dataQ.or(orFilter);
     }
@@ -193,7 +203,7 @@ export default function Motoristas() {
 
     if (term) {
       const s = sanitizeIlikePattern(term);
-      const orFilter = `nome.ilike.%${s}%,cnh_numero.ilike.%${s}%,cnh_categoria.ilike.%${s}%`;
+      const orFilter = `nome.ilike.%${s}%,cpf.ilike.%${s}%,cnh_numero.ilike.%${s}%,cnh_categoria.ilike.%${s}%`;
       dataQ = dataQ.or(orFilter);
     }
 
@@ -248,6 +258,7 @@ export default function Motoristas() {
         head: [
           [
             "Nome",
+            "CPF",
             "Nº CNH",
             "Categoria",
             "Validade CNH",
@@ -259,6 +270,7 @@ export default function Motoristas() {
         ],
         body: linhas.map((m) => [
           m.nome ?? "",
+          m.cpf ?? "-",
           m.cnh_numero ?? "-",
           m.cnh_categoria ?? "-",
           formatarData(m.cnh_validade),
@@ -272,14 +284,15 @@ export default function Motoristas() {
         margin: { left: 40, right: 40 },
         tableWidth: "auto",
         columnStyles: {
-          0: { cellWidth: 150 },
-          1: { cellWidth: 88 },
-          2: { cellWidth: 62 },
-          3: { cellWidth: 78 },
-          4: { cellWidth: 62 },
-          5: { cellWidth: 78 },
-          6: { cellWidth: 100 },
-          7: { cellWidth: 58 },
+          0: { cellWidth: 140 },
+          1: { cellWidth: 72 },
+          2: { cellWidth: 88 },
+          3: { cellWidth: 62 },
+          4: { cellWidth: 78 },
+          5: { cellWidth: 62 },
+          6: { cellWidth: 78 },
+          7: { cellWidth: 100 },
+          8: { cellWidth: 58 },
         },
       });
 
@@ -317,6 +330,14 @@ export default function Motoristas() {
       return;
     }
     const { name, value } = t;
+    if (name === "cpf") {
+      setForm((prev) => ({ ...prev, cpf: formatarCPFDigitacao(value) }));
+      return;
+    }
+    if (name === "cnh_numero") {
+      setForm((prev) => ({ ...prev, cnh_numero: formatarCnhDigitacao(value) }));
+      return;
+    }
     setForm((prev) => ({ ...prev, [name]: value }));
   }
 
@@ -335,6 +356,7 @@ export default function Motoristas() {
   function handleEditar(m: Motorista) {
     setForm({
       nome: m.nome || "",
+      cpf: m.cpf || "",
       cnh_numero: m.cnh_numero || "",
       cnh_categoria: m.cnh_categoria || "",
       cnh_validade: m.cnh_validade
@@ -364,10 +386,29 @@ export default function Motoristas() {
       return;
     }
 
+    const cpfDigitos = form.cpf.replace(/\D/g, "");
+    let cpf: string | null = null;
+    if (cpfDigitos.length > 0) {
+      const cpfFmt = formatarCpfParaArmazenar(form.cpf);
+      if (!cpfFmt || !validarCPF(cpfFmt)) {
+        alert("CPF inválido. Verifique os dígitos ou deixe o campo em branco.");
+        return;
+      }
+      cpf = cpfFmt;
+    }
+
+    if (form.cnh_numero.trim()) {
+      if (!validarCnhNumeroBasica(form.cnh_numero)) {
+        alert("Número da CNH inválido. Informe 11 dígitos (numeração atual) ou deixe em branco.");
+        return;
+      }
+    }
+
     setSalvando(true);
 
     const payload = {
       nome: form.nome.trim(),
+      cpf,
       cnh_numero: limparOuNull(form.cnh_numero),
       cnh_categoria: limparOuNull(form.cnh_categoria),
       cnh_validade: limparOuNull(form.cnh_validade),
@@ -743,6 +784,16 @@ export default function Motoristas() {
                     />
 
                     <input
+                      name="cpf"
+                      value={form.cpf}
+                      onChange={handleInputChange}
+                      placeholder="CPF (opcional)"
+                      style={inputStyle}
+                      inputMode="numeric"
+                      autoComplete="off"
+                    />
+
+                    <input
                       name="cnh_numero"
                       value={form.cnh_numero}
                       onChange={handleInputChange}
@@ -936,7 +987,7 @@ export default function Motoristas() {
               <input
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
-                placeholder="Busca (nome, nº CNH, categoria…)"
+                placeholder="Busca (nome, CPF, nº CNH, categoria…)"
                 style={{
                   width: "360px",
                   maxWidth: "100%",
@@ -980,6 +1031,7 @@ export default function Motoristas() {
                       }}
                     >
                       <th style={thStyle}>Nome</th>
+                      <th style={thStyle}>CPF</th>
                       <th style={thStyle}>Nº CNH</th>
                       <th style={thStyle}>Categoria</th>
                       <th style={thStyle}>Validade CNH</th>
@@ -1008,6 +1060,7 @@ export default function Motoristas() {
                             {m.nome}
                           </button>
                         </td>
+                        <td style={tdStyle}>{m.cpf || "-"}</td>
                         <td style={tdStyle}>{m.cnh_numero || "-"}</td>
                         <td style={tdStyle}>{m.cnh_categoria || "-"}</td>
                         <td style={tdStyle}>{formatarData(m.cnh_validade)}</td>
@@ -1072,7 +1125,7 @@ export default function Motoristas() {
                     {motoristas.length === 0 && (
                       <tr>
                         <td
-                          colSpan={5}
+                          colSpan={8}
                           style={{
                             textAlign: "center",
                             padding: "28px 12px",
@@ -1266,6 +1319,8 @@ export default function Motoristas() {
               >
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>Nome</dt>
                 <dd style={{ margin: 0, color: "#0f172a", fontWeight: 600 }}>{fichaMotorista.nome}</dd>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>CPF</dt>
+                <dd style={{ margin: 0, color: "#1f2937" }}>{fichaMotorista.cpf || "—"}</dd>
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>Nº CNH</dt>
                 <dd style={{ margin: 0, color: "#1f2937" }}>{fichaMotorista.cnh_numero || "—"}</dd>
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>Categoria</dt>
