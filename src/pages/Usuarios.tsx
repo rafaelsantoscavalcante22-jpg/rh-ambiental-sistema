@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type Dispatch,
+  type FormEvent,
+  type SetStateAction,
+} from 'react'
 import MainLayout from '../layouts/MainLayout'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../lib/coletasQueryLimits'
 import { limparSessionDraftKey, useCadastroFormDraft } from '../lib/useCadastroFormDraft'
@@ -79,7 +87,107 @@ type UsuariosCadastroDraftPayload =
       modo: 'editar'
       usuario: Pick<Usuario, 'id' | 'nome' | 'email' | 'cargo' | 'status' | 'created_at'>
       formEdicao: FormEdicaoState
+      /** Rascunhos antigos podem omitir estes campos. */
+      modoPaginas?: 'cargo' | 'lista'
+      rotasMarcadas?: string[]
     }
+
+type PaginasPermitidasFieldsProps = {
+  modoPaginas: 'cargo' | 'lista'
+  setModoPaginas: Dispatch<SetStateAction<'cargo' | 'lista'>>
+  rotasMarcadas: Set<string>
+  toggleRotaMarcada: (path: string) => void
+  disabled?: boolean
+  /** Nome do grupo de rádio (evitar colisão se modal e formulário coexistirem no DOM). */
+  radioGroupName?: string
+}
+
+function PaginasPermitidasFields({
+  modoPaginas,
+  setModoPaginas,
+  rotasMarcadas,
+  toggleRotaMarcada,
+  disabled,
+  radioGroupName = 'modoPaginasEditar',
+}: PaginasPermitidasFieldsProps) {
+  return (
+    <>
+      <div style={{ marginBottom: '16px' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: disabled ? 'default' : 'pointer' }}>
+          <input
+            type="radio"
+            name={radioGroupName}
+            checked={modoPaginas === 'cargo'}
+            disabled={disabled}
+            onChange={() => setModoPaginas('cargo')}
+          />
+          <span>
+            <strong>Apenas cargo</strong> — sem lista extra; vale a regra normal do perfil nas rotas.
+          </span>
+        </label>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '10px',
+            cursor: disabled ? 'default' : 'pointer',
+            marginTop: '10px',
+          }}
+        >
+          <input
+            type="radio"
+            name={radioGroupName}
+            checked={modoPaginas === 'lista'}
+            disabled={disabled}
+            onChange={() => setModoPaginas('lista')}
+          />
+          <span>
+            <strong>Lista de páginas</strong> — o utilizador só abre as rotas marcadas (além de estar ativo e com
+            cargo permitido na rota).
+          </span>
+        </label>
+      </div>
+
+      {modoPaginas === 'lista' ? (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+            gap: '8px',
+            maxHeight: 'min(52vh, 420px)',
+            overflowY: 'auto',
+            padding: '12px',
+            background: '#f8fafc',
+            borderRadius: '10px',
+            border: '1px solid #e2e8f0',
+          }}
+        >
+          {ROTAS_SISTEMA.map((r) => (
+            <label
+              key={r.path}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '13px',
+                cursor: disabled ? 'default' : 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={rotasMarcadas.has(r.path)}
+                disabled={disabled}
+                onChange={() => toggleRotaMarcada(r.path)}
+              />
+              <span style={{ fontWeight: 600, color: '#0f172a' }}>{r.label}</span>
+              <span style={{ color: '#94a3b8', fontSize: '12px' }}>{r.path}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+    </>
+  )
+}
 
 function formatarData(data: string | null) {
   if (!data) return '-'
@@ -155,10 +263,12 @@ export default function Usuarios() {
           created_at: usuarioEmEdicao.created_at,
         },
         formEdicao,
+        modoPaginas,
+        rotasMarcadas: Array.from(rotasMarcadas),
       }
     }
     return { modo: 'criar', form }
-  }, [usuarioEmEdicao, form, formEdicao])
+  }, [usuarioEmEdicao, form, formEdicao, modoPaginas, rotasMarcadas])
 
   useCadastroFormDraft<UsuariosCadastroDraftPayload>({
     storageKey: USUARIOS_CADASTRO_DRAFT_KEY,
@@ -176,6 +286,8 @@ export default function Usuarios() {
         paginas_permitidas: null,
       })
       setFormEdicao(d.formEdicao)
+      setModoPaginas(d.modoPaginas ?? 'cargo')
+      setRotasMarcadas(new Set(d.rotasMarcadas ?? []))
       setFormularioAberto(false)
     },
   })
@@ -294,33 +406,46 @@ export default function Usuarios() {
     })
   }
 
-  async function salvarPaginasUsuario() {
-    if (!modalPaginasUsuario || !podeDefinirPaginas) return
-    setErro('')
-    setSucesso('')
+  async function guardarPaginasUsuarioNoBackend(
+    userId: string
+  ): Promise<{ ok: true; message?: string } | { ok: false }> {
+    if (!podeDefinirPaginas) return { ok: true }
     let paginas: string[] | null = null
     if (modoPaginas === 'lista') {
       paginas = Array.from(rotasMarcadas)
       if (paginas.length === 0) {
         setErro('Seleccione pelo menos uma página ou escolha «Apenas cargo».')
-        return
+        return { ok: false }
       }
     }
 
-    setSalvandoPaginas(true)
     try {
       const sessao = await obterSessaoParaEdgeFunctions(supabase)
       const { data, error } = await supabase.functions.invoke('admin-set-user-pages', {
-        body: { userId: modalPaginasUsuario.id, paginas },
+        body: { userId, paginas },
         headers: headersJwtSessao(sessao),
       })
       if (error) throw error
       if (data?.error) throw new Error(String(data.error))
-      setSucesso(data?.message || 'Permissões de páginas guardadas.')
-      fecharModalPaginas()
-      await carregarUsuarios()
+      return { ok: true, message: data?.message ? String(data.message) : undefined }
     } catch (err) {
       setErro(err instanceof Error ? err.message : 'Erro ao guardar páginas.')
+      return { ok: false }
+    }
+  }
+
+  async function salvarPaginasUsuario() {
+    if (!modalPaginasUsuario || !podeDefinirPaginas) return
+    setErro('')
+    setSucesso('')
+    setSalvandoPaginas(true)
+    try {
+      const res = await guardarPaginasUsuarioNoBackend(modalPaginasUsuario.id)
+      if (res.ok) {
+        setSucesso(res.message || 'Permissões de páginas guardadas.')
+        fecharModalPaginas()
+        await carregarUsuarios()
+      }
     } finally {
       setSalvandoPaginas(false)
     }
@@ -437,6 +562,14 @@ export default function Usuarios() {
     setSucesso('')
     setFormularioAberto(false)
     setUsuarioEmEdicao(usuario)
+    const pp = usuario.paginas_permitidas
+    if (pp && pp.length > 0) {
+      setModoPaginas('lista')
+      setRotasMarcadas(new Set(pp))
+    } else {
+      setModoPaginas('cargo')
+      setRotasMarcadas(new Set())
+    }
     const st = String(usuario.status || 'ativo').toLowerCase()
     setFormEdicao({
       nome: usuario.nome || '',
@@ -477,6 +610,11 @@ export default function Usuarios() {
       return
     }
 
+    if (podeDefinirPaginas && modoPaginas === 'lista' && rotasMarcadas.size === 0) {
+      setErro('Seleccione pelo menos uma página permitida ou escolha «Apenas cargo».')
+      return
+    }
+
     setLoadingEdicao(true)
     setErro('')
     setSucesso('')
@@ -504,7 +642,24 @@ export default function Usuarios() {
       if (error) throw error
       if (data?.error) throw new Error(String(data.error))
 
-      setSucesso(data?.message || 'Usuário atualizado com sucesso.')
+      const msgPerfil = data?.message ? String(data.message) : 'Usuário atualizado com sucesso.'
+      if (podeDefinirPaginas) {
+        const resPag = await guardarPaginasUsuarioNoBackend(usuarioEmEdicao.id)
+        if (!resPag.ok) {
+          setSucesso(
+            `${msgPerfil} As permissões por página não foram guardadas; corrija abaixo e use «Salvar alterações» de novo.`
+          )
+          await carregarUsuarios()
+          return
+        }
+        setSucesso(
+          resPag.message
+            ? `${msgPerfil} ${resPag.message}`
+            : `${msgPerfil} Permissões de páginas guardadas.`
+        )
+      } else {
+        setSucesso(msgPerfil)
+      }
       fecharEdicao()
       await carregarUsuarios()
     } catch (err) {
@@ -969,6 +1124,13 @@ export default function Usuarios() {
           </h2>
           <p style={{ margin: '0 0 16px', fontSize: '14px', color: '#64748b' }}>
             Altere nome, e-mail, cargo ou status. Informe uma nova senha apenas se quiser redefinir.
+            {podeDefinirPaginas ? (
+              <>
+                {' '}
+                Pode também definir <strong>quais páginas</strong> este utilizador pode abrir; as alterações de perfil e
+                de páginas são guardadas ao premir «Salvar alterações».
+              </>
+            ) : null}
           </p>
 
           <form onSubmit={salvarEdicao}>
@@ -1038,6 +1200,30 @@ export default function Usuarios() {
               </div>
             </div>
 
+            {podeDefinirPaginas ? (
+              <div
+                style={{
+                  marginTop: '24px',
+                  paddingTop: '20px',
+                  borderTop: '1px solid #e2e8f0',
+                }}
+              >
+                <div style={sectionTitleStyle}>Acesso por páginas</div>
+                <p style={{ margin: '0 0 14px', fontSize: '13px', color: '#64748b', maxWidth: '720px' }}>
+                  «Apenas cargo» segue as regras normais do perfil. «Lista de páginas» restringe o menu às rotas
+                  marcadas (o utilizador continua a precisar de cargo permitido em cada rota).
+                </p>
+                <PaginasPermitidasFields
+                  modoPaginas={modoPaginas}
+                  setModoPaginas={setModoPaginas}
+                  rotasMarcadas={rotasMarcadas}
+                  toggleRotaMarcada={toggleRotaMarcada}
+                  disabled={loadingEdicao || salvandoPaginas}
+                  radioGroupName="modoPaginasEditar"
+                />
+              </div>
+            ) : null}
+
             <div
               style={{
                 display: 'flex',
@@ -1046,10 +1232,15 @@ export default function Usuarios() {
                 flexWrap: 'wrap',
               }}
             >
-              <button type="submit" disabled={loadingEdicao} style={successButtonStyle}>
+              <button type="submit" disabled={loadingEdicao || salvandoPaginas} style={successButtonStyle}>
                 {loadingEdicao ? 'Salvando...' : 'Salvar alterações'}
               </button>
-              <button type="button" onClick={fecharEdicao} style={secondaryButtonStyle} disabled={loadingEdicao}>
+              <button
+                type="button"
+                onClick={fecharEdicao}
+                style={secondaryButtonStyle}
+                disabled={loadingEdicao || salvandoPaginas}
+              >
                 Cancelar
               </button>
             </div>
@@ -1073,76 +1264,14 @@ export default function Usuarios() {
               <strong>{modalPaginasUsuario.nome}</strong> ({modalPaginasUsuario.email})
             </p>
 
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="modoPaginas"
-                  checked={modoPaginas === 'cargo'}
-                  onChange={() => setModoPaginas('cargo')}
-                />
-                <span>
-                  <strong>Apenas cargo</strong> — sem lista extra; vale a regra normal do perfil nas rotas.
-                </span>
-              </label>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '10px',
-                  cursor: 'pointer',
-                  marginTop: '10px',
-                }}
-              >
-                <input
-                  type="radio"
-                  name="modoPaginas"
-                  checked={modoPaginas === 'lista'}
-                  onChange={() => setModoPaginas('lista')}
-                />
-                <span>
-                  <strong>Lista de páginas</strong> — o utilizador só abre as rotas marcadas (além de estar
-                  ativo e com cargo permitido na rota).
-                </span>
-              </label>
-            </div>
-
-            {modoPaginas === 'lista' ? (
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-                  gap: '8px',
-                  maxHeight: 'min(52vh, 420px)',
-                  overflowY: 'auto',
-                  padding: '12px',
-                  background: '#f8fafc',
-                  borderRadius: '10px',
-                  border: '1px solid #e2e8f0',
-                }}
-              >
-                {ROTAS_SISTEMA.map((r) => (
-                  <label
-                    key={r.path}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      fontSize: '13px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={rotasMarcadas.has(r.path)}
-                      onChange={() => toggleRotaMarcada(r.path)}
-                    />
-                    <span style={{ fontWeight: 600, color: '#0f172a' }}>{r.label}</span>
-                    <span style={{ color: '#94a3b8', fontSize: '12px' }}>{r.path}</span>
-                  </label>
-                ))}
-              </div>
-            ) : null}
+            <PaginasPermitidasFields
+              modoPaginas={modoPaginas}
+              setModoPaginas={setModoPaginas}
+              rotasMarcadas={rotasMarcadas}
+              toggleRotaMarcada={toggleRotaMarcada}
+              disabled={salvandoPaginas}
+              radioGroupName="modoPaginasModal"
+            />
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'wrap' }}>
               <button
