@@ -65,6 +65,8 @@ type Cliente = {
   mtr_destino: string | null;
   residuo_destino: string | null;
   observacoes_operacionais: string | null;
+  observacoes_gerais: string | null;
+  link_google_maps: string | null;
   ajudante: string | null;
   solicitante: string | null;
   origem_planilha_cliente: string | null;
@@ -134,6 +136,8 @@ type FormCliente = {
   mtr_destino: string;
   residuo_destino: string;
   observacoes_operacionais: string;
+  observacoes_gerais: string;
+  link_google_maps: string;
   ajudante: string;
   solicitante: string;
   origem_planilha_cliente: string;
@@ -195,6 +199,8 @@ const formInicial: FormCliente = {
   mtr_destino: "",
   residuo_destino: "",
   observacoes_operacionais: "",
+  observacoes_gerais: "",
+  link_google_maps: "",
   ajudante: "",
   solicitante: "",
   origem_planilha_cliente: "",
@@ -399,6 +405,8 @@ type ImportRow = Partial<{
   mtr_destino: string;
   residuo_destino: string;
   observacoes_operacionais: string;
+  observacoes_gerais: string;
+  link_google_maps: string;
   ajudante: string;
   solicitante: string;
   origem_planilha_cliente: string;
@@ -410,7 +418,7 @@ type ImportRow = Partial<{
 
 const IMPORT_MAX_BYTES = 2 * 1024 * 1024; // 2MB (mitigação)
 const IMPORT_MAX_ROWS = 2000;
-const IMPORT_MAX_COLS = 40;
+const IMPORT_MAX_COLS = 48;
 
 const IMPORT_HEADER_ALIASES: Record<string, keyof ImportRow> = {
   nome: "nome",
@@ -489,6 +497,12 @@ const IMPORT_HEADER_ALIASES: Record<string, keyof ImportRow> = {
   "observações": "observacoes_operacionais",
   obs: "observacoes_operacionais",
   "obs:": "observacoes_operacionais",
+  "observacoes gerais": "observacoes_gerais",
+  observacoes_gerais: "observacoes_gerais",
+  "observações gerais": "observacoes_gerais",
+  "link google maps": "link_google_maps",
+  link_google_maps: "link_google_maps",
+  "google maps": "link_google_maps",
   ajudante: "ajudante",
   solicitante: "solicitante",
   origem_planilha_cliente: "origem_planilha_cliente",
@@ -598,7 +612,7 @@ const CLIENTES_SELECT_FAT_ENDERECO =
   "cep_faturamento, rua_faturamento, numero_faturamento, complemento_faturamento, bairro_faturamento, cidade_faturamento, estado_faturamento";
 
 const CLIENTES_SELECT_TAIL_BASE =
-  "endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade, codigo_ibama, descricao_veiculo, mtr_coleta, destino, mtr_destino, residuo_destino, observacoes_operacionais, ajudante, solicitante, origem_planilha_cliente, cnpj_raiz, tipo_unidade_cliente, representante_rg_id, caminhao_id, equipamentos";
+  "endereco_coleta, endereco_faturamento, email_nf, responsavel_nome, telefone, email, tipo_residuo, classificacao, unidade_medida, frequencia_coleta, licenca_numero, validade, codigo_ibama, descricao_veiculo, mtr_coleta, destino, mtr_destino, residuo_destino, observacoes_operacionais, observacoes_gerais, link_google_maps, ajudante, solicitante, origem_planilha_cliente, cnpj_raiz, tipo_unidade_cliente, representante_rg_id, caminhao_id, equipamentos";
 
 function montarClientesSelectPrincipalLegacy(
   incluirFatEstruturado: boolean,
@@ -615,8 +629,8 @@ function montarClientesSelectPrincipalLegacy(
 function montarOrFilterBuscaClientesLegacy(s: string, incluirColunasFat: boolean): string {
   const base = `nome.ilike.%${s}%,razao_social.ilike.%${s}%,cnpj.ilike.%${s}%,cidade.ilike.%${s}%`;
   const rest = incluirColunasFat
-    ? `,cidade_faturamento.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,rua.ilike.%${s}%,rua_faturamento.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%,codigo_ibama.ilike.%${s}%,descricao_veiculo.ilike.%${s}%,mtr_coleta.ilike.%${s}%,destino.ilike.%${s}%,mtr_destino.ilike.%${s}%,residuo_destino.ilike.%${s}%,observacoes_operacionais.ilike.%${s}%,ajudante.ilike.%${s}%,solicitante.ilike.%${s}%,origem_planilha_cliente.ilike.%${s}%,cnpj_raiz.ilike.%${s}%,tipo_unidade_cliente.ilike.%${s}%`
-    : `,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,rua.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%,codigo_ibama.ilike.%${s}%,descricao_veiculo.ilike.%${s}%,mtr_coleta.ilike.%${s}%,destino.ilike.%${s}%,mtr_destino.ilike.%${s}%,residuo_destino.ilike.%${s}%,observacoes_operacionais.ilike.%${s}%,ajudante.ilike.%${s}%,solicitante.ilike.%${s}%,origem_planilha_cliente.ilike.%${s}%,cnpj_raiz.ilike.%${s}%,tipo_unidade_cliente.ilike.%${s}%`;
+    ? `,cidade_faturamento.ilike.%${s}%,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,rua.ilike.%${s}%,rua_faturamento.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%,codigo_ibama.ilike.%${s}%,descricao_veiculo.ilike.%${s}%,mtr_coleta.ilike.%${s}%,destino.ilike.%${s}%,mtr_destino.ilike.%${s}%,residuo_destino.ilike.%${s}%,observacoes_operacionais.ilike.%${s}%,observacoes_gerais.ilike.%${s}%,link_google_maps.ilike.%${s}%,ajudante.ilike.%${s}%,solicitante.ilike.%${s}%,origem_planilha_cliente.ilike.%${s}%,cnpj_raiz.ilike.%${s}%,tipo_unidade_cliente.ilike.%${s}%`
+    : `,tipo_residuo.ilike.%${s}%,status.ilike.%${s}%,email_nf.ilike.%${s}%,rua.ilike.%${s}%,endereco_coleta.ilike.%${s}%,endereco_faturamento.ilike.%${s}%,codigo_ibama.ilike.%${s}%,descricao_veiculo.ilike.%${s}%,mtr_coleta.ilike.%${s}%,destino.ilike.%${s}%,mtr_destino.ilike.%${s}%,residuo_destino.ilike.%${s}%,observacoes_operacionais.ilike.%${s}%,observacoes_gerais.ilike.%${s}%,link_google_maps.ilike.%${s}%,ajudante.ilike.%${s}%,solicitante.ilike.%${s}%,origem_planilha_cliente.ilike.%${s}%,cnpj_raiz.ilike.%${s}%,tipo_unidade_cliente.ilike.%${s}%`;
   return base + rest;
 }
 
@@ -1226,6 +1240,8 @@ export default function Clientes() {
       "origem_planilha_cliente",
       "cnpj_raiz",
       "tipo_unidade_cliente",
+      "observacoes_gerais",
+      "link_google_maps",
     ];
 
     const exemplo = [
@@ -1270,6 +1286,8 @@ export default function Clientes() {
       "CLIENTES",
       "00000000",
       "Matriz",
+      "Observação geral do cadastro",
+      "https://maps.google.com/?q=-23.5505,-46.6333",
     ];
 
     const ws = XLSX.utils.aoa_to_sheet([headers, exemplo]);
@@ -1304,6 +1322,8 @@ export default function Clientes() {
             "mtr_de_destino",
             "residuo_de_destino",
             "observacoes",
+            "observacoes_gerais",
+            "link_google_maps",
             "ajudante",
           ]
         : [
@@ -1326,6 +1346,8 @@ export default function Clientes() {
             "mtr_destino",
             "residuo_destino",
             "observacoes_operacionais",
+            "observacoes_gerais",
+            "link_google_maps",
             "ajudante",
             "solicitante",
             "origem_planilha_cliente",
@@ -1348,6 +1370,8 @@ export default function Clientes() {
             c.mtr_destino ?? "",
             c.residuo_destino ?? "",
             c.observacoes_operacionais ?? "",
+            c.observacoes_gerais ?? "",
+            c.link_google_maps ?? "",
             c.ajudante ?? "",
           ])
         : linhas.map((c) => [
@@ -1370,6 +1394,8 @@ export default function Clientes() {
             c.mtr_destino ?? "",
             c.residuo_destino ?? "",
             c.observacoes_operacionais ?? "",
+            c.observacoes_gerais ?? "",
+            c.link_google_maps ?? "",
             c.ajudante ?? "",
             c.solicitante ?? "",
             c.origem_planilha_cliente ?? "",
@@ -1581,6 +1607,8 @@ export default function Clientes() {
             mtr_destino: limparOuNull(r.mtr_destino || ""),
             residuo_destino: limparOuNull(r.residuo_destino || ""),
             observacoes_operacionais: limparOuNull(r.observacoes_operacionais || ""),
+            observacoes_gerais: limparOuNull(r.observacoes_gerais || ""),
+            link_google_maps: limparOuNull(r.link_google_maps || ""),
             ajudante: limparOuNull(r.ajudante || ""),
             solicitante: limparOuNull(r.solicitante || ""),
             origem_planilha_cliente: limparOuNull(r.origem_planilha_cliente || ""),
@@ -1772,6 +1800,8 @@ export default function Clientes() {
         mtr_destino: row.mtr_destino || "",
         residuo_destino: row.residuo_destino || "",
         observacoes_operacionais: row.observacoes_operacionais || "",
+        observacoes_gerais: row.observacoes_gerais || "",
+        link_google_maps: row.link_google_maps || "",
         ajudante: row.ajudante || "",
         solicitante: row.solicitante || "",
         origem_planilha_cliente: row.origem_planilha_cliente || "",
@@ -1930,6 +1960,8 @@ export default function Clientes() {
       mtr_destino: limparOuNull(form.mtr_destino),
       residuo_destino: limparOuNull(form.residuo_destino),
       observacoes_operacionais: limparOuNull(form.observacoes_operacionais),
+      observacoes_gerais: limparOuNull(form.observacoes_gerais),
+      link_google_maps: limparOuNull(form.link_google_maps),
       ajudante: limparOuNull(form.ajudante),
       solicitante: limparOuNull(form.solicitante),
       origem_planilha_cliente: limparOuNull(form.origem_planilha_cliente),
@@ -2516,6 +2548,31 @@ export default function Clientes() {
                   title="Coluna Observações da planilha"
                   rows={3}
                   style={{ ...inputStyle, height: "auto", paddingTop: "10px", resize: "vertical" }}
+                />
+                <textarea
+                  name="observacoes_gerais"
+                  value={form.observacoes_gerais}
+                  onChange={handleInputChange}
+                  placeholder="Observações gerais (cadastro)"
+                  title="Observações gerais sobre o cliente"
+                  rows={3}
+                  style={{
+                    ...inputStyle,
+                    height: "auto",
+                    paddingTop: "10px",
+                    resize: "vertical",
+                    marginTop: "10px",
+                  }}
+                />
+                <input
+                  name="link_google_maps"
+                  type="url"
+                  inputMode="url"
+                  value={form.link_google_maps}
+                  onChange={handleInputChange}
+                  placeholder="https://maps.google.com/... (link do Google Maps / GPS)"
+                  title="Cole o link completo do Google Maps (deve começar com http:// ou https://)"
+                  style={{ ...inputStyle, marginTop: "10px" }}
                 />
               </div>
 
@@ -3563,6 +3620,8 @@ export default function Clientes() {
                                   cliente.destino,
                                   cliente.mtr_coleta,
                                   cliente.observacoes_operacionais,
+                                  cliente.observacoes_gerais,
+                                  cliente.link_google_maps,
                                 ]
                                   .filter(Boolean)
                                   .join(" | ")}
@@ -3841,6 +3900,45 @@ export default function Clientes() {
                                   >
                                     {cliente.observacoes_operacionais}
                                   </div>
+                                </div>
+                              ) : null}
+                              {cliente.observacoes_gerais ? (
+                                <div style={{ marginTop: "12px" }}>
+                                  <div
+                                    style={{
+                                      fontSize: "11px",
+                                      color: "#64748b",
+                                      fontWeight: 700,
+                                      textTransform: "uppercase",
+                                      letterSpacing: "0.04em",
+                                      marginBottom: "3px",
+                                    }}
+                                  >
+                                    Observações gerais
+                                  </div>
+                                  <div
+                                    style={{
+                                      whiteSpace: "pre-wrap",
+                                      wordBreak: "break-word",
+                                      color: "#334155",
+                                    }}
+                                  >
+                                    {cliente.observacoes_gerais}
+                                  </div>
+                                </div>
+                              ) : null}
+                              {cliente.link_google_maps?.trim() &&
+                              /^https?:\/\//i.test(cliente.link_google_maps.trim()) ? (
+                                <div style={{ marginTop: "10px" }}>
+                                  <a
+                                    href={cliente.link_google_maps.trim()}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ fontSize: "12px", color: "#1d4ed8", fontWeight: 600 }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    Abrir no Google Maps
+                                  </a>
                                 </div>
                               ) : null}
                             </td>
@@ -4281,7 +4379,31 @@ function ClienteDetalheModal({
           <DetalheSecao titulo="Endereços">
             <DetalheCampo rotulo="Endereço de coleta" valor={enderecoColeta} colunas={2} />
             <DetalheCampo rotulo="Endereço de faturamento" valor={enderecoFaturamento} colunas={2} />
+            <DetalheCampo
+              rotulo="Link Google Maps"
+              valor={cliente.link_google_maps}
+              colunas={2}
+              comoLink
+            />
           </DetalheSecao>
+
+          {(cliente.observacoes_gerais ?? "").trim() ? (
+            <DetalheSecao titulo="Observações gerais">
+              <div style={{ gridColumn: "1 / -1" }}>
+                <div
+                  style={{
+                    color: "#1f2937",
+                    fontSize: 14,
+                    wordBreak: "break-word",
+                    whiteSpace: "pre-wrap",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {(cliente.observacoes_gerais ?? "").trim()}
+                </div>
+              </div>
+            </DetalheSecao>
+          ) : null}
 
           <DetalheSecao titulo="Operacional (planilha CLIENTES)">
             <DetalheCampo rotulo="CADRI" valor={cliente.licenca_numero} />
@@ -4435,13 +4557,17 @@ function DetalheCampo({
   valor,
   colunas = 1,
   quebrarLinha = false,
+  comoLink = false,
 }: {
   rotulo: string;
   valor?: string | number | null;
   colunas?: 1 | 2 | 3;
   quebrarLinha?: boolean;
+  /** Se verdadeiro e o valor for URL http(s), renderiza como hiperligação. */
+  comoLink?: boolean;
 }) {
   const texto = valor == null ? "" : String(valor).trim();
+  const urlHttp = comoLink && /^https?:\/\//i.test(texto);
   return (
     <div style={{ gridColumn: `span ${colunas}` }}>
       <DetalheRotulo>{rotulo}</DetalheRotulo>
@@ -4455,7 +4581,18 @@ function DetalheCampo({
             lineHeight: 1.45,
           }}
         >
-          {texto}
+          {urlHttp ? (
+            <a
+              href={texto}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "#1d4ed8", fontWeight: 600 }}
+            >
+              {texto}
+            </a>
+          ) : (
+            texto
+          )}
         </div>
       ) : (
         <DetalheVazio />

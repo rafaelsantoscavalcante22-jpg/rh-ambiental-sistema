@@ -157,6 +157,8 @@ type ImportRow = Partial<{
   mtr_destino: string;
   residuo_destino: string;
   observacoes_operacionais: string;
+  observacoes_gerais: string;
+  link_google_maps: string;
   ajudante: string;
   solicitante: string;
   origem_planilha_cliente: string;
@@ -226,6 +228,12 @@ const IMPORT_HEADER_ALIASES: Record<string, keyof ImportRow> = {
   observacoes: "observacoes_operacionais",
   obs: "observacoes_operacionais",
   "obs:": "observacoes_operacionais",
+  "observacoes gerais": "observacoes_gerais",
+  observacoes_gerais: "observacoes_gerais",
+  "observações gerais": "observacoes_gerais",
+  "link google maps": "link_google_maps",
+  link_google_maps: "link_google_maps",
+  "google maps": "link_google_maps",
   ajudante: "ajudante",
   solicitante: "solicitante",
   origem_planilha_cliente: "origem_planilha_cliente",
@@ -524,6 +532,8 @@ async function main() {
       mtr_destino: limparOuNull(r.mtr_destino),
       residuo_destino: limparOuNull(r.residuo_destino),
       observacoes_operacionais: limparOuNull(r.observacoes_operacionais),
+      observacoes_gerais: limparOuNull(r.observacoes_gerais),
+      link_google_maps: limparOuNull(r.link_google_maps),
       ajudante: limparOuNull(r.ajudante),
       solicitante: limparOuNull(r.solicitante),
       origem_planilha_cliente: limparOuNull(r.origem_planilha_cliente),

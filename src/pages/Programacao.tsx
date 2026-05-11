@@ -4,8 +4,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import { overlayAreaPrincipal } from '../lib/layoutOverlay'
 import { chunkArray } from '../lib/chunkArray'
+import { montarMapNomeExibicaoPorUsuarioId } from '../lib/resolveAutorUsuarioNomes'
 import { supabase } from '../lib/supabase'
-import { cargoPodeEditarProgramacao } from '../lib/workflowPermissions'
+import { cargoEhDesenvolvedor, cargoPodeEditarProgramacao } from '../lib/workflowPermissions'
+import { formatarLancadoPorResumo } from '../lib/formatLancamentoAutor'
 import { BRAND_LOGO_MARK } from '../lib/brandLogo'
 import { RgReportPdfIcon } from '../components/ui/RgReportPdfIcon'
 import { FloatingAlert } from '../components/ui/FloatingAlert'
@@ -39,6 +41,8 @@ type ProgramacaoRow = {
   status_programacao: ProgramacaoStatus | null
   coleta_id: string | null
   created_at: string | null
+  criado_por_user_id: string | null
+  criado_por_nome: string | null
 }
 
 type ProgramacaoItem = {
@@ -59,6 +63,7 @@ type ProgramacaoItem = {
   coletaId: string
   mtrId: string
   createdAt: string
+  criadoPorNome: string
 }
 
 type FormState = {
@@ -313,6 +318,7 @@ function ProgramacaoRelatorioPrintRoot(p: ProgramacaoRelatorioPrintProps) {
               <th>MTR</th>
               <th>Coleta</th>
               <th>Obs.</th>
+              <th>Lançamento</th>
             </tr>
           </thead>
           <tbody>
@@ -328,6 +334,7 @@ function ProgramacaoRelatorioPrintRoot(p: ProgramacaoRelatorioPrintProps) {
                   <td>{item.mtrId ? 'Sim' : 'Não'}</td>
                   <td>{item.coletaId ? 'Sim' : 'Não'}</td>
                   <td>{truncarTexto(item.observacoes || '', 80)}</td>
+                  <td>{truncarTexto(formatarLancadoPorResumo(item.criadoPorNome, item.createdAt) || '—', 72)}</td>
                 </tr>
               ))
             )}
@@ -709,6 +716,8 @@ export default function Programacao() {
   const [sucesso, setSucesso] = useState('')
   const [contextoDestaqueId, setContextoDestaqueId] = useState<string | null>(null)
   const [usuarioCargo, setUsuarioCargo] = useState<string | null>(null)
+  const [usuarioNome, setUsuarioNome] = useState<string | null>(null)
+  const [edicaoCriadoPorNomeDev, setEdicaoCriadoPorNomeDev] = useState('')
   const [diaPainelCalendario, setDiaPainelCalendario] = useState<string | null>(null)
   const [modalNovaProgramacaoAberto, setModalNovaProgramacaoAberto] = useState(false)
   const [relatorioAberto, setRelatorioAberto] = useState(false)
@@ -729,6 +738,7 @@ export default function Programacao() {
       relatorioDiaRef,
       relatorioMesRef,
       contextoDestaqueId,
+      edicaoCriadoPorNomeDev,
     }),
     [
       form,
@@ -741,6 +751,7 @@ export default function Programacao() {
       relatorioDiaRef,
       relatorioMesRef,
       contextoDestaqueId,
+      edicaoCriadoPorNomeDev,
     ]
   )
 
@@ -758,6 +769,7 @@ export default function Programacao() {
       setRelatorioDiaRef(d.relatorioDiaRef)
       setRelatorioMesRef(d.relatorioMesRef)
       setContextoDestaqueId(d.contextoDestaqueId)
+      setEdicaoCriadoPorNomeDev(d.edicaoCriadoPorNomeDev ?? '')
     },
   })
 
@@ -855,7 +867,7 @@ export default function Programacao() {
       const { data: programacoesData, error: programacoesError } = await supabase
         .from('programacoes')
         .select(
-          'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, periodicidade, programacao_dias_semana, programacao_serie_id, status_programacao, coleta_id, created_at'
+          'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, periodicidade, programacao_dias_semana, programacao_serie_id, status_programacao, coleta_id, created_at, criado_por_user_id, criado_por_nome'
         )
         .gte('data_programada', rangeIni)
         .lte('data_programada', rangeFim)
@@ -867,6 +879,11 @@ export default function Programacao() {
       }
 
       const progs = (programacoesData || []) as ProgramacaoRow[]
+      const idsAutorSemNome = progs
+        .filter((p) => !(p.criado_por_nome || '').trim() && (p.criado_por_user_id || '').trim())
+        .map((p) => p.criado_por_user_id as string)
+      const nomePorUsuarioId = await montarMapNomeExibicaoPorUsuarioId(supabase, idsAutorSemNome)
+
       const progIds = progs.map((p) => p.id)
 
       const mtrMapByProgramacaoId = new Map<string, string>()
@@ -943,6 +960,10 @@ export default function Programacao() {
           coletaId,
           mtrId,
           createdAt: row.created_at || '',
+          criadoPorNome:
+            (row.criado_por_nome || '').trim() ||
+            nomePorUsuarioId.get((row.criado_por_user_id || '').trim()) ||
+            '',
         }
       })
 
@@ -971,10 +992,11 @@ export default function Programacao() {
       }
       const { data } = await supabase
         .from('usuarios')
-        .select('cargo')
+        .select('cargo, nome')
         .eq('id', user.id)
         .maybeSingle()
       setUsuarioCargo(data?.cargo ?? null)
+      setUsuarioNome(data?.nome ?? null)
     }
     void carregarCargo()
   }, [])
@@ -1077,6 +1099,7 @@ export default function Programacao() {
 
   function fecharModalEdicao() {
     setFormEdicaoModal(null)
+    setEdicaoCriadoPorNomeDev('')
     setErro('')
   }
 
@@ -1093,6 +1116,7 @@ export default function Programacao() {
       diasSemanaColetaFixa: [...item.diasSemanaColetaFixa],
       programacaoSerieId: item.programacaoSerieId,
     })
+    setEdicaoCriadoPorNomeDev(item.criadoPorNome || '')
     setErro('')
     setSucesso('')
   }
@@ -1197,7 +1221,7 @@ export default function Programacao() {
         ? formEdicaoModal.programacaoSerieId?.trim() || crypto.randomUUID()
         : null
 
-      const payload = {
+      const payload: Record<string, unknown> = {
         cliente_id: formEdicaoModal.clienteId,
         cliente: clienteSelecionado.nome,
         data_programada: formEdicaoModal.dataProgramada,
@@ -1209,6 +1233,10 @@ export default function Programacao() {
         programacao_dias_semana: formEdicaoModal.coletaFixa && diasGravar.length > 0 ? diasGravar : null,
         programacao_serie_id: programacaoSerieId,
         updated_at: new Date().toISOString(),
+      }
+
+      if (cargoEhDesenvolvedor(usuarioCargo)) {
+        payload.criado_por_nome = edicaoCriadoPorNomeDev.trim() || null
       }
 
       const { error } = await supabase.from('programacoes').update(payload).eq('id', formEdicaoModal.id)
@@ -1327,11 +1355,23 @@ export default function Programacao() {
       } else {
         const novoNumero = gerarNumeroProgramacao(programacoes.length)
 
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        let nomeLancador = (usuarioNome ?? '').trim()
+        if (user && !nomeLancador) {
+          const { data: rowU } = await supabase.from('usuarios').select('nome').eq('id', user.id).maybeSingle()
+          nomeLancador = (rowU?.nome ?? '').trim()
+        }
+        if (!nomeLancador && user?.email) nomeLancador = user.email.trim()
+
         const { error } = await supabase.from('programacoes').insert([
           {
             ...payloadBase,
             numero: novoNumero,
             status_programacao: 'PENDENTE' as ProgramacaoStatus,
+            criado_por_user_id: user?.id ?? null,
+            criado_por_nome: nomeLancador || null,
           },
         ])
 
@@ -2266,6 +2306,19 @@ export default function Programacao() {
                               </div>
                             ) : null}
 
+                            {formatarLancadoPorResumo(item.criadoPorNome, item.createdAt) ? (
+                              <div
+                                style={{
+                                  ...itemAgendaObsStyle,
+                                  fontSize: '12px',
+                                  color: '#64748b',
+                                  fontStyle: 'normal',
+                                }}
+                              >
+                                {formatarLancadoPorResumo(item.criadoPorNome, item.createdAt)}
+                              </div>
+                            ) : null}
+
                             <div style={acoesRowCompactStyle}>
                               {item.mtrId ? (
                                 <button
@@ -2476,6 +2529,11 @@ export default function Programacao() {
                           {secPainel ? (
                             <div style={{ fontSize: '13px', color: '#475569', marginTop: '4px' }}>
                               {secPainel}
+                            </div>
+                          ) : null}
+                          {formatarLancadoPorResumo(item.criadoPorNome, item.createdAt) ? (
+                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px', lineHeight: 1.35 }}>
+                              {formatarLancadoPorResumo(item.criadoPorNome, item.createdAt)}
                             </div>
                           ) : null}
                         </div>
@@ -3003,6 +3061,44 @@ export default function Programacao() {
               }}
             >
               {renderFormFields(formEdicaoModal, atualizarCampoModal)}
+              {(() => {
+                const refItem = programacoes.find((p) => p.id === formEdicaoModal.id)
+                const nomePreview = cargoEhDesenvolvedor(usuarioCargo)
+                  ? edicaoCriadoPorNomeDev.trim() || refItem?.criadoPorNome
+                  : refItem?.criadoPorNome
+                const linha = formatarLancadoPorResumo(nomePreview, refItem?.createdAt)
+                if (!linha) return null
+                return (
+                  <div style={{ ...cardDescricaoStyle, color: '#475569', fontSize: '13px', lineHeight: 1.4 }}>
+                    <strong style={{ color: '#334155' }}>Auditoria:</strong> {linha}
+                  </div>
+                )
+              })()}
+              {cargoEhDesenvolvedor(usuarioCargo) ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label htmlFor="prog-criado-por-nome-dev" style={{ fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                    Corrigir nome do autor do lançamento (apenas Desenvolvedor)
+                  </label>
+                  <input
+                    id="prog-criado-por-nome-dev"
+                    type="text"
+                    value={edicaoCriadoPorNomeDev}
+                    onChange={(e) => setEdicaoCriadoPorNomeDev(e.target.value)}
+                    placeholder="Nome exibido em «Lançado por …»"
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      borderRadius: '10px',
+                      border: '1px solid #cbd5e1',
+                      padding: '10px 12px',
+                      fontSize: '14px',
+                    }}
+                  />
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>
+                    A data/hora do lançamento não é alterada. O ID do utilizador só pode ser ajustado via base de dados.
+                  </span>
+                </div>
+              ) : null}
               <div
                 style={{
                   display: 'flex',

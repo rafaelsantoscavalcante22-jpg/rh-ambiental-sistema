@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import { supabase } from '../lib/supabase'
+import { montarMapNomeExibicaoPorUsuarioId } from '../lib/resolveAutorUsuarioNomes'
 import {
   formatarEtapaParaUI,
   formatarFaseFluxoOficialParaUI,
@@ -9,7 +10,8 @@ import {
   normalizarEtapaColeta,
 } from '../lib/fluxoEtapas'
 import { isBenignSupabaseFetchError } from '../lib/supabaseErrors'
-import { cargoPodeEditarMtr } from '../lib/workflowPermissions'
+import { cargoEhDesenvolvedor, cargoPodeEditarMtr } from '../lib/workflowPermissions'
+import { formatarLancadoPorResumo } from '../lib/formatLancamentoAutor'
 import { BRAND_LOGO_MARK } from '../lib/brandLogo'
 import { officialSiteUrl } from '../lib/officialSiteUrl'
 import {
@@ -44,6 +46,8 @@ interface Programacao {
   periodicidade?: string | null
   status_programacao?: ProgramacaoStatus | null
   created_at?: string | null
+  criado_por_user_id?: string | null
+  criado_por_nome?: string | null
 }
 
 interface MTR {
@@ -64,6 +68,8 @@ interface MTR {
   observacoes: string
   status: MTRStatus
   created_at?: string
+  criado_por_nome?: string | null
+  criado_por_user_id?: string | null
 }
 
 interface Coleta {
@@ -154,7 +160,7 @@ type MTRDetalhes = {
   }
 }
 
-type MTRFormState = Omit<MTR, 'id' | 'created_at' | 'status'>
+type MTRFormState = Omit<MTR, 'id' | 'created_at' | 'status' | 'criado_por_nome' | 'criado_por_user_id'>
 
 function detalhesVazios(): MTRDetalhes {
   return {
@@ -256,6 +262,8 @@ type ClienteRowAutofill = {
   mtr_destino: string | null
   residuo_destino: string | null
   observacoes_operacionais: string | null
+  observacoes_gerais: string | null
+  link_google_maps: string | null
   descricao_veiculo: string | null
   mtr_coleta: string | null
 }
@@ -526,6 +534,9 @@ export default function MTR() {
 
   const [form, setForm] = useState<MTRFormState>(emptyForm)
   const [usuarioCargo, setUsuarioCargo] = useState<string | null>(null)
+  const [usuarioNome, setUsuarioNome] = useState<string | null>(null)
+  const [mtrEdicaoCreatedAtIso, setMtrEdicaoCreatedAtIso] = useState('')
+  const [mtrDevCriadoPorNome, setMtrDevCriadoPorNome] = useState('')
 
   const mtrUiDraft = useMemo(
     () => ({
@@ -564,6 +575,8 @@ export default function MTR() {
       detalhes: detalhesVazios(),
     })
     setEditingId(null)
+    setMtrEdicaoCreatedAtIso('')
+    setMtrDevCriadoPorNome('')
   }
 
   async function loadData() {
@@ -574,7 +587,7 @@ export default function MTR() {
       supabase
         .from('mtrs')
         .select(
-          'id, numero, programacao_id, cliente, gerador, endereco, cidade, tipo_residuo, quantidade, unidade, destinador, transportador, detalhes, data_emissao, observacoes, status, created_at'
+          'id, numero, programacao_id, cliente, gerador, endereco, cidade, tipo_residuo, quantidade, unidade, destinador, transportador, detalhes, data_emissao, observacoes, status, created_at, criado_por_nome, criado_por_user_id'
         )
         .order('created_at', { ascending: false })
         .limit(300),
@@ -592,7 +605,7 @@ export default function MTR() {
           const { data, error } = await supabase
             .from('programacoes')
             .select(
-              'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, frequencia, periodicidade, status_programacao, created_at'
+              'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, frequencia, periodicidade, status_programacao, created_at, criado_por_nome, criado_por_user_id'
             )
             .neq('status_programacao', 'CANCELADA')
             .gte('data_programada', dataLimiteStr)
@@ -629,7 +642,20 @@ export default function MTR() {
     if (mtrsRes.error) {
       alertarSeCritico('Erro ao carregar MTRs:', mtrsRes.error)
     } else {
-      setMtrs((mtrsRes.data || []) as MTR[])
+      const rawMtrs = (mtrsRes.data || []) as MTR[]
+      const idsAutorSemNome = rawMtrs
+        .filter((m) => !(m.criado_por_nome || '').trim() && (m.criado_por_user_id || '').trim())
+        .map((m) => m.criado_por_user_id as string)
+      const nomePorUsuarioId = await montarMapNomeExibicaoPorUsuarioId(supabase, idsAutorSemNome)
+      setMtrs(
+        rawMtrs.map((m) => ({
+          ...m,
+          criado_por_nome:
+            (m.criado_por_nome || '').trim() ||
+            nomePorUsuarioId.get(String(m.criado_por_user_id || '').trim()) ||
+            null,
+        }))
+      )
     }
 
     if (programacoesRes.error) {
@@ -664,10 +690,11 @@ export default function MTR() {
       }
       const { data } = await supabase
         .from('usuarios')
-        .select('cargo')
+        .select('cargo, nome')
         .eq('id', user.id)
         .maybeSingle()
       setUsuarioCargo(data?.cargo ?? null)
+      setUsuarioNome(data?.nome ?? null)
     }
     void carregarCargo()
   }, [])
@@ -812,6 +839,8 @@ export default function MTR() {
       return
     }
     setEditingId(item.id)
+    setMtrEdicaoCreatedAtIso(item.created_at || '')
+    setMtrDevCriadoPorNome(item.criado_por_nome || '')
     setForm({
       numero: item.numero || '',
       programacao_id: item.programacao_id || null,
@@ -900,7 +929,7 @@ export default function MTR() {
     const { data: clienteRow, error } = await supabase
       .from('clientes')
       .select(
-        'nome, razao_social, cnpj, cep, rua, numero, complemento, bairro, cidade, estado, endereco_coleta, responsavel_nome, telefone, tipo_residuo, unidade_medida, classificacao, licenca_numero, destino, mtr_destino, residuo_destino, observacoes_operacionais, descricao_veiculo, mtr_coleta'
+        'nome, razao_social, cnpj, cep, rua, numero, complemento, bairro, cidade, estado, endereco_coleta, responsavel_nome, telefone, tipo_residuo, unidade_medida, classificacao, licenca_numero, destino, mtr_destino, residuo_destino, observacoes_operacionais, observacoes_gerais, link_google_maps, descricao_veiculo, mtr_coleta'
       )
       .eq('id', clienteId)
       .maybeSingle()
@@ -922,7 +951,12 @@ export default function MTR() {
       const atividadeGerador =
         (programacao.tipo_servico ?? '').trim() ||
         (row.observacoes_operacionais ?? '').trim().slice(0, 120) ||
+        (row.observacoes_gerais ?? '').trim().slice(0, 120) ||
         dz.gerador.atividade
+      const obsExtrasCliente = [row.observacoes_gerais, row.link_google_maps]
+        .map((s) => (s ?? '').trim())
+        .filter(Boolean)
+      const observacoesMescladas = [prev.observacoes?.trim(), ...obsExtrasCliente].filter(Boolean).join(' | ')
       const destinoTxt = (row.destino ?? '').trim()
       const transportNome = (prev.transportador ?? '').trim()
       let transportadorDet = {
@@ -958,6 +992,7 @@ export default function MTR() {
       const telGer = (row.telefone ?? '').trim()
       return {
         ...prev,
+        observacoes: observacoesMescladas,
         gerador: nomeGeradorParaMtr(row, prev.cliente),
         endereco: montarEnderecoLinhaCliente(row),
         cidade: montarCidadeUfCliente(row),
@@ -1168,7 +1203,7 @@ export default function MTR() {
         ? null
         : Number(form.quantidade)
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       numero: form.numero.trim(),
       programacao_id: form.programacao_id,
       cliente: form.cliente.trim(),
@@ -1185,6 +1220,22 @@ export default function MTR() {
       observacoes: form.observacoes.trim(),
       /** Fluxo único: documento salvo é tratado como emitido (sem gestão de status na UI). */
       status: 'Emitido' as MTRStatus,
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!editingId) {
+      let nomeLancador = (usuarioNome ?? '').trim()
+      if (user && !nomeLancador) {
+        const { data: rowU } = await supabase.from('usuarios').select('nome').eq('id', user.id).maybeSingle()
+        nomeLancador = (rowU?.nome ?? '').trim()
+      }
+      if (!nomeLancador && user?.email) nomeLancador = user.email.trim()
+      payload.criado_por_user_id = user?.id ?? null
+      payload.criado_por_nome = nomeLancador || null
+    } else if (cargoEhDesenvolvedor(usuarioCargo)) {
+      payload.criado_por_nome = mtrDevCriadoPorNome.trim() || null
     }
 
     let error: SupabaseErrorLike | null = null
@@ -2960,6 +3011,19 @@ export default function MTR() {
                           </div>
                         </div>
 
+                        {formatarLancadoPorResumo(item.criado_por_nome, item.created_at) ? (
+                          <div
+                            style={{
+                              fontSize: '12px',
+                              color: '#64748b',
+                              lineHeight: 1.35,
+                              marginBottom: '10px',
+                            }}
+                          >
+                            {formatarLancadoPorResumo(item.criado_por_nome, item.created_at)}
+                          </div>
+                        ) : null}
+
                         <div className="table-actions">
                           <button className="mini-btn" onClick={() => setSelectedMTR(item)}>
                             Visualizar
@@ -3331,6 +3395,11 @@ export default function MTR() {
                                 <p className="mtr-excel__doc-footer-line">
                                   Documento emitido pelo Sistema RG Ambiental · {officialSiteUrl('/mtr')}
                                 </p>
+                                {formatarLancadoPorResumo(selectedMTR.criado_por_nome, selectedMTR.created_at) ? (
+                                  <p className="mtr-excel__doc-footer-line">
+                                    {formatarLancadoPorResumo(selectedMTR.criado_por_nome, selectedMTR.created_at)}
+                                  </p>
+                                ) : null}
                               </div>
                             </div>
                           </>
@@ -3368,6 +3437,27 @@ export default function MTR() {
                     Atenção: a programação selecionada já possui uma MTR vinculada: <strong>{duplicateMTR.numero}</strong>
                   </div>
                 )}
+
+                {editingId && formatarLancadoPorResumo(mtrDevCriadoPorNome, mtrEdicaoCreatedAtIso) ? (
+                  <div className="field-info-box" style={{ marginBottom: 4 }}>
+                    <strong style={{ color: '#334155' }}>Auditoria:</strong>{' '}
+                    {formatarLancadoPorResumo(mtrDevCriadoPorNome, mtrEdicaoCreatedAtIso)}
+                  </div>
+                ) : null}
+
+                {editingId && cargoEhDesenvolvedor(usuarioCargo) ? (
+                  <div className="field field-full">
+                    <label htmlFor="mtr-criado-por-nome-dev">Corrigir nome do autor do lançamento (apenas Desenvolvedor)</label>
+                    <input
+                      id="mtr-criado-por-nome-dev"
+                      type="text"
+                      value={mtrDevCriadoPorNome}
+                      onChange={(e) => setMtrDevCriadoPorNome(e.target.value)}
+                      placeholder="Nome em «Lançado por …»"
+                    />
+                    <span className="helper">A data/hora do registo não é alterada aqui.</span>
+                  </div>
+                ) : null}
 
                 <form onSubmit={handleSave}>
                   <div className="form-grid">
