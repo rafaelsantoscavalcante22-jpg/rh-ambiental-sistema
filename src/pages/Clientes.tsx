@@ -1814,32 +1814,30 @@ export default function Clientes() {
   async function handleSalvarCliente(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
-    if (!form.nome.trim()) {
-      alert("Preencha o nome fantasia.");
+    const nomeTrim = form.nome.trim();
+    const razaoTrim = form.razao_social.trim();
+    const cnpjTrim = form.cnpj.trim();
+
+    // Única trava mínima: precisamos de pelo menos UM identificador (nome, razão ou CNPJ/CPF).
+    // Caso contrário o registo seria impossível de localizar depois.
+    if (!nomeTrim && !razaoTrim && !cnpjTrim) {
+      alert(
+        "Para cadastrar o cliente, informe pelo menos um destes campos: Nome fantasia, Razão social ou CNPJ/CPF."
+      );
       return;
     }
 
-    if (!form.razao_social.trim()) {
-      alert("Preencha a razão social.");
-      return;
+    // CNPJ/CPF com tamanho fora do padrão: agora apenas avisa, não trava — assim cadastros
+    // parciais (ex.: documento ainda em digitação ou cliente estrangeiro) podem ser salvos.
+    if (cnpjTrim && !documentoPossuiTamanhoValido(form.cnpj)) {
+      const seguir = window.confirm(
+        "O CNPJ/CPF informado não tem o tamanho padrão (CNPJ = 14 dígitos, CPF = 11 dígitos).\n\nDeseja salvar mesmo assim?"
+      );
+      if (!seguir) return;
     }
 
-    if (!form.cnpj.trim()) {
-      alert("Preencha o CNPJ/CPF.");
-      return;
-    }
-
-    if (!documentoPossuiTamanhoValido(form.cnpj)) {
-      alert("Informe um CNPJ com 14 dígitos ou CPF com 11 dígitos.");
-      return;
-    }
-
+    // Resíduos passaram a ser opcionais no cadastro — o utilizador pode complementar depois.
     const residuosValidos = form.residuos.filter((item) => item.tipo_residuo.trim());
-
-    if (residuosValidos.length === 0) {
-      alert("Adicione pelo menos um resíduo.");
-      return;
-    }
 
     const margemParsed = parseMargemLucroPercentual(form.margem_lucro_percentual);
     if (!margemParsed.ok) {
@@ -2201,11 +2199,14 @@ export default function Clientes() {
                     fontSize: "15px",
                     fontWeight: 800,
                     color: "#334155",
-                    marginBottom: "12px",
+                    marginBottom: "6px",
                   }}
                 >
                   Dados básicos
                 </div>
+                <p style={{ margin: "0 0 12px", fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                  Preencha pelo menos um destes três para identificar o cliente: <strong>Nome fantasia</strong>, <strong>Razão social</strong> ou <strong>CNPJ/CPF</strong>. Os restantes campos do cadastro são opcionais e podem ser completados depois.
+                </p>
 
                 <div
                   style={{
@@ -2214,39 +2215,51 @@ export default function Clientes() {
                     gap: "12px",
                   }}
                 >
-                  <input
-                    name="nome"
-                    value={form.nome}
-                    onChange={handleInputChange}
-                    placeholder="Nome fantasia"
-                    style={inputStyle}
-                  />
+                  <label style={fieldLabelStackStyle}>
+                    <span style={fieldLabelTextStyle}>Nome fantasia</span>
+                    <input
+                      name="nome"
+                      value={form.nome}
+                      onChange={handleInputChange}
+                      placeholder="Nome fantasia"
+                      style={inputStyle}
+                    />
+                  </label>
 
-                  <input
-                    name="razao_social"
-                    value={form.razao_social}
-                    onChange={handleInputChange}
-                    placeholder="Razão social"
-                    style={inputStyle}
-                  />
+                  <label style={fieldLabelStackStyle}>
+                    <span style={fieldLabelTextStyle}>Razão social</span>
+                    <input
+                      name="razao_social"
+                      value={form.razao_social}
+                      onChange={handleInputChange}
+                      placeholder="Razão social"
+                      style={inputStyle}
+                    />
+                  </label>
 
-                  <input
-                    name="cnpj"
-                    value={form.cnpj}
-                    onChange={handleInputChange}
-                    placeholder="CNPJ/CPF"
-                    style={inputStyle}
-                  />
+                  <label style={fieldLabelStackStyle}>
+                    <span style={fieldLabelTextStyle}>CNPJ / CPF</span>
+                    <input
+                      name="cnpj"
+                      value={form.cnpj}
+                      onChange={handleInputChange}
+                      placeholder="CNPJ/CPF"
+                      style={inputStyle}
+                    />
+                  </label>
 
-                  <select
-                    name="status"
-                    value={form.status}
-                    onChange={handleInputChange}
-                    style={inputStyle}
-                  >
-                    <option value="Ativo">Ativo</option>
-                    <option value="Inativo">Inativo</option>
-                  </select>
+                  <label style={fieldLabelStackStyle}>
+                    <span style={fieldLabelTextStyle}>Status</span>
+                    <select
+                      name="status"
+                      value={form.status}
+                      onChange={handleInputChange}
+                      style={inputStyle}
+                    >
+                      <option value="Ativo">Ativo</option>
+                      <option value="Inativo">Inativo</option>
+                    </select>
+                  </label>
                 </div>
                 <div
                   style={{
@@ -2256,40 +2269,69 @@ export default function Clientes() {
                     marginTop: "12px",
                   }}
                 >
-                  <input
-                    type="date"
-                    name="status_ativo_desde"
-                    value={form.status_ativo_desde}
-                    onChange={handleInputChange}
-                    aria-label="Ativo desde"
-                    title="Ativo desde (opcional)"
-                    style={inputStyle}
-                  />
-                  <input
-                    type="date"
-                    name="status_inativo_desde"
-                    value={form.status_inativo_desde}
-                    onChange={handleInputChange}
-                    aria-label="Inativo desde"
-                    title="Inativo desde (opcional)"
-                    style={inputStyle}
-                  />
-                  <input
-                    name="tipo_unidade_cliente"
-                    value={form.tipo_unidade_cliente}
-                    readOnly
-                    placeholder="Matriz/Filial/Pessoa física"
-                    title="Calculado automaticamente pelo CNPJ/CPF"
-                    style={{ ...inputStyle, background: "#f8fafc" }}
-                  />
-                  <input
-                    name="cnpj_raiz"
-                    value={form.cnpj_raiz}
-                    readOnly
-                    placeholder="Raiz do CNPJ"
-                    title="Raiz usada para agrupar matriz e filiais"
-                    style={{ ...inputStyle, background: "#f8fafc" }}
-                  />
+                  <label style={fieldLabelStackStyle}>
+                    <span style={fieldLabelTextStyle}>
+                      Cliente ativo desde
+                    </span>
+                    <input
+                      type="date"
+                      name="status_ativo_desde"
+                      value={form.status_ativo_desde}
+                      onChange={handleInputChange}
+                      title="Data em que o cliente passou a estar ativo (opcional)"
+                      style={inputStyle}
+                    />
+                    <span style={fieldLabelHelpStyle}>
+                      Data em que o cliente passou a estar ativo.
+                    </span>
+                  </label>
+
+                  <label style={fieldLabelStackStyle}>
+                    <span style={fieldLabelTextStyle}>
+                      Cliente inativo desde
+                    </span>
+                    <input
+                      type="date"
+                      name="status_inativo_desde"
+                      value={form.status_inativo_desde}
+                      onChange={handleInputChange}
+                      title="Data em que o cliente foi marcado como inativo (opcional)"
+                      style={inputStyle}
+                    />
+                    <span style={fieldLabelHelpStyle}>
+                      Data em que o cliente foi marcado como inativo.
+                    </span>
+                  </label>
+
+                  <label style={fieldLabelStackStyle}>
+                    <span style={fieldLabelTextStyle}>Tipo de unidade</span>
+                    <input
+                      name="tipo_unidade_cliente"
+                      value={form.tipo_unidade_cliente}
+                      readOnly
+                      placeholder="Matriz / Filial / Pessoa física"
+                      title="Calculado automaticamente pelo CNPJ/CPF"
+                      style={{ ...inputStyle, background: "#f8fafc" }}
+                    />
+                    <span style={fieldLabelHelpStyle}>
+                      Calculado a partir do CNPJ/CPF.
+                    </span>
+                  </label>
+
+                  <label style={fieldLabelStackStyle}>
+                    <span style={fieldLabelTextStyle}>Raiz do CNPJ</span>
+                    <input
+                      name="cnpj_raiz"
+                      value={form.cnpj_raiz}
+                      readOnly
+                      placeholder="Raiz do CNPJ"
+                      title="Raiz usada para agrupar matriz e filiais"
+                      style={{ ...inputStyle, background: "#f8fafc" }}
+                    />
+                    <span style={fieldLabelHelpStyle}>
+                      Agrupa matriz e filiais do mesmo grupo.
+                    </span>
+                  </label>
                 </div>
               </div>
 
@@ -2794,20 +2836,25 @@ export default function Clientes() {
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
-                    alignItems: "center",
+                    alignItems: "flex-start",
                     gap: "12px",
                     marginBottom: "12px",
                     flexWrap: "wrap",
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize: "15px",
-                      fontWeight: 800,
-                      color: "#334155",
-                    }}
-                  >
-                    Resíduos e operação
+                  <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: 800,
+                        color: "#334155",
+                      }}
+                    >
+                      Resíduos e operação <span style={{ color: "#64748b", fontWeight: 500 }}>(opcional)</span>
+                    </div>
+                    <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                      Pode deixar em branco e completar depois — os resíduos não travam o cadastro.
+                    </p>
                   </div>
 
                   <button
@@ -3871,6 +3918,27 @@ const inputStyle: React.CSSProperties = {
   fontSize: "14px",
   color: "#0f172a",
   boxSizing: "border-box",
+};
+
+/** Coluna vertical com rótulo + input + dica curta, para dar contexto a campos cujo placeholder não basta (ex.: datas). */
+const fieldLabelStackStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "4px",
+  minWidth: 0,
+};
+
+const fieldLabelTextStyle: React.CSSProperties = {
+  fontSize: "12px",
+  fontWeight: 700,
+  color: "#334155",
+  letterSpacing: "0.01em",
+};
+
+const fieldLabelHelpStyle: React.CSSProperties = {
+  fontSize: "11px",
+  color: "#64748b",
+  lineHeight: 1.35,
 };
 
 const thStyle: React.CSSProperties = {
