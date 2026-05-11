@@ -48,7 +48,14 @@ function toISODate(date: Date): string {
 function dataKeyDaProgramacao(p: ProgramacaoCalendarOption): string | null {
   const raw = p.data_programada;
   if (!raw) return null;
-  return raw.includes("T") ? raw.split("T")[0] : raw;
+  const s = String(raw).trim();
+  if (!s) return null;
+  // Aceita `YYYY-MM-DD`, `YYYY-MM-DDTHH:mm:ss...` e `YYYY-MM-DD HH:mm:ss...`
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  if (m) return m[1];
+  if (s.includes("T")) return s.split("T")[0];
+  if (s.includes(" ")) return s.split(" ")[0];
+  return s.length >= 10 ? s.slice(0, 10) : s;
 }
 
 export default function ProgramacaoCalendarPicker<P extends ProgramacaoCalendarOption>(props: Props<P>) {

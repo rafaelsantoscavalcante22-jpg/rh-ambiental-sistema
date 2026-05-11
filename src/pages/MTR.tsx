@@ -11,6 +11,13 @@ import {
 import { isBenignSupabaseFetchError } from '../lib/supabaseErrors'
 import { cargoPodeEditarMtr } from '../lib/workflowPermissions'
 import { BRAND_LOGO_MARK } from '../lib/brandLogo'
+import { officialSiteUrl } from '../lib/officialSiteUrl'
+import {
+  nomeIndicaRgAmbiental,
+  preencherCamposVazios,
+  TRANSPORTADOR_RG_AMBIENTAL_PADRAO,
+} from '../lib/mtrTransportadorRgDefaults'
+import { MTR_RODAPE_VIAS, MTR_TEXTO_VIDE_FICHA, mtrTextoCelula } from '../lib/mtrPrintTexto'
 import ProgramacaoCalendarPicker from '../components/mtr/ProgramacaoCalendarPicker'
 import { useSessionObjectDraft } from '../lib/usePageSessionPersistence'
 
@@ -106,7 +113,15 @@ type MTRDetalhes = {
     estado_fisico: string
     acondicionamento: string
     quantidade_aproximada: string
+    fp_numero: string
     onu: string
+  }
+  blocos: {
+    descricoes_adicionais_residuos: string
+    instrucoes_manuseio: string
+  }
+  conformidade: {
+    telefone_discrepancias: string
   }
   transportador: {
     atividade: string
@@ -160,7 +175,15 @@ function detalhesVazios(): MTRDetalhes {
       estado_fisico: '',
       acondicionamento: '',
       quantidade_aproximada: '',
+      fp_numero: '',
       onu: '',
+    },
+    blocos: {
+      descricoes_adicionais_residuos: MTR_TEXTO_VIDE_FICHA,
+      instrucoes_manuseio: MTR_TEXTO_VIDE_FICHA,
+    },
+    conformidade: {
+      telefone_discrepancias: '',
     },
     transportador: {
       atividade: '',
@@ -212,6 +235,8 @@ const emptyForm: MTRFormState = {
 }
 
 type ClienteRowAutofill = {
+  nome: string | null
+  razao_social: string | null
   cnpj: string | null
   cep: string | null
   rua: string | null
@@ -220,12 +245,19 @@ type ClienteRowAutofill = {
   bairro: string | null
   cidade: string | null
   estado: string | null
+  endereco_coleta: string | null
   responsavel_nome: string | null
   telefone: string | null
   tipo_residuo: string | null
   unidade_medida: string | null
   classificacao: string | null
   licenca_numero: string | null
+  destino: string | null
+  mtr_destino: string | null
+  residuo_destino: string | null
+  observacoes_operacionais: string | null
+  descricao_veiculo: string | null
+  mtr_coleta: string | null
 }
 
 function montarEnderecoLinhaCliente(row: ClienteRowAutofill): string {
@@ -235,7 +267,13 @@ function montarEnderecoLinhaCliente(row: ClienteRowAutofill): string {
   if (row.complemento?.trim()) parts.push(row.complemento.trim())
   if (row.bairro?.trim()) parts.push(row.bairro.trim())
   if (row.cep?.trim()) parts.push(`CEP ${row.cep.trim()}`)
-  return parts.join(' — ')
+  const estruturado = parts.join(' — ')
+  const livre = row.endereco_coleta?.trim()
+  return estruturado || livre || ''
+}
+
+function nomeGeradorParaMtr(row: ClienteRowAutofill, fallbackCliente: string): string {
+  return row.razao_social?.trim() || row.nome?.trim() || fallbackCliente.trim() || ''
 }
 
 function montarCidadeUfCliente(row: ClienteRowAutofill): string {
@@ -270,6 +308,115 @@ function generateMTRNumber() {
   const seconds = String(now.getSeconds()).padStart(2, '0')
 
   return `MTR-${year}${month}${day}-${hours}${minutes}${seconds}`
+}
+
+/** Número estilo manifesto físico (ex.: 2650/2026), sequencial por ano com base nas MTR já listadas. */
+function generateMTRNumberSequencialAno(mtrNumeros: string[], ano?: number): string {
+  const y = ano ?? new Date().getFullYear()
+  let maxSeq = 0
+  for (const raw of mtrNumeros) {
+    const n = raw.trim()
+    const m = /^(\d+)\s*\/\s*(\d{4})$/.exec(n)
+    if (m && Number(m[2]) === y) maxSeq = Math.max(maxSeq, Number(m[1]))
+  }
+  return `${maxSeq + 1}/${y}`
+}
+
+function mergeMtrDetalhesProfundo(raw: MTRDetalhes | null | undefined): MTRDetalhes {
+  const z = detalhesVazios()
+  if (!raw) return z
+  return {
+    gerador: { ...z.gerador, ...raw.gerador },
+    residuo: { ...z.residuo, ...raw.residuo },
+    transportador: { ...z.transportador, ...raw.transportador },
+    destinatario: { ...z.destinatario, ...raw.destinatario },
+    blocos: { ...z.blocos, ...(raw.blocos ?? z.blocos) },
+    conformidade: { ...z.conformidade, ...(raw.conformidade ?? z.conformidade) },
+  }
+}
+
+function mergeDetalhesParaDocumento(
+  mtr: MTR,
+  motoristaColeta: string,
+  placaColeta: string,
+  opts?: { tipoCaminhao?: string | null }
+): MTRDetalhes {
+  let d = mergeMtrDetalhesProfundo(mtr.detalhes ?? null)
+
+  const qPart =
+    mtr.quantidade !== null && mtr.quantidade !== undefined && !Number.isNaN(Number(mtr.quantidade))
+      ? `${String(mtr.quantidade).replace('.', ',')} ${(mtr.unidade ?? '').trim()}`.trim()
+      : ''
+  if (qPart && !d.residuo.quantidade_aproximada.trim()) {
+    d = { ...d, residuo: { ...d.residuo, quantidade_aproximada: qPart } }
+  }
+
+  if (!d.residuo.fonte_origem.trim()) {
+    d = { ...d, residuo: { ...d.residuo, fonte_origem: 'Industrial' } }
+  }
+  if (!d.residuo.estado_fisico.trim()) {
+    d = { ...d, residuo: { ...d.residuo, estado_fisico: 'SÓLIDO' } }
+  }
+  const tcam = (opts?.tipoCaminhao ?? '').trim()
+  if (tcam && !d.residuo.acondicionamento.trim()) {
+    d = { ...d, residuo: { ...d.residuo, acondicionamento: tcam } }
+  }
+
+  if (nomeIndicaRgAmbiental(mtr.transportador)) {
+    d = {
+      ...d,
+      transportador: preencherCamposVazios(
+        d.transportador,
+        TRANSPORTADOR_RG_AMBIENTAL_PADRAO as unknown as Partial<MTRDetalhes['transportador']>
+      ),
+    }
+  }
+  if (nomeIndicaRgAmbiental(mtr.destinador)) {
+    const padDest: Partial<MTRDetalhes['destinatario']> = {
+      atividade: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.atividade,
+      cnpj: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.cnpj,
+      ie: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.ie,
+      endereco: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.endereco,
+      municipio: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.municipio,
+      bairro: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.bairro,
+      cep: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.cep,
+      estado: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.estado,
+      telefone: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.telefone,
+    }
+    d = { ...d, destinatario: preencherCamposVazios(d.destinatario, padDest) }
+  }
+
+  const mot = (d.transportador.motorista || motoristaColeta || '').trim()
+  const plc = (d.transportador.placa || placaColeta || '').trim()
+  d = { ...d, transportador: { ...d.transportador, motorista: mot, placa: plc } }
+
+  const telDisc =
+    d.conformidade.telefone_discrepancias.trim() ||
+    d.gerador.telefone.trim() ||
+    d.transportador.telefones_gerais.trim() ||
+    d.transportador.telefone.trim()
+  d = {
+    ...d,
+    conformidade: { ...d.conformidade, telefone_discrepancias: telDisc },
+  }
+
+  return d
+}
+
+function avisosImpressaoMtr(mtr: MTR, d: MTRDetalhes): string[] {
+  const f: string[] = []
+  if (!mtr.numero?.trim()) f.push('Número da MTR')
+  if (!mtr.gerador?.trim()) f.push('Razão social (Gerador)')
+  if (!(mtr.endereco ?? '').trim() && !(mtr.cidade ?? '').trim() && !(d.gerador.cep ?? '').trim()) {
+    f.push('Endereço de coleta ou município')
+  }
+  if (!(mtr.tipo_residuo ?? '').trim() && !(d.residuo.caracterizacao ?? '').trim()) {
+    f.push('Descrição / caracterização dos resíduos')
+  }
+  if (!(mtr.transportador ?? '').trim()) f.push('Transportador')
+  if (!(mtr.destinador ?? '').trim()) f.push('Destinatário')
+  if (!(d.gerador.cnpj ?? '').trim()) f.push('CNPJ do gerador')
+  return f
 }
 
 function etiquetaEtapaColeta(c: Coleta | null | undefined) {
@@ -630,15 +777,6 @@ export default function MTR() {
     selectedMTR?.id,
   ])
 
-  const eligibleProgramacoes = useMemo(() => {
-    return programacoes.filter((programacao) => {
-      const existingMTR = mtrMapByProgramacaoId.get(programacao.id)
-      if (!existingMTR) return true
-      if (editingId && existingMTR.id === editingId) return true
-      return false
-    })
-  }, [programacoes, mtrMapByProgramacaoId, editingId])
-
   function openNewForm() {
     if (!podeMutarMtr) {
       alert('Seu perfil não pode criar MTR. Apenas operacional ou administrador.')
@@ -666,7 +804,7 @@ export default function MTR() {
       unidade: item.unidade || 'kg',
       destinador: item.destinador || '',
       transportador: item.transportador || 'RG Ambiental',
-      detalhes: item.detalhes ? { ...detalhesVazios(), ...item.detalhes } : detalhesVazios(),
+      detalhes: mergeMtrDetalhesProfundo(item.detalhes ?? null),
       data_emissao: item.data_emissao || new Date().toISOString().slice(0, 10),
       observacoes: item.observacoes || '',
     })
@@ -690,6 +828,18 @@ export default function MTR() {
         data_emissao: new Date().toISOString().slice(0, 10),
         detalhes: detalhesVazios(),
       }))
+      return
+    }
+
+    const linked = mtrMapByProgramacaoId.get(programacao.id)
+    if (linked && !(editingId && linked.id === editingId)) {
+      const ok = window.confirm(
+        `Esta programação já possui uma MTR vinculada (${linked.numero}).\n\nDeseja abrir a MTR existente?`
+      )
+      if (ok) {
+        setSelectedMTR(linked)
+        setShowForm(false)
+      }
       return
     }
 
@@ -730,7 +880,7 @@ export default function MTR() {
     const { data: clienteRow, error } = await supabase
       .from('clientes')
       .select(
-        'cnpj, cep, rua, numero, complemento, bairro, cidade, estado, responsavel_nome, telefone, tipo_residuo, unidade_medida, classificacao, licenca_numero'
+        'nome, razao_social, cnpj, cep, rua, numero, complemento, bairro, cidade, estado, endereco_coleta, responsavel_nome, telefone, tipo_residuo, unidade_medida, classificacao, licenca_numero, destino, mtr_destino, residuo_destino, observacoes_operacionais, descricao_veiculo, mtr_coleta'
       )
       .eq('id', clienteId)
       .maybeSingle()
@@ -749,10 +899,49 @@ export default function MTR() {
       if (prev.programacao_id !== programacao.id) return prev
       const dz = detalhesVazios()
       const unidade = (row.unidade_medida ?? '').trim()
+      const atividadeGerador =
+        (programacao.tipo_servico ?? '').trim() ||
+        (row.observacoes_operacionais ?? '').trim().slice(0, 120) ||
+        dz.gerador.atividade
+      const destinoTxt = (row.destino ?? '').trim()
+      const transportNome = (prev.transportador ?? '').trim()
+      let transportadorDet = {
+        ...dz.transportador,
+        ...(prev.detalhes?.transportador || {}),
+      }
+      if (nomeIndicaRgAmbiental(transportNome)) {
+        transportadorDet = preencherCamposVazios(
+          transportadorDet,
+          TRANSPORTADOR_RG_AMBIENTAL_PADRAO as unknown as Partial<MTRDetalhes['transportador']>
+        )
+      }
+      let destinatarioDet = {
+        ...dz.destinatario,
+        ...(prev.detalhes?.destinatario || {}),
+      }
+      if (destinoTxt && nomeIndicaRgAmbiental(destinoTxt)) {
+        destinatarioDet = preencherCamposVazios(
+          destinatarioDet,
+          {
+            atividade: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.atividade,
+            cnpj: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.cnpj,
+            ie: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.ie,
+            endereco: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.endereco,
+            municipio: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.municipio,
+            bairro: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.bairro,
+            cep: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.cep,
+            estado: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.estado,
+            telefone: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.telefone,
+          } as Partial<MTRDetalhes['destinatario']>
+        )
+      }
+      const telGer = (row.telefone ?? '').trim()
       return {
         ...prev,
+        gerador: nomeGeradorParaMtr(row, prev.cliente),
         endereco: montarEnderecoLinhaCliente(row),
         cidade: montarCidadeUfCliente(row),
+        destinador: destinoTxt || prev.destinador,
         tipo_residuo:
           (prev.tipo_residuo || '').trim() || (row.tipo_residuo ?? '').trim() || prev.tipo_residuo,
         unidade: unidade || prev.unidade,
@@ -762,10 +951,11 @@ export default function MTR() {
           gerador: {
             ...dz.gerador,
             ...(prev.detalhes?.gerador || {}),
+            atividade: (prev.detalhes?.gerador?.atividade ?? '').trim() || atividadeGerador,
             cnpj: (row.cnpj ?? '').trim() || dz.gerador.cnpj,
             cadri: (row.licenca_numero ?? '').trim() || dz.gerador.cadri,
             responsavel: (row.responsavel_nome ?? '').trim() || dz.gerador.responsavel,
-            telefone: (row.telefone ?? '').trim() || dz.gerador.telefone,
+            telefone: telGer || dz.gerador.telefone,
             bairro: (row.bairro ?? '').trim() || dz.gerador.bairro,
             cep: (row.cep ?? '').trim() || dz.gerador.cep,
             estado: (row.estado ?? '').trim() || dz.gerador.estado,
@@ -773,11 +963,43 @@ export default function MTR() {
           residuo: {
             ...dz.residuo,
             ...(prev.detalhes?.residuo || {}),
+            fonte_origem:
+              (prev.detalhes?.residuo?.fonte_origem ?? '').trim() || dz.residuo.fonte_origem || 'Industrial',
             caracterizacao:
               (prev.detalhes?.residuo?.caracterizacao ?? '').trim() ||
               (row.classificacao ?? '').trim() ||
               (row.tipo_residuo ?? '').trim() ||
               dz.residuo.caracterizacao,
+            acondicionamento:
+              (prev.detalhes?.residuo?.acondicionamento ?? '').trim() ||
+              (programacao.tipo_caminhao ?? '').trim() ||
+              (row.descricao_veiculo ?? '').trim() ||
+              dz.residuo.acondicionamento,
+          },
+          transportador: transportadorDet,
+          destinatario: {
+            ...destinatarioDet,
+            atividade:
+              (prev.detalhes?.destinatario?.atividade ?? '').trim() ||
+              (row.residuo_destino ?? '').trim() ||
+              destinatarioDet.atividade,
+            lo: (prev.detalhes?.destinatario?.lo ?? '').trim() || (row.mtr_destino ?? '').trim() || destinatarioDet.lo,
+          },
+          conformidade: {
+            ...dz.conformidade,
+            ...(prev.detalhes?.conformidade || {}),
+            telefone_discrepancias:
+              (prev.detalhes?.conformidade?.telefone_discrepancias ?? '').trim() || telGer || dz.conformidade.telefone_discrepancias,
+          },
+          blocos: {
+            ...dz.blocos,
+            ...(prev.detalhes?.blocos || {}),
+            descricoes_adicionais_residuos:
+              (prev.detalhes?.blocos?.descricoes_adicionais_residuos ?? '').trim() ||
+              (row.mtr_coleta ?? '').trim() ||
+              dz.blocos.descricoes_adicionais_residuos,
+            instrucoes_manuseio:
+              (prev.detalhes?.blocos?.instrucoes_manuseio ?? '').trim() || dz.blocos.instrucoes_manuseio,
           },
         },
       }
@@ -1099,6 +1321,13 @@ export default function MTR() {
   }
 
   function handlePrint() {
+    if (!selectedMTR) return
+    if (avisosImpressao.length > 0) {
+      const ok = window.confirm(
+        `O manifesto ainda não está completo para impressão ideal. Itens a rever: ${avisosImpressao.join('; ')}.\n\nDeseja imprimir mesmo assim?`
+      )
+      if (!ok) return
+    }
     window.print()
   }
 
@@ -1111,9 +1340,19 @@ export default function MTR() {
   const selectedColeta = selectedMTR ? coletaMapByMtrId.get(selectedMTR.id) : null
   const duplicateMTR = getDuplicateMTRForSelectedProgramacao()
 
-  const motoristaColeta =
-    selectedColeta?.motorista_nome || selectedColeta?.motorista || '—'
-  const placaColeta = selectedColeta?.placa || '—'
+  const detalhesMtrSelecionada = useMemo(() => {
+    if (!selectedMTR) return null
+    const coleta = coletaMapByMtrId.get(selectedMTR.id)
+    const mot = coleta?.motorista_nome || coleta?.motorista || ''
+    const placa = coleta?.placa || ''
+    const prog = selectedMTR.programacao_id ? programacaoMap.get(selectedMTR.programacao_id) : null
+    return mergeDetalhesParaDocumento(selectedMTR, mot, placa, { tipoCaminhao: prog?.tipo_caminhao })
+  }, [selectedMTR, coletaMapByMtrId, programacaoMap])
+
+  const avisosImpressao = useMemo(() => {
+    if (!selectedMTR || !detalhesMtrSelecionada) return []
+    return avisosImpressaoMtr(selectedMTR, detalhesMtrSelecionada)
+  }, [selectedMTR, detalhesMtrSelecionada])
 
   return (
     <MainLayout>
@@ -1789,7 +2028,34 @@ export default function MTR() {
 
         .mtr-excel__sec {
           font-weight: 800;
-          background: #f2f2f2;
+          background: #2f2f2f;
+          color: #ffffff;
+          letter-spacing: 0.03em;
+        }
+
+        .mtr-excel__doc-footer {
+          margin-top: 10px;
+          padding: 8px 4px 0;
+          font-size: 9px;
+          line-height: 1.35;
+          color: #334155;
+          text-align: center;
+        }
+
+        .mtr-excel__doc-footer-line {
+          margin: 0 0 4px;
+        }
+
+        .mtr-excel__inner {
+          width: 100%;
+          border-collapse: collapse;
+          margin: 0;
+        }
+
+        .mtr-excel__inner td {
+          border: 1px solid #111;
+          padding: 5px 7px;
+          font-size: 11px;
         }
 
         .mtr-excel__k {
@@ -2271,7 +2537,14 @@ export default function MTR() {
 
           .mtr-excel__sec {
             font-weight: 800 !important;
-            background: #f2f2f2 !important;
+            background: #2f2f2f !important;
+            color: #ffffff !important;
+            letter-spacing: 0.03em !important;
+          }
+
+          .mtr-excel__doc-footer {
+            font-size: 8px !important;
+            line-height: 1.25 !important;
           }
 
           .mtr-excel__k {
@@ -2294,6 +2567,17 @@ export default function MTR() {
 
           .mtr-excel__v {
             word-break: break-word !important;
+          }
+
+          .mtr-excel__inner {
+            width: 100% !important;
+            border-collapse: collapse !important;
+          }
+
+          .mtr-excel__inner td {
+            border: 1px solid #111 !important;
+            padding: 3px 5px !important;
+            font-size: 8px !important;
           }
 
           .mtr-excel__signrow {
@@ -2718,18 +3002,24 @@ export default function MTR() {
                 </div>
               )}
 
+              {selectedMTR && avisosImpressao.length > 0 ? (
+                <div className="alert-box alert-warning" style={{ marginBottom: 12 }}>
+                  <strong>Conferência antes de imprimir:</strong> {avisosImpressao.join('; ')}.
+                </div>
+              ) : null}
+
               <div
                 className={`document-wrapper print-area${selectedMTR ? ' document-wrapper--mtr-excel' : ''}`}
               >
-                {selectedMTR ? (
+                {selectedMTR && detalhesMtrSelecionada ? (
                   <div className="document-shell mtr-modelo-pdf-shell">
                     <div className="document-green-bar" />
 
                     <div className="document-content mtr-modelo-pdf">
                       {(() => {
-                        const d = selectedMTR.detalhes ? { ...detalhesVazios(), ...selectedMTR.detalhes } : detalhesVazios()
-                        const motoristaDoc = d.transportador.motorista?.trim() || motoristaColeta
-                        const placaDoc = d.transportador.placa?.trim() || placaColeta
+                        const d = detalhesMtrSelecionada
+                        const motoristaDoc = d.transportador.motorista?.trim() || ''
+                        const placaDoc = d.transportador.placa?.trim() || ''
                         const telefonesDoc = d.transportador.telefones_gerais?.trim() || ''
                         return (
                           <>
@@ -2750,149 +3040,193 @@ export default function MTR() {
                               <table className="mtr-excel__table">
                                 <tbody>
                                   <tr>
-                                    <td className="mtr-excel__sec" colSpan={6}>1. GERADOR:</td>
+                                    <td className="mtr-excel__sec" colSpan={6}>1. GERADOR</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Atividade:</td>
-                                    <td className="mtr-excel__v">{d.gerador.atividade || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.gerador.atividade)}</td>
                                     <td className="mtr-excel__k">Nº CADRI:</td>
-                                    <td className="mtr-excel__v">{d.gerador.cadri || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.gerador.cadri)}</td>
                                     <td className="mtr-excel__k">CNPJ:</td>
-                                    <td className="mtr-excel__v">{d.gerador.cnpj || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.gerador.cnpj)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Razão Social:</td>
-                                    <td className="mtr-excel__v" colSpan={3}>{selectedMTR.gerador || '—'}</td>
+                                    <td className="mtr-excel__v" colSpan={3}>{mtrTextoCelula(selectedMTR.gerador)}</td>
                                     <td className="mtr-excel__k">I.E:</td>
-                                    <td className="mtr-excel__v">{d.gerador.ie || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.gerador.ie)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Endereço de coleta:</td>
-                                    <td className="mtr-excel__v" colSpan={3}>{selectedMTR.endereco || '—'}</td>
+                                    <td className="mtr-excel__v" colSpan={3}>{mtrTextoCelula(selectedMTR.endereco)}</td>
                                     <td className="mtr-excel__k">Bairro:</td>
-                                    <td className="mtr-excel__v">{d.gerador.bairro || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.gerador.bairro)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Município:</td>
-                                    <td className="mtr-excel__v">{selectedMTR.cidade || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(selectedMTR.cidade)}</td>
                                     <td className="mtr-excel__k">CEP:</td>
-                                    <td className="mtr-excel__v">{d.gerador.cep || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.gerador.cep)}</td>
                                     <td className="mtr-excel__k">Estado:</td>
-                                    <td className="mtr-excel__v">{d.gerador.estado || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.gerador.estado)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Responsável:</td>
-                                    <td className="mtr-excel__v" colSpan={3}>{d.gerador.responsavel || '—'}</td>
+                                    <td className="mtr-excel__v" colSpan={3}>{mtrTextoCelula(d.gerador.responsavel)}</td>
                                     <td className="mtr-excel__k">Telefone:</td>
-                                    <td className="mtr-excel__v">{d.gerador.telefone || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.gerador.telefone)}</td>
                                   </tr>
 
                                   <tr>
-                                    <td className="mtr-excel__sec" colSpan={6}>2. DESCRIÇÃO DOS RESÍDUOS:</td>
+                                    <td className="mtr-excel__sec" colSpan={6}>2. DESCRIÇÃO DOS RESÍDUOS</td>
+                                  </tr>
+                                  <tr>
+                                    <td colSpan={6} style={{ padding: 0, borderBottom: 'none' }}>
+                                      <table className="mtr-excel__inner">
+                                        <tbody>
+                                          <tr className="mtr-excel__throw">
+                                            <td className="mtr-excel__th">Fonte de Origem</td>
+                                            <td className="mtr-excel__th" colSpan={2}>
+                                              Caracterização dos resíduos
+                                            </td>
+                                            <td className="mtr-excel__th">Estado Físico</td>
+                                            <td className="mtr-excel__th">Tipo de Acondicionamento</td>
+                                            <td className="mtr-excel__th">Qtde aprox.</td>
+                                            <td className="mtr-excel__th">FP (Nº)</td>
+                                            <td className="mtr-excel__th">Nº ONU</td>
+                                          </tr>
+                                          <tr>
+                                            <td className="mtr-excel__v">{mtrTextoCelula(d.residuo.fonte_origem)}</td>
+                                            <td className="mtr-excel__v" colSpan={2}>
+                                              {mtrTextoCelula(d.residuo.caracterizacao || selectedMTR.tipo_residuo)}
+                                            </td>
+                                            <td className="mtr-excel__v">{mtrTextoCelula(d.residuo.estado_fisico)}</td>
+                                            <td className="mtr-excel__v">{mtrTextoCelula(d.residuo.acondicionamento)}</td>
+                                            <td className="mtr-excel__v">{mtrTextoCelula(d.residuo.quantidade_aproximada)}</td>
+                                            <td className="mtr-excel__v">{mtrTextoCelula(d.residuo.fp_numero)}</td>
+                                            <td className="mtr-excel__v">{mtrTextoCelula(d.residuo.onu)}</td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
+                                    </td>
                                   </tr>
                                   <tr className="mtr-excel__throw">
-                                    <td className="mtr-excel__th">Fonte de Origem</td>
-                                    <td className="mtr-excel__th" colSpan={2}>Caracterização dos resíduos</td>
-                                    <td className="mtr-excel__th">Estado Físico</td>
-                                    <td className="mtr-excel__th">Tipo de Acondicionamento</td>
-                                    <td className="mtr-excel__th">Nº ONU</td>
+                                    <td colSpan={6}>DESCRIÇÕES ADICIONAIS DOS RESÍDUOS ACIMA</td>
                                   </tr>
                                   <tr>
-                                    <td className="mtr-excel__v">{d.residuo.fonte_origem || '—'}</td>
-                                    <td className="mtr-excel__v" colSpan={2}>{d.residuo.caracterizacao || selectedMTR.tipo_residuo || '—'}</td>
-                                    <td className="mtr-excel__v">{d.residuo.estado_fisico || '—'}</td>
-                                    <td className="mtr-excel__v">{d.residuo.acondicionamento || '—'}</td>
-                                    <td className="mtr-excel__v">{d.residuo.onu || '—'}</td>
+                                    <td className="mtr-excel__v" colSpan={6}>
+                                      {mtrTextoCelula(d.blocos.descricoes_adicionais_residuos)}
+                                    </td>
+                                  </tr>
+                                  <tr className="mtr-excel__throw">
+                                    <td colSpan={6}>
+                                      INSTRUÇÕES ESPECIAIS DE MANUSEIO E INFORMAÇÕES ADICIONAIS
+                                    </td>
+                                  </tr>
+                                  <tr>
+                                    <td className="mtr-excel__v" colSpan={6}>
+                                      {mtrTextoCelula(d.blocos.instrucoes_manuseio)}
+                                    </td>
                                   </tr>
 
                                   <tr>
-                                    <td className="mtr-excel__sec" colSpan={6}>3. TRANSPORTADOR:</td>
+                                    <td className="mtr-excel__sec" colSpan={6}>3. TRANSPORTADOR</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Atividade:</td>
-                                    <td className="mtr-excel__v" colSpan={3}>{d.transportador.atividade || selectedMTR.transportador || '—'}</td>
+                                    <td className="mtr-excel__v" colSpan={3}>
+                                      {mtrTextoCelula(d.transportador.atividade || selectedMTR.transportador)}
+                                    </td>
                                     <td className="mtr-excel__k">CNPJ:</td>
-                                    <td className="mtr-excel__v">{d.transportador.cnpj || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.transportador.cnpj)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Razão Social:</td>
-                                    <td className="mtr-excel__v" colSpan={3}>{selectedMTR.transportador || '—'}</td>
+                                    <td className="mtr-excel__v" colSpan={3}>{mtrTextoCelula(selectedMTR.transportador)}</td>
                                     <td className="mtr-excel__k">I.E:</td>
-                                    <td className="mtr-excel__v">{d.transportador.ie || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.transportador.ie)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Endereço:</td>
-                                    <td className="mtr-excel__v" colSpan={3}>{d.transportador.endereco || '—'}</td>
+                                    <td className="mtr-excel__v" colSpan={3}>{mtrTextoCelula(d.transportador.endereco)}</td>
                                     <td className="mtr-excel__k">Bairro:</td>
-                                    <td className="mtr-excel__v">{d.transportador.bairro || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.transportador.bairro)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Município:</td>
-                                    <td className="mtr-excel__v">{d.transportador.municipio || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.transportador.municipio)}</td>
                                     <td className="mtr-excel__k">CEP:</td>
-                                    <td className="mtr-excel__v">{d.transportador.cep || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.transportador.cep)}</td>
                                     <td className="mtr-excel__k">Estado:</td>
-                                    <td className="mtr-excel__v">{d.transportador.estado || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.transportador.estado)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Responsável:</td>
-                                    <td className="mtr-excel__v">{d.transportador.responsavel || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.transportador.responsavel)}</td>
                                     <td className="mtr-excel__k">Telefone:</td>
-                                    <td className="mtr-excel__v">{d.transportador.telefone || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.transportador.telefone)}</td>
                                     <td className="mtr-excel__k">Email:</td>
-                                    <td className="mtr-excel__v">{d.transportador.email || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.transportador.email)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Motorista:</td>
-                                    <td className="mtr-excel__v" colSpan={3}>{motoristaDoc || '—'}</td>
+                                    <td className="mtr-excel__v" colSpan={3}>{mtrTextoCelula(motoristaDoc)}</td>
                                     <td className="mtr-excel__k">Placa do Veículo:</td>
-                                    <td className="mtr-excel__v">{placaDoc || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(placaDoc)}</td>
                                   </tr>
                                   <tr>
-                                    <td className="mtr-excel__k" colSpan={1}>Telefones:</td>
-                                    <td className="mtr-excel__v" colSpan={5}>{telefonesDoc || '—'}</td>
+                                    <td className="mtr-excel__k" colSpan={1}>
+                                      Telefones:
+                                    </td>
+                                    <td className="mtr-excel__v" colSpan={5}>
+                                      {mtrTextoCelula(telefonesDoc)}
+                                    </td>
                                   </tr>
 
                                   <tr>
-                                    <td className="mtr-excel__sec" colSpan={6}>4. STTADE DESTINATÁRIO:</td>
+                                    <td className="mtr-excel__sec" colSpan={6}>
+                                      4. UNIDADE DESTINATÁRIA (INSTALAÇÃO RECEPTORA)
+                                    </td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Atividade:</td>
-                                    <td className="mtr-excel__v" colSpan={3}>{d.destinatario.atividade || selectedMTR.destinador || '—'}</td>
+                                    <td className="mtr-excel__v" colSpan={3}>
+                                      {mtrTextoCelula(d.destinatario.atividade || selectedMTR.destinador)}
+                                    </td>
                                     <td className="mtr-excel__k">L.O:</td>
-                                    <td className="mtr-excel__v">{d.destinatario.lo || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.destinatario.lo)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Razão Social:</td>
-                                    <td className="mtr-excel__v" colSpan={3}>{selectedMTR.destinador || '—'}</td>
+                                    <td className="mtr-excel__v" colSpan={3}>{mtrTextoCelula(selectedMTR.destinador)}</td>
                                     <td className="mtr-excel__k">CNPJ:</td>
-                                    <td className="mtr-excel__v">{d.destinatario.cnpj || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.destinatario.cnpj)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Endereço:</td>
-                                    <td className="mtr-excel__v" colSpan={3}>{d.destinatario.endereco || '—'}</td>
+                                    <td className="mtr-excel__v" colSpan={3}>{mtrTextoCelula(d.destinatario.endereco)}</td>
                                     <td className="mtr-excel__k">Bairro:</td>
-                                    <td className="mtr-excel__v">{d.destinatario.bairro || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.destinatario.bairro)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Município:</td>
-                                    <td className="mtr-excel__v">{d.destinatario.municipio || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.destinatario.municipio)}</td>
                                     <td className="mtr-excel__k">CEP:</td>
-                                    <td className="mtr-excel__v">{d.destinatario.cep || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.destinatario.cep)}</td>
                                     <td className="mtr-excel__k">Estado:</td>
-                                    <td className="mtr-excel__v">{d.destinatario.estado || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.destinatario.estado)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Responsável:</td>
-                                    <td className="mtr-excel__v">{d.destinatario.responsavel || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.destinatario.responsavel)}</td>
                                     <td className="mtr-excel__k">Telefone:</td>
-                                    <td className="mtr-excel__v">{d.destinatario.telefone || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.destinatario.telefone)}</td>
                                     <td className="mtr-excel__k">I.E:</td>
-                                    <td className="mtr-excel__v">{d.destinatario.ie || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(d.destinatario.ie)}</td>
                                   </tr>
 
                                   <tr>
-                                    <td className="mtr-excel__sec" colSpan={6}>5. CERTIFICAÇÃO DO GERADOR:</td>
+                                    <td className="mtr-excel__sec" colSpan={6}>5. CERTIFICAÇÃO DO GERADOR</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__v" colSpan={6}>
@@ -2904,17 +3238,23 @@ export default function MTR() {
                                     <td className="mtr-excel__sec" colSpan={6}>6. RESPONSÁVEIS</td>
                                   </tr>
                                   <tr className="mtr-excel__throw">
-                                    <td className="mtr-excel__th" colSpan={2}>Gerador</td>
-                                    <td className="mtr-excel__th" colSpan={2}>Transportador</td>
-                                    <td className="mtr-excel__th" colSpan={2}>Instalação Receptora</td>
+                                    <td className="mtr-excel__th" colSpan={2}>
+                                      a) Gerador
+                                    </td>
+                                    <td className="mtr-excel__th" colSpan={2}>
+                                      b) Transportador
+                                    </td>
+                                    <td className="mtr-excel__th" colSpan={2}>
+                                      c) Instalação receptora
+                                    </td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Nome:</td>
-                                    <td className="mtr-excel__v">{selectedMTR.gerador || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(selectedMTR.gerador)}</td>
                                     <td className="mtr-excel__k">Nome:</td>
-                                    <td className="mtr-excel__v">{selectedMTR.transportador || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(selectedMTR.transportador)}</td>
                                     <td className="mtr-excel__k">Nome:</td>
-                                    <td className="mtr-excel__v">{selectedMTR.destinador || '—'}</td>
+                                    <td className="mtr-excel__v">{mtrTextoCelula(selectedMTR.destinador)}</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Assinatura:</td>
@@ -2926,23 +3266,38 @@ export default function MTR() {
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Data:</td>
-                                    <td className="mtr-excel__v">{formatDate(selectedMTR.data_emissao)}</td>
+                                    <td className="mtr-excel__v">____/____/________</td>
                                     <td className="mtr-excel__k">Data:</td>
-                                    <td className="mtr-excel__v">{formatDate(selectedMTR.data_emissao)}</td>
+                                    <td className="mtr-excel__v">____/____/________</td>
                                     <td className="mtr-excel__k">Data:</td>
-                                    <td className="mtr-excel__v">{formatDate(selectedMTR.data_emissao)}</td>
+                                    <td className="mtr-excel__v">____/____/________</td>
                                   </tr>
 
                                   <tr>
-                                    <td className="mtr-excel__sec" colSpan={6}>Certificação de recebimento</td>
+                                    <td className="mtr-excel__sec" colSpan={6}>7. COMUNICAÇÃO DE DISCREPÂNCIAS</td>
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__v" colSpan={6}>
-                                      Certificação de recebimento do material perigoso descrito neste manifesto, exceto quando ocorre o especificado no item 7.
-                                      <div className="mtr-excel__signrow">
+                                      Em caso de divergência entre a quantidade ou a qualidade dos resíduos recebidos e o
+                                      discriminado neste Manifesto, contatar:{' '}
+                                      <strong>{mtrTextoCelula(d.conformidade.telefone_discrepancias)}</strong>.
+                                    </td>
+                                  </tr>
+
+                                  <tr>
+                                    <td className="mtr-excel__sec" colSpan={6}>
+                                      8. CERTIFICAÇÃO DA INSTALAÇÃO RECEPTORA
+                                    </td>
+                                  </tr>
+                                  <tr>
+                                    <td className="mtr-excel__v" colSpan={6}>
+                                      Certificação de recebimento do material perigoso descrito neste manifesto, na quantidade
+                                      e tipo discriminados, exceto quando ocorrer o disposto na Seção 7 (Comunicação de
+                                      discrepâncias), acima.
+                                      <div className="mtr-excel__signrow" style={{ marginTop: 10 }}>
                                         <span>Nome: ___________________________</span>
                                         <span>Assinatura: ______________________________</span>
-                                        <span>Data: ____/____/_____</span>
+                                        <span>Data: ____/____/________</span>
                                       </div>
                                     </td>
                                   </tr>
@@ -2951,6 +3306,12 @@ export default function MTR() {
                                   </tr>
                                 </tbody>
                               </table>
+                              <div className="mtr-excel__doc-footer">
+                                <p className="mtr-excel__doc-footer-line">{MTR_RODAPE_VIAS}</p>
+                                <p className="mtr-excel__doc-footer-line">
+                                  Documento emitido pelo Sistema RG Ambiental · {officialSiteUrl('/mtr')}
+                                </p>
+                              </div>
                             </div>
                           </>
                         )
@@ -2995,23 +3356,24 @@ export default function MTR() {
                       <ProgramacaoCalendarPicker
                         id="mtr-programacao-calendar"
                         value={form.programacao_id}
-                        options={eligibleProgramacoes}
+                        options={programacoes}
                         onChange={(id) => void handleProgramacaoChange(id)}
                         getLabel={getProgramacaoLabel}
                         placeholder="Selecione a data da programação"
                       />
                       <span className="helper">
-                        Abra o calendário, clique no dia que tem programação (dias destacados em verde, com o número de programações no canto) e escolha uma na lista que aparece. Aqui é o início correto do fluxo — a coleta será criada depois a partir desta MTR.
+                        Abra o calendário, clique no dia que tem programação (dias destacados em verde, com o número de programações no canto) e escolha uma na lista que aparece. Se a programação já tiver MTR, o sistema abre a MTR existente.
                       </span>
                     </div>
 
                     <div className="field">
                       <label>Número da MTR</label>
-                      <div className="input-inline">
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                         <input
+                          style={{ flex: '1 1 220px', minWidth: 0, width: '100%', boxSizing: 'border-box' }}
                           value={form.numero}
                           onChange={(e) => setForm((prev) => ({ ...prev, numero: e.target.value }))}
-                          placeholder="Ex.: MTR-20260405-190930"
+                          placeholder="Ex.: MTR-20260405-190930 ou 2650/2026"
                         />
                         <button
                           type="button"
@@ -3019,6 +3381,19 @@ export default function MTR() {
                           onClick={() => setForm((prev) => ({ ...prev, numero: generateMTRNumber() }))}
                         >
                           Gerar
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-light"
+                          title="Número estilo manifesto físico (sequencial por ano)"
+                          onClick={() =>
+                            setForm((prev) => ({
+                              ...prev,
+                              numero: generateMTRNumberSequencialAno(mtrs.map((m) => m.numero)),
+                            }))
+                          }
+                        >
+                          Nº / ano
                         </button>
                       </div>
                     </div>
@@ -3459,6 +3834,84 @@ export default function MTR() {
                               }
                             />
                           </div>
+                          <div className="field">
+                            <label>FP (Nº)</label>
+                            <input
+                              value={form.detalhes?.residuo.fp_numero ?? ''}
+                              onChange={(e) =>
+                                setForm((prev) => ({
+                                  ...prev,
+                                  detalhes: {
+                                    ...(prev.detalhes ?? detalhesVazios()),
+                                    residuo: {
+                                      ...(prev.detalhes?.residuo ?? detalhesVazios().residuo),
+                                      fp_numero: e.target.value,
+                                    },
+                                  },
+                                }))
+                              }
+                            />
+                          </div>
+
+                          <div className="field field-full">
+                            <div style={{ fontWeight: 800 }}>Blocos adicionais e discrepâncias</div>
+                          </div>
+                          <div className="field field-full">
+                            <label>Descrições adicionais dos resíduos (impresso na MTR)</label>
+                            <textarea
+                              rows={2}
+                              value={form.detalhes?.blocos.descricoes_adicionais_residuos ?? ''}
+                              onChange={(e) =>
+                                setForm((prev) => ({
+                                  ...prev,
+                                  detalhes: {
+                                    ...(prev.detalhes ?? detalhesVazios()),
+                                    blocos: {
+                                      ...(prev.detalhes?.blocos ?? detalhesVazios().blocos),
+                                      descricoes_adicionais_residuos: e.target.value,
+                                    },
+                                  },
+                                }))
+                              }
+                            />
+                          </div>
+                          <div className="field field-full">
+                            <label>Instruções especiais de manuseio (impresso na MTR)</label>
+                            <textarea
+                              rows={2}
+                              value={form.detalhes?.blocos.instrucoes_manuseio ?? ''}
+                              onChange={(e) =>
+                                setForm((prev) => ({
+                                  ...prev,
+                                  detalhes: {
+                                    ...(prev.detalhes ?? detalhesVazios()),
+                                    blocos: {
+                                      ...(prev.detalhes?.blocos ?? detalhesVazios().blocos),
+                                      instrucoes_manuseio: e.target.value,
+                                    },
+                                  },
+                                }))
+                              }
+                            />
+                          </div>
+                          <div className="field field-full">
+                            <label>Telefone para comunicação de discrepâncias (Seção 7)</label>
+                            <input
+                              value={form.detalhes?.conformidade.telefone_discrepancias ?? ''}
+                              onChange={(e) =>
+                                setForm((prev) => ({
+                                  ...prev,
+                                  detalhes: {
+                                    ...(prev.detalhes ?? detalhesVazios()),
+                                    conformidade: {
+                                      ...(prev.detalhes?.conformidade ?? detalhesVazios().conformidade),
+                                      telefone_discrepancias: e.target.value,
+                                    },
+                                  },
+                                }))
+                              }
+                            />
+                          </div>
 
                           <div className="field field-full">
                             <div style={{ fontWeight: 800 }}>3. Transportador</div>
@@ -3718,7 +4171,7 @@ export default function MTR() {
                           </div>
 
                           <div className="field field-full">
-                            <div style={{ fontWeight: 800 }}>4. STTADE Destinatário</div>
+                            <div style={{ fontWeight: 800 }}>4. Unidade destinatária (instalação receptora)</div>
                           </div>
                           <div className="field">
                             <label>Atividade</label>
