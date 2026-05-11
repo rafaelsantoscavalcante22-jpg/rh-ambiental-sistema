@@ -78,6 +78,16 @@ type Cliente = {
   equipamentos?: string | null;
 };
 
+/** Área rolável do `MainLayout`; `window.scrollTo` não afeta quando `body` está com overflow oculto. */
+function scrollRgMainContentToTop(behavior: ScrollBehavior = "smooth") {
+  const el = document.querySelector<HTMLElement>(".layout-main-scroll-inner");
+  if (el) {
+    el.scrollTo({ top: 0, behavior });
+  } else {
+    window.scrollTo({ top: 0, behavior });
+  }
+}
+
 type ResiduoForm = {
   tipo_residuo: string;
   classificacao: string;
@@ -1704,7 +1714,7 @@ export default function Clientes() {
   function abrirCadastroNovo() {
     limparFormulario();
     setMostrarCadastro(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollRgMainContentToTop("smooth");
   }
 
   async function handleEditar(cliente: Cliente) {
@@ -1712,7 +1722,7 @@ export default function Clientes() {
     setEditingId(cliente.id);
     setMostrarCadastro(true);
     setSucesso("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollRgMainContentToTop("smooth");
 
     const hydrate = (row: Cliente) => {
       setForm({
@@ -3948,8 +3958,7 @@ export default function Clientes() {
               representanteRotulo={rotuloRepresentanteRgCliente(clienteDetalhe)}
               veiculoRotulo={rotuloVeiculoCliente(clienteDetalhe)}
               onClose={() => setClienteDetalhe(null)}
-              onEditar={() => {
-                const c = clienteDetalhe;
+              onEditar={(c) => {
                 setClienteDetalhe(null);
                 void handleEditar(c);
               }}
@@ -4044,7 +4053,7 @@ type ClienteDetalheModalProps = {
   representanteRotulo: string;
   veiculoRotulo: string;
   onClose: () => void;
-  onEditar: () => void;
+  onEditar: (cliente: Cliente) => void;
 };
 
 function ClienteDetalheModal({
@@ -4103,7 +4112,7 @@ function ClienteDetalheModal({
         position: "fixed",
         inset: 0,
         background: "rgba(15, 23, 42, 0.55)",
-        zIndex: 9999,
+        zIndex: 10100,
         display: "flex",
         alignItems: "flex-start",
         justifyContent: "center",
@@ -4197,7 +4206,7 @@ function ClienteDetalheModal({
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
             <button
               type="button"
-              onClick={onEditar}
+              onClick={() => onEditar(cliente)}
               style={{
                 background: "#16a34a",
                 color: "#ffffff",

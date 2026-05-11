@@ -425,11 +425,17 @@ export default function Usuarios() {
         body: { userId, paginas },
         headers: headersJwtSessao(sessao),
       })
-      if (error) throw error
-      if (data?.error) throw new Error(String(data.error))
+      if (error) {
+        setErro(await formatarErroEdgeFunction(error, 'paginas'))
+        return { ok: false }
+      }
+      if (data && typeof data === 'object' && 'error' in data && data.error) {
+        setErro(String(data.error))
+        return { ok: false }
+      }
       return { ok: true, message: data?.message ? String(data.message) : undefined }
     } catch (err) {
-      setErro(err instanceof Error ? err.message : 'Erro ao guardar páginas.')
+      setErro(await formatarErroEdgeFunction(err, 'paginas'))
       return { ok: false }
     }
   }
