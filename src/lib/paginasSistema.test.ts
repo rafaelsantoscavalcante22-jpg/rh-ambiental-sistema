@@ -3,6 +3,7 @@ import {
   cargoPodeAcessarRotaMenu,
   emailPodeDefinirPaginasPorUsuario,
   pathEstaNaListaValida,
+  rotasCheckboxDesdePaginasGuardadas,
   usuarioPodeAcessarRota,
 } from './paginasSistema'
 
@@ -68,6 +69,16 @@ describe('paginasSistema', () => {
     expect(pathEstaNaListaValida('/faturamento/regras-preco')).toBe(true)
     expect(pathEstaNaListaValida('/financeiro/contas-receber')).toBe(true)
     expect(pathEstaNaListaValida('/financeiro/contas-pagar')).toBe(true)
+  })
+
+  it('rotasCheckboxDesdePaginasGuardadas: prefixo expande filhos e aceita path sem slash inicial', () => {
+    const a = rotasCheckboxDesdePaginasGuardadas(['/financeiro'])
+    expect(a).toContain('/financeiro')
+    expect(a).toContain('/financeiro/contas-receber')
+    expect(a).toContain('/financeiro/contas-pagar')
+    const b = rotasCheckboxDesdePaginasGuardadas(['financeiro/contas-pagar'])
+    expect(b).toContain('/financeiro/contas-pagar')
+    expect(b).not.toContain('/clientes')
   })
 
   it('cargoPodeAcessarRotaMenu: Operacional não acede a Financeiro (alinhado ao App)', () => {

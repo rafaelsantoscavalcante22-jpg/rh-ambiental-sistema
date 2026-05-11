@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -23,7 +24,12 @@ import {
   cargoPodeCriarOuExcluirUsuario,
   cargoPodeGerirUsuarios,
 } from '../lib/workflowPermissions'
-import { ROTAS_SISTEMA, emailPodeDefinirPaginasPorUsuario } from '../lib/paginasSistema'
+import {
+  ROTAS_SISTEMA,
+  emailPodeDefinirPaginasPorUsuario,
+  rotasCheckboxDesdePaginasGuardadas,
+  rotasPermitidasPorCargoParaChecklist,
+} from '../lib/paginasSistema'
 
 type Usuario = {
   id: string
@@ -209,6 +215,33 @@ function normalizarStatus(status: string) {
   return status || '-'
 }
 
+/** `paginas_permitidas` pode vir como array, JSON em string ou valor inesperado do PostgREST. */
+function coalescePaginasPermitidas(raw: unknown): string[] | null {
+  if (raw == null) return null
+  if (Array.isArray(raw)) {
+    const arr = raw
+      .filter((x) => x != null)
+      .map((x) => String(x).trim())
+      .filter(Boolean)
+    return arr.length ? arr : null
+  }
+  if (typeof raw === 'string') {
+    const t = raw.trim()
+    if (!t) return null
+    try {
+      const o = JSON.parse(t) as unknown
+      if (Array.isArray(o)) {
+        const arr = o.map((x) => String(x).trim()).filter(Boolean)
+        return arr.length ? arr : null
+      }
+    } catch {
+      /* valor único */
+    }
+    return [t]
+  }
+  return null
+}
+
 export default function Usuarios() {
   const [usuarios, setUsuarios] = useState<Usuario[]>([])
   const [loadingLista, setLoadingLista] = useState(false)
@@ -233,10 +266,8 @@ export default function Usuarios() {
 
   const [meuEmail, setMeuEmail] = useState<string | null>(null)
   const [modalPaginasUsuario, setModalPaginasUsuario] = useState<Usuario | null>(null)
-  const [modoPaginas, setModoPaginas] = useSessionPersistedState<'cargo' | 'lista'>(
-    'modal-paginas-modo',
-    'cargo'
-  )
+  /** Não persistir em sessionStorage: o efeito de restauro podia correr após abrir o modal e deixar «lista» sem checkboxes. */
+  const [modoPaginas, setModoPaginas] = useState<'cargo' | 'lista'>('cargo')
   const [rotasMarcadas, setRotasMarcadas] = useState<Set<string>>(() => new Set())
   const [salvandoPaginas, setSalvandoPaginas] = useState(false)
 
@@ -247,6 +278,19 @@ export default function Usuarios() {
   const podeCriarOuExcluir = meuCargo === null || cargoPodeCriarOuExcluirUsuario(meuCargo)
 
   const podeDefinirPaginas = emailPodeDefinirPaginasPorUsuario(meuEmail)
+
+  const definirModoPaginasParaFormulario = useCallback((mode: 'cargo' | 'lista') => {
+    if (mode === 'cargo') {
+      setModoPaginas('cargo')
+      return
+    }
+    setModoPaginas('lista')
+    setRotasMarcadas((prev) => {
+      if (prev.size > 0) return prev
+      const u = usuarioEmEdicao ?? modalPaginasUsuario
+      return rotasPermitidasPorCargoParaChecklist(u?.cargo ?? null)
+    })
+  }, [usuarioEmEdicao, modalPaginasUsuario])
 
   const cadastroPainelAberto = formularioAberto || usuarioEmEdicao != null
 
@@ -382,10 +426,11 @@ export default function Usuarios() {
     setErro('')
     setSucesso('')
     setModalPaginasUsuario(usuario)
-    const pp = usuario.paginas_permitidas
+    const pp = coalescePaginasPermitidas(usuario.paginas_permitidas as unknown)
+    const rotasUi = rotasCheckboxDesdePaginasGuardadas(pp)
     if (pp && pp.length > 0) {
       setModoPaginas('lista')
-      setRotasMarcadas(new Set(pp))
+      setRotasMarcadas(new Set(rotasUi))
     } else {
       setModoPaginas('cargo')
       setRotasMarcadas(new Set())
@@ -448,6 +493,12 @@ export default function Usuarios() {
     try {
       const res = await guardarPaginasUsuarioNoBackend(modalPaginasUsuario.id)
       if (res.ok) {
+        const uid = modalPaginasUsuario.id
+        const novasPaginas: string[] | null =
+          modoPaginas === 'lista' ? Array.from(rotasMarcadas) : null
+        setUsuarios((prev) =>
+          prev.map((u) => (u.id === uid ? { ...u, paginas_permitidas: novasPaginas } : u))
+        )
         setSucesso(res.message || 'Permissões de páginas guardadas.')
         fecharModalPaginas()
         await carregarUsuarios()
@@ -568,10 +619,11 @@ export default function Usuarios() {
     setSucesso('')
     setFormularioAberto(false)
     setUsuarioEmEdicao(usuario)
-    const pp = usuario.paginas_permitidas
+    const pp = coalescePaginasPermitidas(usuario.paginas_permitidas as unknown)
+    const rotasUi = rotasCheckboxDesdePaginasGuardadas(pp)
     if (pp && pp.length > 0) {
       setModoPaginas('lista')
-      setRotasMarcadas(new Set(pp))
+      setRotasMarcadas(new Set(rotasUi))
     } else {
       setModoPaginas('cargo')
       setRotasMarcadas(new Set())
@@ -1221,7 +1273,7 @@ export default function Usuarios() {
                 </p>
                 <PaginasPermitidasFields
                   modoPaginas={modoPaginas}
-                  setModoPaginas={setModoPaginas}
+                  setModoPaginas={definirModoPaginasParaFormulario}
                   rotasMarcadas={rotasMarcadas}
                   toggleRotaMarcada={toggleRotaMarcada}
                   disabled={loadingEdicao || salvandoPaginas}
@@ -1272,7 +1324,7 @@ export default function Usuarios() {
 
             <PaginasPermitidasFields
               modoPaginas={modoPaginas}
-              setModoPaginas={setModoPaginas}
+              setModoPaginas={definirModoPaginasParaFormulario}
               rotasMarcadas={rotasMarcadas}
               toggleRotaMarcada={toggleRotaMarcada}
               disabled={salvandoPaginas}

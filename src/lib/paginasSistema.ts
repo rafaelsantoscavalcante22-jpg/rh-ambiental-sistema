@@ -82,10 +82,40 @@ function cargoEhVisualizadorLocal(cargo: string | null | undefined): boolean {
     .includes('visualizador')
 }
 
-function normalizarPath(pathname: string): string {
+export function normalizarPath(pathname: string): string {
   if (!pathname) return '/'
   const p = pathname.endsWith('/') && pathname !== '/' ? pathname.slice(0, -1) : pathname
   return p || '/'
+}
+
+/** Garante `/` inicial para valores vindos da BD ou de importações. */
+function normalizarPrefixoPaginaGuardada(p: string): string {
+  const t = String(p).trim()
+  if (!t) return '/'
+  const comSlash = t.startsWith('/') ? t : `/${t.replace(/^\/+/, '')}`
+  return normalizarPath(comSlash)
+}
+
+/**
+ * Converte `paginas_permitidas` (prefixos ou paths exatos) nos paths canónicos de `ROTAS_SISTEMA`
+ * usados nos checkboxes (inclui filhos de um prefixo, ex.: `/financeiro` → contas a pagar/receber).
+ */
+export function rotasCheckboxDesdePaginasGuardadas(paginas: string[] | null | undefined): string[] {
+  if (!paginas?.length) return []
+  const prefixes = [
+    ...new Set(paginas.map((p) => normalizarPrefixoPaginaGuardada(p)).filter((p) => p !== '/')),
+  ]
+  const out = new Set<string>()
+  for (const pre of prefixes) {
+    if (ROTAS_VALIDAS.has(pre)) out.add(pre)
+  }
+  for (const { path } of ROTAS_SISTEMA) {
+    const pathN = normalizarPath(path)
+    if (prefixes.some((pre) => pathN === pre || pathN.startsWith(`${pre}/`))) {
+      out.add(path)
+    }
+  }
+  return Array.from(out)
 }
 
 /** Igual a `ROLES_SEGUIMENTO_COLETA` em App-NEXUS.tsx (fluxo de coleta / faturamento). */
@@ -173,6 +203,16 @@ export function cargoPodeAcessarRotaMenu(cargo: string | null | undefined, pathn
   return true
 }
 
+/** Rotas da checklist a que o cargo já pode aceder pelo menu (base para pré-marcação ao mudar para «lista»). */
+export function rotasPermitidasPorCargoParaChecklist(cargo: string | null | undefined): Set<string> {
+  const c = String(cargo ?? '').trim()
+  const out = new Set<string>()
+  for (const { path } of ROTAS_SISTEMA) {
+    if (cargoPodeAcessarRotaMenu(c, path)) out.add(path)
+  }
+  return out
+}
+
 /**
  * Regras (alinhadas ao documento de cargos):
  * - Página `/bem-vindo` é sempre acessível.
@@ -198,7 +238,7 @@ export function usuarioPodeAcessarRota(usuario: UsuarioComPaginas, pathname: str
   }
 
   return raw.some((prefix) => {
-    const pre = normalizarPath(prefix)
+    const pre = normalizarPrefixoPaginaGuardada(String(prefix))
     return path === pre || path.startsWith(`${pre}/`)
   })
 }
