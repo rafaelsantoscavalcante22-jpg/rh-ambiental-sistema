@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useState, type CSSProperties } from 'react'
+import { useSessionPersistedState } from '../lib/usePageSessionPersistence'
 import { Link } from 'react-router-dom'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { jsPDF } from 'jspdf'
@@ -457,7 +458,10 @@ export default function PosVenda() {
   const [idsComColeta, setIdsComColeta] = useState<Set<string> | null>(null)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
-  const [filtroZonaSp, setFiltroZonaSp] = useState<'todas' | ZonaSpCarteira>('todas')
+  const [filtroZonaSp, setFiltroZonaSp] = useSessionPersistedState<'todas' | ZonaSpCarteira>(
+    'filtro-zona',
+    'todas'
+  )
 
   const carregar = useCallback(async () => {
     setLoading(true)

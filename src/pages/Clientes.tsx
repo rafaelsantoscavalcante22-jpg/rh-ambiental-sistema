@@ -7,6 +7,7 @@ import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from "../lib/coletasQueryLimits"
 import { sanitizeIlikePattern } from "../lib/sanitizeIlike";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { limparSessionDraftKey, useCadastroFormDraft } from "../lib/useCadastroFormDraft";
+import { useSessionPersistedState } from "../lib/usePageSessionPersistence";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
@@ -783,9 +784,9 @@ function clienteAtendeFiltroVencCadri(c: Cliente, filtro: FiltroVencCadri): bool
 export default function Clientes() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busca, setBusca] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [busca, setBusca] = useSessionPersistedState("lista-busca", "");
+  const [page, setPage] = useSessionPersistedState("lista-page", 1);
+  const [pageSize, setPageSize] = useSessionPersistedState("lista-page-size", DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const buscaDebounced = useDebouncedValue(busca, 400);
   const [mostrarCadastro, setMostrarCadastro] = useState(false);
@@ -802,7 +803,10 @@ export default function Clientes() {
   const margemLucroColDisponivelRef = useRef(true);
 
   const [modoTabela, setModoTabela] = useState<ModoTabelaClientes>(() => lerModoTabelaPersistido());
-  const [filtroVencCadri, setFiltroVencCadri] = useState<FiltroVencCadri>("todos");
+  const [filtroVencCadri, setFiltroVencCadri] = useSessionPersistedState<FiltroVencCadri>(
+    "filtro-venc-cadri",
+    "todos"
+  );
   const [linhasExpandidas, setLinhasExpandidas] = useState<Set<string>>(() => new Set());
 
   /** Modal de informações completas do cliente (aberto ao clicar no nome). */

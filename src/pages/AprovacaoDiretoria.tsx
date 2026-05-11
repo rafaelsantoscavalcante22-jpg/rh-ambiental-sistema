@@ -13,6 +13,7 @@ import {
 import { COLETAS_DROPDOWN_MAX_ROWS } from '../lib/coletasQueryLimits'
 import { queryColetasListaResumoFluxo } from '../lib/coletasSelectSeguimento'
 import { cargoPodeDecidirAprovacaoDiretoria } from '../lib/workflowPermissions'
+import { useSessionObjectDraft } from '../lib/usePageSessionPersistence'
 
 type ColetaResumo = {
   id: string
@@ -86,6 +87,25 @@ export default function AprovacaoDiretoria() {
   const [erro, setErro] = useState('')
   const [preReq, setPreReq] = useState<{ ticket: boolean }>({ ticket: false })
   const [carregandoPreReq, setCarregandoPreReq] = useState(false)
+
+  const aprovacaoDraft = useMemo(
+    () => ({
+      recadoAprovar,
+      recadoReprovar,
+      sp: searchParams.toString(),
+    }),
+    [recadoAprovar, recadoReprovar, searchParams]
+  )
+
+  useSessionObjectDraft({
+    cacheKey: 'aprovacao-diretoria',
+    data: aprovacaoDraft,
+    onRestore: (d) => {
+      setRecadoAprovar(d.recadoAprovar)
+      setRecadoReprovar(d.recadoReprovar)
+      setSearchParams(new URLSearchParams(d.sp), { replace: true })
+    },
+  })
 
   const podeMutar = cargoPodeDecidirAprovacaoDiretoria(cargo)
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useSessionPersistedState } from '../lib/usePageSessionPersistence'
 import { useNavigate } from 'react-router-dom'
 import {
   Bar,
@@ -159,7 +160,10 @@ export default function DashboardLegacy() {
   const [itens, setItens] = useState<DashboardItem[]>([])
   const [erro, setErro] = useState('')
   const [loading, setLoading] = useState(false)
-  const [tabPendencias, setTabPendencias] = useState<PendenciaSetorKey>('faturamento')
+  const [tabPendencias, setTabPendencias] = useSessionPersistedState<PendenciaSetorKey>(
+    'tab-pendencias',
+    'faturamento'
+  )
 
   const carregarDashboard = useCallback(async () => {
     const { data, error } = await supabase

@@ -11,6 +11,7 @@ import MainLayout from '../layouts/MainLayout'
 import { supabase } from '../lib/supabase'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../lib/coletasQueryLimits'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
+import { useSessionPersistedState } from '../lib/usePageSessionPersistence'
 import {
   cargoPodeAlterarValorContaTravada,
   cargoPodeEditarCobranca,
@@ -229,22 +230,28 @@ export default function Financeiro() {
   const prevContextoScrollKeyRef = useRef<string>('')
 
   const [itens, setItens] = useState<FinanceiroListaItem[]>([])
-  const [busca, setBusca] = useState('')
-  const [filtroClienteId, setFiltroClienteId] = useState('')
-  const [dataInicioFiltro, setDataInicioFiltro] = useState('')
-  const [dataFimFiltro, setDataFimFiltro] = useState('')
-  const [filtroStatusConferencia, setFiltroStatusConferencia] = useState<
+  const [busca, setBusca] = useSessionPersistedState('busca', '')
+  const [filtroClienteId, setFiltroClienteId] = useSessionPersistedState('filtro-cliente', '')
+  const [dataInicioFiltro, setDataInicioFiltro] = useSessionPersistedState('data-ini', '')
+  const [dataFimFiltro, setDataFimFiltro] = useSessionPersistedState('data-fim', '')
+  const [filtroStatusConferencia, setFiltroStatusConferencia] = useSessionPersistedState<
     'todos' | 'PRONTO_PARA_FATURAR' | 'PENDENTE'
-  >('todos')
-  const [filtroStatusPagamentoLista, setFiltroStatusPagamentoLista] = useState<
+  >('filtro-conf', 'todos')
+  const [filtroStatusPagamentoLista, setFiltroStatusPagamentoLista] = useSessionPersistedState<
     '' | StatusPagamento
-  >('')
-  const [detalheAbertoId, setDetalheAbertoId] = useState<string | null>(null)
+  >('filtro-pag', '')
+  const [detalheAbertoId, setDetalheAbertoId] = useSessionPersistedState<string | null>(
+    'detalhe-id',
+    null
+  )
   const buscaDebounced = useDebouncedValue(busca, 350)
-  const [somenteVencidos, setSomenteVencidos] = useState(false)
-  const [relatorioFiltro, setRelatorioFiltro] = useState<RelatorioFiltro>('todos')
-  const [pageTab, setPageTab] = useState(1)
-  const [pageSizeTab, setPageSizeTab] = useState(DEFAULT_PAGE_SIZE)
+  const [somenteVencidos, setSomenteVencidos] = useSessionPersistedState('somente-venc', false)
+  const [relatorioFiltro, setRelatorioFiltro] = useSessionPersistedState<RelatorioFiltro>(
+    'rel-filtro',
+    'todos'
+  )
+  const [pageTab, setPageTab] = useSessionPersistedState('page-tab', 1)
+  const [pageSizeTab, setPageSizeTab] = useSessionPersistedState('page-size-tab', DEFAULT_PAGE_SIZE)
   const [erro, setErro] = useState('')
   const [sucesso, setSucesso] = useState('')
   const [loading, setLoading] = useState(false)
@@ -254,16 +261,19 @@ export default function Financeiro() {
 
   const [linhasVistaFat, setLinhasVistaFat] = useState<FaturamentoResumoViewRow[]>([])
   const [erroVistaFat, setErroVistaFat] = useState('')
-  const [fatModalAberto, setFatModalAberto] = useState(false)
-  const [fatModalColetaId, setFatModalColetaId] = useState<string | null>(null)
-  const [fatPeriodoDe, setFatPeriodoDe] = useState(isoPrimeiroDiaMes)
-  const [fatPeriodoAte, setFatPeriodoAte] = useState(isoHoje)
+  const [fatModalAberto, setFatModalAberto] = useSessionPersistedState('fat-modal-aberto', false)
+  const [fatModalColetaId, setFatModalColetaId] = useSessionPersistedState<string | null>(
+    'fat-modal-coleta',
+    null
+  )
+  const [fatPeriodoDe, setFatPeriodoDe] = useSessionPersistedState('fat-per-de', isoPrimeiroDiaMes())
+  const [fatPeriodoAte, setFatPeriodoAte] = useSessionPersistedState('fat-per-ate', isoHoje())
 
   const [documentos, setDocumentos] = useState<DocumentoFinRow[]>([])
   const [loadingDocs, setLoadingDocs] = useState(false)
-  const [docNome, setDocNome] = useState('')
-  const [docVenc, setDocVenc] = useState('')
-  const [docColetaId, setDocColetaId] = useState('')
+  const [docNome, setDocNome] = useSessionPersistedState('doc-nome', '')
+  const [docVenc, setDocVenc] = useSessionPersistedState('doc-venc', '')
+  const [docColetaId, setDocColetaId] = useSessionPersistedState('doc-coleta', '')
   const [salvandoDoc, setSalvandoDoc] = useState(false)
 
   const podeMutarFinanceiro = cargoPodeEditarCobranca(usuarioCargo)

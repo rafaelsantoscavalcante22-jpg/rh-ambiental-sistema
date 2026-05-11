@@ -9,6 +9,7 @@ import { cargoPodeEditarProgramacao } from '../lib/workflowPermissions'
 import { BRAND_LOGO_MARK } from '../lib/brandLogo'
 import { RgReportPdfIcon } from '../components/ui/RgReportPdfIcon'
 import { FloatingAlert } from '../components/ui/FloatingAlert'
+import { useSessionObjectDraft } from '../lib/usePageSessionPersistence'
 
 type ClienteOption = {
   id: string
@@ -715,6 +716,50 @@ export default function Programacao() {
   const [relatorioDiaRef, setRelatorioDiaRef] = useState(() => todayIsoLocal())
   const [relatorioMesRef, setRelatorioMesRef] = useState(() => getMonthInputValue())
   const [relatorioPrintTick, setRelatorioPrintTick] = useState({ n: 0, em: '' })
+
+  const programacaoUiDraft = useMemo(
+    () => ({
+      form,
+      formEdicaoModal,
+      mesSelecionado,
+      diaPainelCalendario,
+      modalNovaProgramacaoAberto,
+      relatorioAberto,
+      relatorioFiltro,
+      relatorioDiaRef,
+      relatorioMesRef,
+      contextoDestaqueId,
+    }),
+    [
+      form,
+      formEdicaoModal,
+      mesSelecionado,
+      diaPainelCalendario,
+      modalNovaProgramacaoAberto,
+      relatorioAberto,
+      relatorioFiltro,
+      relatorioDiaRef,
+      relatorioMesRef,
+      contextoDestaqueId,
+    ]
+  )
+
+  useSessionObjectDraft({
+    cacheKey: 'programacao',
+    data: programacaoUiDraft,
+    onRestore: (d) => {
+      setForm(d.form)
+      setFormEdicaoModal(d.formEdicaoModal)
+      setMesSelecionado(d.mesSelecionado)
+      setDiaPainelCalendario(d.diaPainelCalendario)
+      setModalNovaProgramacaoAberto(d.modalNovaProgramacaoAberto)
+      setRelatorioAberto(d.relatorioAberto)
+      setRelatorioFiltro(d.relatorioFiltro)
+      setRelatorioDiaRef(d.relatorioDiaRef)
+      setRelatorioMesRef(d.relatorioMesRef)
+      setContextoDestaqueId(d.contextoDestaqueId)
+    },
+  })
 
   const podeMutarProgramacao = cargoPodeEditarProgramacao(usuarioCargo)
 

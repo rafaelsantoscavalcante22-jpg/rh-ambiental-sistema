@@ -6,6 +6,7 @@ import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from "../lib/coletasQueryLimits"
 import { sanitizeIlikePattern } from "../lib/sanitizeIlike";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { limparSessionDraftKey, useCadastroFormDraft } from "../lib/useCadastroFormDraft";
+import { useSessionPersistedState } from "../lib/usePageSessionPersistence";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { RgReportPdfIcon } from "../components/ui/RgReportPdfIcon";
@@ -78,9 +79,9 @@ const REPRESENTANTES_RG_CADASTRO_DRAFT_KEY = "rg-ambiental-representantes-rg-cad
 export default function RepresentantesRG() {
   const [lista, setLista] = useState<RepresentanteRG[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busca, setBusca] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [busca, setBusca] = useSessionPersistedState("lista-busca", "");
+  const [page, setPage] = useSessionPersistedState("lista-page", 1);
+  const [pageSize, setPageSize] = useSessionPersistedState("lista-page-size", DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const buscaDebounced = useDebouncedValue(busca, 400);
   const [mostrarCadastro, setMostrarCadastro] = useState(false);

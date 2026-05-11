@@ -30,6 +30,7 @@ import { cargoPodeEditarChecklistTransporte } from '../lib/workflowPermissions'
 import { BRAND_LOGO_MARK } from '../lib/brandLogo'
 import ChecklistTransporte from '../components/ChecklistTransporte'
 import { RgReportPdfIcon } from '../components/ui/RgReportPdfIcon'
+import { useSessionObjectDraft } from '../lib/usePageSessionPersistence'
 
 type ColetaResumo = {
   id: string
@@ -151,6 +152,44 @@ export default function ConferenciaTransporte() {
   const [secaoColetaExpandida, setSecaoColetaExpandida] = useState(true)
   const [secaoChecklistExpandida, setSecaoChecklistExpandida] = useState(false)
   const coletaIdAnteriorAccordionRef = useRef<string | null>(null)
+
+  const conferenciaTransporteDraft = useMemo(
+    () => ({
+      pesquisaColeta,
+      sp: searchParams.toString(),
+      respostasMotorista,
+      observacoesMotorista,
+      assinaturaMotorista,
+      assinaturaResponsavel,
+      secaoColetaExpandida,
+      secaoChecklistExpandida,
+    }),
+    [
+      pesquisaColeta,
+      searchParams,
+      respostasMotorista,
+      observacoesMotorista,
+      assinaturaMotorista,
+      assinaturaResponsavel,
+      secaoColetaExpandida,
+      secaoChecklistExpandida,
+    ]
+  )
+
+  useSessionObjectDraft({
+    cacheKey: 'conferencia-transporte',
+    data: conferenciaTransporteDraft,
+    onRestore: (d) => {
+      setPesquisaColeta(d.pesquisaColeta)
+      setSearchParams(new URLSearchParams(d.sp), { replace: true })
+      setRespostasMotorista(d.respostasMotorista)
+      setObservacoesMotorista(d.observacoesMotorista)
+      setAssinaturaMotorista(d.assinaturaMotorista)
+      setAssinaturaResponsavel(d.assinaturaResponsavel)
+      setSecaoColetaExpandida(d.secaoColetaExpandida)
+      setSecaoChecklistExpandida(d.secaoChecklistExpandida)
+    },
+  })
 
   const podeMutar = cargoPodeEditarChecklistTransporte(cargo)
   const coletaAtiva = useMemo(

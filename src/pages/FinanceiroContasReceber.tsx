@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSessionPersistedState } from '../lib/usePageSessionPersistence'
 import { Link } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import { supabase } from '../lib/supabase'
@@ -41,9 +42,14 @@ export default function FinanceiroContasReceber() {
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [cargo, setCargo] = useState<string | null>(null)
-  const [filtroStatus, setFiltroStatus] = useState<'' | 'Pendente' | 'Parcial' | 'Pago'>('')
-  const [filtroFaixa, setFiltroFaixa] = useState<'todos' | 'vencido' | '7d' | 'sem_venc'>('todos')
-  const [busca, setBusca] = useState('')
+  const [filtroStatus, setFiltroStatus] = useSessionPersistedState<'' | 'Pendente' | 'Parcial' | 'Pago'>(
+    'filtro-status',
+    ''
+  )
+  const [filtroFaixa, setFiltroFaixa] = useSessionPersistedState<
+    'todos' | 'vencido' | '7d' | 'sem_venc'
+  >('filtro-faixa', 'todos')
+  const [busca, setBusca] = useSessionPersistedState('busca', '')
 
   const podeMutar = cargoPodeEditarCobranca(cargo)
 

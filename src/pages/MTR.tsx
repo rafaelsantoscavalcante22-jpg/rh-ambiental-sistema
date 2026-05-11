@@ -12,6 +12,7 @@ import { isBenignSupabaseFetchError } from '../lib/supabaseErrors'
 import { cargoPodeEditarMtr } from '../lib/workflowPermissions'
 import { BRAND_LOGO_MARK } from '../lib/brandLogo'
 import ProgramacaoCalendarPicker from '../components/mtr/ProgramacaoCalendarPicker'
+import { useSessionObjectDraft } from '../lib/usePageSessionPersistence'
 
 type MTRStatus = 'Rascunho' | 'Emitido' | 'Cancelado'
 
@@ -378,6 +379,29 @@ export default function MTR() {
 
   const [form, setForm] = useState<MTRFormState>(emptyForm)
   const [usuarioCargo, setUsuarioCargo] = useState<string | null>(null)
+
+  const mtrUiDraft = useMemo(
+    () => ({
+      showForm,
+      editingId,
+      form,
+      selectedMTR,
+      sp: searchParams.toString(),
+    }),
+    [showForm, editingId, form, selectedMTR, searchParams]
+  )
+
+  useSessionObjectDraft({
+    cacheKey: 'mtr',
+    data: mtrUiDraft,
+    onRestore: (d) => {
+      setShowForm(d.showForm)
+      setEditingId(d.editingId)
+      setForm(d.form)
+      setSelectedMTR(d.selectedMTR)
+      setSearchParams(new URLSearchParams(d.sp), { replace: true })
+    },
+  })
 
   const podeMutarMtr = cargoPodeEditarMtr(usuarioCargo)
 

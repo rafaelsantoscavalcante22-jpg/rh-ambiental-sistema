@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useSessionPersistedState } from '../../lib/usePageSessionPersistence'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -94,6 +95,17 @@ function pad(n: number) {
 function hojeLocalISO(): string {
   const d = new Date()
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function defaultCustomFromExecutivo(): string {
+  const d = new Date()
+  d.setDate(d.getDate() - 29)
+  return d.toISOString().slice(0, 10)
+}
+
+function defaultCalMonthExecutivo(): { y: number; m: number } {
+  const d = new Date()
+  return { y: d.getFullYear(), m: d.getMonth() }
 }
 
 /** Janela mínima de `created_at` para o dashboard (gráficos 12m + calendário); reduz payload vs. histórico ilimitado. */
@@ -197,24 +209,26 @@ export function ExecutiveDashboard() {
   const [tipoCaminhaoPorProg, setTipoCaminhaoPorProg] = useState<Record<string, string>>({})
   const [totalClientesCadastro, setTotalClientesCadastro] = useState(0)
 
-  const [preset, setPreset] = useState<PresetPeriodo>('30d')
-  const [customFrom, setCustomFrom] = useState(() => {
-    const d = new Date()
-    d.setDate(d.getDate() - 29)
-    return d.toISOString().slice(0, 10)
-  })
-  const [customTo, setCustomTo] = useState(() => hojeLocalISO())
+  const [preset, setPreset] = useSessionPersistedState<PresetPeriodo>('exe-preset', '30d')
+  const [customFrom, setCustomFrom] = useSessionPersistedState(
+    'exe-custom-from',
+    defaultCustomFromExecutivo()
+  )
+  const [customTo, setCustomTo] = useSessionPersistedState('exe-custom-to', hojeLocalISO())
 
-  const [filtroClienteId, setFiltroClienteId] = useState('')
-  const [filtroEtapa, setFiltroEtapa] = useState<string>('')
-  const [filtroTipoResiduo, setFiltroTipoResiduo] = useState('')
-  const [filtroTipoCaminhao, setFiltroTipoCaminhao] = useState('')
+  const [filtroClienteId, setFiltroClienteId] = useSessionPersistedState('exe-filtro-cliente', '')
+  const [filtroEtapa, setFiltroEtapa] = useSessionPersistedState('exe-filtro-etapa', '')
+  const [filtroTipoResiduo, setFiltroTipoResiduo] = useSessionPersistedState(
+    'exe-filtro-residuo',
+    ''
+  )
+  const [filtroTipoCaminhao, setFiltroTipoCaminhao] = useSessionPersistedState(
+    'exe-filtro-caminhao',
+    ''
+  )
 
   const [diaModal, setDiaModal] = useState<string | null>(null)
-  const [calMonth, setCalMonth] = useState(() => {
-    const d = new Date()
-    return { y: d.getFullYear(), m: d.getMonth() }
-  })
+  const [calMonth, setCalMonth] = useSessionPersistedState('exe-cal-month', defaultCalMonthExecutivo())
   const [relatorioEmissaoLabel, setRelatorioEmissaoLabel] = useState(() =>
     new Date().toLocaleString('pt-BR', {
       day: '2-digit',
@@ -225,7 +239,7 @@ export function ExecutiveDashboard() {
     })
   )
   const [relatorioPrintNonce, setRelatorioPrintNonce] = useState(0)
-  const [linhaTempoAberta, setLinhaTempoAberta] = useState(false)
+  const [linhaTempoAberta, setLinhaTempoAberta] = useSessionPersistedState('exe-linha-tempo', false)
 
   const EXEC_PAGE_SIZE = 1000
   const EXEC_MAX_COLETAS = 3000

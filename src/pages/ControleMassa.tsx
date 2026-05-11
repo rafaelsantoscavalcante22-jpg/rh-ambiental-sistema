@@ -25,6 +25,7 @@ import {
   formatarFaseFluxoOficialParaUI,
   normalizarEtapaColeta,
 } from "../lib/fluxoEtapas";
+import { useSessionObjectDraft } from "../lib/usePageSessionPersistence";
 
 /** Busca insensível a maiúsculas e acentos (MTR / cliente / coleta). */
 function normalizarTextoBusca(s: string): string {
@@ -609,6 +610,50 @@ export default function ControleMassa() {
   const tipoTicketRef = useRef<HTMLSelectElement | null>(null);
   const [usuarioCargo, setUsuarioCargo] = useState<string | null>(null);
   const [excluindoColetaId, setExcluindoColetaId] = useState<string | null>(null);
+
+  const controleMassaDraft = useMemo(
+    () => ({
+      form,
+      secaoPesagemAberta,
+      modoTela,
+      tabelaAberta,
+      filtroOperacao,
+      buscaColetasLista,
+      mtrSemColetaSelecionado,
+      mtrPickerAberto,
+      filtroMtr,
+      sp: searchParams.toString(),
+    }),
+    [
+      form,
+      secaoPesagemAberta,
+      modoTela,
+      tabelaAberta,
+      filtroOperacao,
+      buscaColetasLista,
+      mtrSemColetaSelecionado,
+      mtrPickerAberto,
+      filtroMtr,
+      searchParams,
+    ]
+  );
+
+  useSessionObjectDraft({
+    cacheKey: "controle-massa",
+    data: controleMassaDraft,
+    onRestore: (d) => {
+      setForm(d.form);
+      setSecaoPesagemAberta(d.secaoPesagemAberta);
+      setModoTela(d.modoTela);
+      setTabelaAberta(d.tabelaAberta);
+      setFiltroOperacao(d.filtroOperacao);
+      setBuscaColetasLista(d.buscaColetasLista);
+      setMtrSemColetaSelecionado(d.mtrSemColetaSelecionado);
+      setMtrPickerAberto(d.mtrPickerAberto);
+      setFiltroMtr(d.filtroMtr);
+      setSearchParams(new URLSearchParams(d.sp), { replace: true });
+    },
+  });
 
   const podeMutarMassa = cargoPodeLancarPesagem(usuarioCargo);
   const podeEditarOuExcluirColeta = cargoPodeExcluirMtr(usuarioCargo);

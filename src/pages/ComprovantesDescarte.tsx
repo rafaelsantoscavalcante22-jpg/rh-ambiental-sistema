@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSessionPersistedState } from '../lib/usePageSessionPersistence'
 import { Link } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import { supabase } from '../lib/supabase'
@@ -42,10 +43,13 @@ function formatarDataCriacao(iso: string) {
 }
 
 export default function ComprovantesDescarte() {
-  const [filtros, setFiltros] = useState<ComprovanteDescarteFiltros>(FILTROS_VAZIOS)
+  const [filtros, setFiltros] = useSessionPersistedState<ComprovanteDescarteFiltros>(
+    'filtros-rascunho',
+    FILTROS_VAZIOS
+  )
   const [filtrosAplicados, setFiltrosAplicados] =
-    useState<ComprovanteDescarteFiltros>(FILTROS_VAZIOS)
-  const [page, setPage] = useState(1)
+    useSessionPersistedState<ComprovanteDescarteFiltros>('filtros-aplicados', FILTROS_VAZIOS)
+  const [page, setPage] = useSessionPersistedState('lista-page', 1)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [linhas, setLinhas] = useState<ComprovanteDescarteRow[]>([])

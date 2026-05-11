@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useSessionObjectDraft } from '../lib/usePageSessionPersistence'
 import { Link, useSearchParams } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import { supabase } from '../lib/supabase'
@@ -80,6 +81,25 @@ export default function FaturamentoOperacional() {
 
   const [modalAberto, setModalAberto] = useState(false)
   const [modalColetaId, setModalColetaId] = useState<string | null>(null)
+
+  const faturamentoOperDraft = useMemo(
+    () => ({
+      modalAberto,
+      modalColetaId,
+      sp: searchParams.toString(),
+    }),
+    [modalAberto, modalColetaId, searchParams]
+  )
+
+  useSessionObjectDraft({
+    cacheKey: 'faturamento-operacional',
+    data: faturamentoOperDraft,
+    onRestore: (d) => {
+      setModalAberto(d.modalAberto)
+      setModalColetaId(d.modalColetaId)
+      setSearchParams(new URLSearchParams(d.sp), { replace: true })
+    },
+  })
 
   const podeMutar = cargoPodeEmitirFaturamento(cargo)
 

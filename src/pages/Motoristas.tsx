@@ -6,6 +6,7 @@ import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from "../lib/coletasQueryLimits"
 import { sanitizeIlikePattern } from "../lib/sanitizeIlike";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { limparSessionDraftKey, useCadastroFormDraft } from "../lib/useCadastroFormDraft";
+import { useSessionPersistedState } from "../lib/usePageSessionPersistence";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { RgReportPdfIcon } from "../components/ui/RgReportPdfIcon";
@@ -120,9 +121,9 @@ const MOTORISTAS_CADASTRO_DRAFT_KEY = "rg-ambiental-motoristas-cadastro-draft";
 export default function Motoristas() {
   const [motoristas, setMotoristas] = useState<Motorista[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busca, setBusca] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [busca, setBusca] = useSessionPersistedState("lista-busca", "");
+  const [page, setPage] = useSessionPersistedState("lista-page", 1);
+  const [pageSize, setPageSize] = useSessionPersistedState("lista-page-size", DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const buscaDebounced = useDebouncedValue(busca, 400);
   const [mostrarCadastro, setMostrarCadastro] = useState(false);
@@ -262,8 +263,8 @@ export default function Motoristas() {
             "Nº CNH",
             "Categoria",
             "Validade CNH",
-            "Possui NOPP?",
-            "Validade NOPP",
+            "Possui MOPP?",
+            "Validade MOPP",
             "Cadastrado em",
             "CNH (foto)",
           ],
@@ -827,7 +828,7 @@ export default function Motoristas() {
                         marginBottom: "10px",
                       }}
                     >
-                      NOPP
+                      MOPP
                     </div>
                     <div
                       style={{
@@ -861,7 +862,7 @@ export default function Motoristas() {
                             cursor: "pointer",
                           }}
                         />
-                        Possui NOPP?
+                        Possui MOPP?
                       </label>
                       <div
                         style={{
@@ -873,7 +874,7 @@ export default function Motoristas() {
                         }}
                       >
                         <span style={{ fontSize: "12px", fontWeight: 700, color: "#64748b" }}>
-                          Data de validade do NOPP
+                          Data de validade do MOPP
                         </span>
                         <input
                           type="date"
@@ -883,8 +884,8 @@ export default function Motoristas() {
                           disabled={!form.possui_nopp}
                           title={
                             form.possui_nopp
-                              ? "Data de validade do NOPP"
-                              : 'Marque "Possui NOPP?" para informar a validade'
+                              ? "Data de validade do MOPP"
+                              : 'Marque "Possui MOPP?" para informar a validade'
                           }
                           style={{
                             ...inputStyle,
@@ -1035,8 +1036,8 @@ export default function Motoristas() {
                       <th style={thStyle}>Nº CNH</th>
                       <th style={thStyle}>Categoria</th>
                       <th style={thStyle}>Validade CNH</th>
-                      <th style={thStyle}>NOPP</th>
-                      <th style={thStyle}>Val. NOPP</th>
+                      <th style={thStyle}>MOPP</th>
+                      <th style={thStyle}>Val. MOPP</th>
                       <th style={thStyle}>Ações</th>
                     </tr>
                   </thead>
@@ -1327,9 +1328,9 @@ export default function Motoristas() {
                 <dd style={{ margin: 0, color: "#1f2937" }}>{fichaMotorista.cnh_categoria || "—"}</dd>
                 <dt style={{ color: "#64748b", fontWeight: 700 }}>Validade CNH</dt>
                 <dd style={{ margin: 0, color: "#1f2937" }}>{formatarData(fichaMotorista.cnh_validade)}</dd>
-                <dt style={{ color: "#64748b", fontWeight: 700 }}>Possui NOPP?</dt>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Possui MOPP?</dt>
                 <dd style={{ margin: 0, color: "#1f2937" }}>{simOuNao(!!fichaMotorista.possui_nopp)}</dd>
-                <dt style={{ color: "#64748b", fontWeight: 700 }}>Validade NOPP</dt>
+                <dt style={{ color: "#64748b", fontWeight: 700 }}>Validade MOPP</dt>
                 <dd style={{ margin: 0, color: "#1f2937" }}>
                   {fichaMotorista.possui_nopp ? formatarData(fichaMotorista.nopp_validade) : "—"}
                 </dd>

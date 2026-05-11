@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { clearSessionPageBlob, useSessionObjectDraft } from '../lib/usePageSessionPersistence'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import { supabase } from '../lib/supabase'
@@ -320,6 +321,21 @@ export default function ComprovanteDescarteForm() {
   const [coletasOp, setColetasOp] = useState<ColetaVinculoResumo[]>([])
   const [mtrsOp, setMtrsOp] = useState<MtrVinculoResumo[]>([])
 
+  const formComprovanteRestauradoRef = useRef(false)
+  const comprovanteDraftKey = idParam ? `comprovante-descarte:${idParam}` : 'comprovante-descarte:pending'
+  const comprovanteFormDraft = useMemo(() => ({ form, aba }), [form, aba])
+
+  useSessionObjectDraft({
+    cacheKey: comprovanteDraftKey,
+    data: comprovanteFormDraft,
+    persist: Boolean(idParam) && !isNovo && !loading,
+    onRestore: (d) => {
+      formComprovanteRestauradoRef.current = true
+      setForm(d.form)
+      setAba(d.aba)
+    },
+  })
+
   const comprovanteId = baseRow?.id ?? idParam ?? ''
 
   useEffect(() => {
@@ -378,7 +394,9 @@ export default function ComprovanteDescarteForm() {
         return
       }
       setBaseRow(data)
-      setForm(rowParaForm(data))
+      if (!formComprovanteRestauradoRef.current) {
+        setForm(rowParaForm(data))
+      }
       setLoading(false)
     },
     []
@@ -438,6 +456,7 @@ export default function ComprovanteDescarteForm() {
       return
     }
     await carregarId(baseRow.id)
+    clearSessionPageBlob(user.id, `comprovante-descarte:${baseRow.id}`)
   }
 
   async function aoVincularColeta(cid: string) {

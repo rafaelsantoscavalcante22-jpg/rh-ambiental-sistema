@@ -11,6 +11,7 @@ import {
 import { cargoPodeEmitirFaturamento } from '../lib/workflowPermissions'
 import { registrarEnvioNfContaReceber } from '../services/financeiroReceber'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
+import { useSessionObjectDraft } from '../lib/usePageSessionPersistence'
 
 type ClienteLista = {
   id: string
@@ -100,6 +101,31 @@ export default function EnvioNF() {
     { referencia_coleta_id: string; numero: string; saldoFmt: string }[]
   >([])
   const [coletasComContaMarcadas, setColetasComContaMarcadas] = useState<Set<string>>(new Set())
+
+  const envioNfDraft = useMemo(
+    () => ({
+      busca,
+      somenteComEmail,
+      observacao,
+      envioModo,
+      selecionados: [...selecionados],
+      coletasComContaMarcadas: [...coletasComContaMarcadas],
+    }),
+    [busca, somenteComEmail, observacao, envioModo, selecionados, coletasComContaMarcadas]
+  )
+
+  useSessionObjectDraft({
+    cacheKey: 'envio-nf',
+    data: envioNfDraft,
+    onRestore: (d) => {
+      setBusca(d.busca)
+      setSomenteComEmail(d.somenteComEmail)
+      setObservacao(d.observacao)
+      setEnvioModo(d.envioModo)
+      setSelecionados(new Set(d.selecionados))
+      setColetasComContaMarcadas(new Set(d.coletasComContaMarcadas))
+    },
+  })
 
   const podeDisparar = cargoPodeEmitirFaturamento(usuarioCargo)
   const clienteParam = useMemo(() => (searchParams.get('cliente') || '').trim(), [searchParams])

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from
 import MainLayout from '../layouts/MainLayout'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../lib/coletasQueryLimits'
 import { limparSessionDraftKey, useCadastroFormDraft } from '../lib/useCadastroFormDraft'
+import { useSessionPersistedState } from '../lib/usePageSessionPersistence'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
 import {
   formatarErroEdgeFunction,
@@ -114,14 +115,20 @@ export default function Usuarios() {
 
   const [form, setForm] = useState<FormState>(estadoInicialFormulario)
   const [formEdicao, setFormEdicao] = useState<FormEdicaoState>(estadoInicialEdicao)
-  const [busca, setBusca] = useState('')
+  const [busca, setBusca] = useSessionPersistedState('lista-busca', '')
   const buscaDebounced = useDebouncedValue(busca, 280)
-  const [paginaUsuarios, setPaginaUsuarios] = useState(0)
-  const [itensPorPagina, setItensPorPagina] = useState(DEFAULT_PAGE_SIZE)
+  const [paginaUsuarios, setPaginaUsuarios] = useSessionPersistedState('lista-pagina', 0)
+  const [itensPorPagina, setItensPorPagina] = useSessionPersistedState(
+    'lista-page-size',
+    DEFAULT_PAGE_SIZE
+  )
 
   const [meuEmail, setMeuEmail] = useState<string | null>(null)
   const [modalPaginasUsuario, setModalPaginasUsuario] = useState<Usuario | null>(null)
-  const [modoPaginas, setModoPaginas] = useState<'cargo' | 'lista'>('cargo')
+  const [modoPaginas, setModoPaginas] = useSessionPersistedState<'cargo' | 'lista'>(
+    'modal-paginas-modo',
+    'cargo'
+  )
   const [rotasMarcadas, setRotasMarcadas] = useState<Set<string>>(() => new Set())
   const [salvandoPaginas, setSalvandoPaginas] = useState(false)
 

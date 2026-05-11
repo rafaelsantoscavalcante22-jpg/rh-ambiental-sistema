@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSessionPersistedState } from '../lib/usePageSessionPersistence'
 import { Link } from 'react-router-dom'
 import MainLayout from '../layouts/MainLayout'
 import { supabase } from '../lib/supabase'
@@ -114,14 +115,17 @@ export default function FinanceiroContasPagar() {
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [cargo, setCargo] = useState<string | null>(null)
-  const [filtroStatus, setFiltroStatus] = useState<'' | StatusExibicao>('')
-  const [vencDe, setVencDe] = useState('')
-  const [vencAte, setVencAte] = useState('')
-  const [busca, setBusca] = useState('')
+  const [filtroStatus, setFiltroStatus] = useSessionPersistedState<'' | StatusExibicao>(
+    'filtro-status',
+    ''
+  )
+  const [vencDe, setVencDe] = useSessionPersistedState('venc-de', '')
+  const [vencAte, setVencAte] = useSessionPersistedState('venc-ate', '')
+  const [busca, setBusca] = useSessionPersistedState('busca', '')
 
-  const [formOpen, setFormOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState<FormState>(formVazio)
+  const [formOpen, setFormOpen] = useSessionPersistedState('form-aberto', false)
+  const [editingId, setEditingId] = useSessionPersistedState<string | null>('editing-id', null)
+  const [form, setForm] = useSessionPersistedState<FormState>('form-rascunho', formVazio)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [salvando, setSalvando] = useState(false)
 
