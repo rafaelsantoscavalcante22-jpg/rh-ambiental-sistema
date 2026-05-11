@@ -393,6 +393,7 @@ export default function MTR() {
 
   useSessionObjectDraft({
     cacheKey: 'mtr',
+    debounceMs: 200,
     data: mtrUiDraft,
     onRestore: (d) => {
       setShowForm(d.showForm)
@@ -504,8 +505,13 @@ export default function MTR() {
     void carregarCargo()
   }, [])
 
+  /** Só limpa o formulário quando o utilizador fecha o painel — não na montagem inicial (senão apaga o rascunho restaurado). */
+  const mtrFormEstavaAbertoRef = useRef(false)
   useEffect(() => {
-    if (!showForm && !editingId) {
+    const formAberto = showForm || editingId != null
+    const estavaAberto = mtrFormEstavaAbertoRef.current
+    mtrFormEstavaAbertoRef.current = formAberto
+    if (estavaAberto && !formAberto) {
       queueMicrotask(() => {
         resetForm()
       })
