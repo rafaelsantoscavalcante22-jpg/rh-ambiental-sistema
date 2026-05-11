@@ -4,9 +4,7 @@ import {
   useMemo,
   useState,
   type CSSProperties,
-  type Dispatch,
   type FormEvent,
-  type SetStateAction,
 } from 'react'
 import MainLayout from '../layouts/MainLayout'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../lib/coletasQueryLimits'
@@ -100,7 +98,7 @@ type UsuariosCadastroDraftPayload =
 
 type PaginasPermitidasFieldsProps = {
   modoPaginas: 'cargo' | 'lista'
-  setModoPaginas: Dispatch<SetStateAction<'cargo' | 'lista'>>
+  setModoPaginas: (mode: 'cargo' | 'lista') => void
   rotasMarcadas: Set<string>
   toggleRotaMarcada: (path: string) => void
   disabled?: boolean
