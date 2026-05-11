@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeadersFor, handleCorsOptions } from "../_shared/cors.ts";
+import { perfilPodeEditarUsuarios } from "../_shared/cargoPermissoes.ts";
 
 type Body = {
   id?: string;
@@ -115,12 +116,9 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const cargoEditor = String(perfilAdmin.cargo || "").trim().toLowerCase();
-    const ehAdministrador = cargoEditor === "administrador";
-    const ehDiretoria = cargoEditor === "diretoria" || cargoEditor === "diretor";
-    if (!ehAdministrador && !ehDiretoria) {
+    if (!perfilPodeEditarUsuarios(perfilAdmin.cargo)) {
       return jsonResponse(req, 403, {
-        error: "Apenas Administrador ou Diretoria podem editar usuários.",
+        error: "Sem permissão para editar utilizadores (Administrador, Desenvolvedor, Diretoria ou Financeiro).",
       });
     }
 

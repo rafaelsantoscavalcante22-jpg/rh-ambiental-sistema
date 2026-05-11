@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import { Suspense, useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
+import { NEXUS_CARGOS_POR_ROTA } from './lib/nexusCargosPorRota'
 import { usuarioPodeAcessarRota } from './lib/paginasSistema'
 import { ChatFloatProvider } from './contexts/ChatFloatContext'
 import { PerfilUsuarioProvider, type UsuarioPerfilApp } from './contexts/PerfilUsuarioContext'
@@ -126,21 +127,6 @@ function RedirectConferenciaOperacionalParaControleMassa() {
   const { search } = useLocation()
   return <Navigate to={`/controle-massa${search}`} replace />
 }
-
-/**
- * Mesmos perfis do Dashboard: o menu «Seguimento da coleta» deve abrir para todos.
- * Quem pode editar em cada etapa continua definido em workflowPermissions / UI.
- */
-const ROLES_SEGUIMENTO_COLETA = [
-  'Administrador',
-  'Operacional',
-  'Logística',
-  'Balanceiro',
-  'Diretoria',
-  'Faturamento',
-  'Financeiro',
-  'Visualizador',
-] as const
 
 function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
@@ -275,16 +261,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[
-                    'Administrador',
-                    'Operacional',
-                    'Logística',
-                    'Balanceiro',
-                    'Diretoria',
-                    'Faturamento',
-                    'Financeiro',
-                    'Visualizador',
-                  ]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/dashboard']]}
                 >
                   <Dashboard />
                 </ProtectedRoute>
@@ -298,16 +275,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[
-                    'Administrador',
-                    'Operacional',
-                    'Logística',
-                    'Balanceiro',
-                    'Diretoria',
-                    'Faturamento',
-                    'Financeiro',
-                    'Visualizador',
-                  ]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/clientes']]}
                 >
                   <Clientes />
                 </ProtectedRoute>
@@ -321,16 +289,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[
-                    'Administrador',
-                    'Operacional',
-                    'Logística',
-                    'Balanceiro',
-                    'Diretoria',
-                    'Faturamento',
-                    'Financeiro',
-                    'Visualizador',
-                  ]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/pos-venda']]}
                 >
                   <PosVenda />
                 </ProtectedRoute>
@@ -344,16 +303,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[
-                    'Administrador',
-                    'Operacional',
-                    'Logística',
-                    'Balanceiro',
-                    'Diretoria',
-                    'Faturamento',
-                    'Financeiro',
-                    'Visualizador',
-                  ]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/motoristas']]}
                 >
                   <Motoristas />
                 </ProtectedRoute>
@@ -367,17 +317,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[
-                    'Administrador',
-                    'Operacional',
-                    'Logística',
-                    'Balanceiro',
-                    'Diretoria',
-                    'Faturamento',
-                    'Financeiro',
-                    'Comercial',
-                    'Visualizador',
-                  ]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/representantes-rg']]}
                 >
                   <RepresentantesRG />
                 </ProtectedRoute>
@@ -391,16 +331,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[
-                    'Administrador',
-                    'Operacional',
-                    'Logística',
-                    'Balanceiro',
-                    'Diretoria',
-                    'Faturamento',
-                    'Financeiro',
-                    'Visualizador',
-                  ]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/caminhoes']]}
                 >
                   <Caminhoes />
                 </ProtectedRoute>
@@ -414,7 +345,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Operacional', 'Visualizador']}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/programacao']]}
                 >
                   <Programacao />
                 </ProtectedRoute>
@@ -428,16 +359,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[
-                    'Administrador',
-                    'Operacional',
-                    'Logística',
-                    'Balanceiro',
-                    'Diretoria',
-                    'Faturamento',
-                    'Financeiro',
-                    'Visualizador',
-                  ]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/controle-massa']]}
                 >
                   <RedirectColetasParaControleMassa />
                 </ProtectedRoute>
@@ -451,7 +373,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Operacional', 'Visualizador']}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/mtr']]}
                 >
                   <MTR />
                 </ProtectedRoute>
@@ -465,7 +387,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Operacional', 'Visualizador']}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/mtr']]}
                 >
                   <MTR />
                 </ProtectedRoute>
@@ -479,7 +401,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Operacional', 'Logística', 'Balanceiro', 'Visualizador']}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/controle-massa']]}
                 >
                   <ControleMassa />
                 </ProtectedRoute>
@@ -493,7 +415,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Operacional', 'Logística', 'Balanceiro', 'Visualizador']}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/controle-massa']]}
                 >
                   <ControleMassa />
                 </ProtectedRoute>
@@ -507,7 +429,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/comprovantes-descarte']]}
                 >
                   <ComprovantesDescarte />
                 </ProtectedRoute>
@@ -521,7 +443,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/comprovantes-descarte']]}
                 >
                   <ComprovanteDescarteForm />
                 </ProtectedRoute>
@@ -535,7 +457,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/comprovantes-descarte']]}
                 >
                   <ComprovanteDescarteForm />
                 </ProtectedRoute>
@@ -549,7 +471,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/comprovantes-descarte']]}
                 >
                   <ComprovanteDescarteForm />
                 </ProtectedRoute>
@@ -563,7 +485,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/checklist-transporte']]}
                 >
                   <ChecklistTransporte />
                 </ProtectedRoute>
@@ -577,7 +499,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/conferencia-transporte']]}
                 >
                   <ConferenciaTransporte />
                 </ProtectedRoute>
@@ -591,7 +513,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/controle-massa']]}
                 >
                   <RedirectConferenciaOperacionalParaControleMassa />
                 </ProtectedRoute>
@@ -605,7 +527,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/ticket-operacional']]}
                 >
                   <TicketOperacional />
                 </ProtectedRoute>
@@ -619,7 +541,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/aprovacao']]}
                 >
                   <AprovacaoDiretoria />
                 </ProtectedRoute>
@@ -633,7 +555,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/faturamento']]}
                 >
                   <FaturamentoOperacional />
                 </ProtectedRoute>
@@ -647,7 +569,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[...ROLES_SEGUIMENTO_COLETA]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/faturamento/regras-preco']]}
                 >
                   <FaturamentoRegrasPreco />
                 </ProtectedRoute>
@@ -661,13 +583,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[
-                    'Administrador',
-                    'Diretoria',
-                    'Financeiro',
-                    'Faturamento',
-                    'Visualizador',
-                  ]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/financeiro']]}
                 >
                   <Financeiro />
                 </ProtectedRoute>
@@ -681,13 +597,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[
-                    'Administrador',
-                    'Diretoria',
-                    'Financeiro',
-                    'Faturamento',
-                    'Visualizador',
-                  ]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/financeiro/contas-receber']]}
                 >
                   <FinanceiroContasReceber />
                 </ProtectedRoute>
@@ -701,13 +611,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[
-                    'Administrador',
-                    'Diretoria',
-                    'Financeiro',
-                    'Faturamento',
-                    'Visualizador',
-                  ]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/financeiro/contas-pagar']]}
                 >
                   <FinanceiroContasPagar />
                 </ProtectedRoute>
@@ -721,7 +625,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Financeiro', 'Faturamento', 'Visualizador']}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/envio-nf']]}
                 >
                   <EnvioNF />
                 </ProtectedRoute>
@@ -735,7 +639,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={['Administrador', 'Diretoria']}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/usuarios']]}
                 >
                   <Usuarios />
                 </ProtectedRoute>
@@ -749,16 +653,7 @@ function App() {
                   session={session}
                   usuario={usuario}
                   carregandoUsuario={carregandoUsuario}
-                  allowedRoles={[
-                    'Administrador',
-                    'Operacional',
-                    'Logística',
-                    'Balanceiro',
-                    'Diretoria',
-                    'Faturamento',
-                    'Financeiro',
-                    'Visualizador',
-                  ]}
+                  allowedRoles={[...NEXUS_CARGOS_POR_ROTA['/chat']]}
                 >
                   <Chat />
                 </ProtectedRoute>

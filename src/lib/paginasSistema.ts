@@ -1,3 +1,5 @@
+import { NEXUS_CARGOS_POR_ROTA } from './nexusCargosPorRota'
+
 /**
  * Página inicial de boas-vindas — sempre acessível (fora da lista `paginas_permitidas`).
  */
@@ -118,67 +120,11 @@ export function rotasCheckboxDesdePaginasGuardadas(paginas: string[] | null | un
   return Array.from(out)
 }
 
-/** Igual a `ROLES_SEGUIMENTO_COLETA` em App-NEXUS.tsx (fluxo de coleta / faturamento). */
-const R_SEGUIMENTO_COLETA = [
-  'Administrador',
-  'Operacional',
-  'Logística',
-  'Balanceiro',
-  'Diretoria',
-  'Faturamento',
-  'Financeiro',
-  'Visualizador',
-] as const
-
-const R_CADASTRO_E_DASHBOARD = [
-  'Administrador',
-  'Operacional',
-  'Logística',
-  'Balanceiro',
-  'Diretoria',
-  'Faturamento',
-  'Financeiro',
-  'Visualizador',
-] as const
-
 /**
- * Cargos autorizados por prefixo de rota — espelha `allowedRoles` em App-NEXUS.tsx.
- * O menu lateral deve filtrar com `cargoPodeAcessarRotaMenu` para não mostrar links que o utilizador
- * não consegue abrir (ex.: Operacional não vê Financeiro mesmo com `paginas_permitidas` vazio).
+ * Cargos autorizados por prefixo de rota — mesma fonte que `App-NEXUS.tsx` (`nexusCargosPorRota.ts`).
  */
 const CARGOS_POR_PREFIXO_ROTA: Record<string, readonly string[]> = {
-  '/dashboard': R_CADASTRO_E_DASHBOARD,
-  '/clientes': R_CADASTRO_E_DASHBOARD,
-  '/motoristas': R_CADASTRO_E_DASHBOARD,
-  '/caminhoes': R_CADASTRO_E_DASHBOARD,
-  '/pos-venda': R_CADASTRO_E_DASHBOARD,
-  '/chat': R_CADASTRO_E_DASHBOARD,
-  '/representantes-rg': [
-    'Administrador',
-    'Operacional',
-    'Logística',
-    'Balanceiro',
-    'Diretoria',
-    'Faturamento',
-    'Financeiro',
-    'Comercial',
-    'Visualizador',
-  ],
-  '/programacao': ['Administrador', 'Operacional', 'Visualizador'],
-  '/mtr': ['Administrador', 'Operacional', 'Visualizador'],
-  '/controle-massa': ['Administrador', 'Operacional', 'Logística', 'Balanceiro', 'Visualizador'],
-  '/comprovantes-descarte': R_SEGUIMENTO_COLETA,
-  '/checklist-transporte': R_SEGUIMENTO_COLETA,
-  '/conferencia-transporte': R_SEGUIMENTO_COLETA,
-  '/ticket-operacional': R_SEGUIMENTO_COLETA,
-  '/aprovacao': R_SEGUIMENTO_COLETA,
-  '/faturamento': R_SEGUIMENTO_COLETA,
-  '/faturamento/regras-preco': R_SEGUIMENTO_COLETA,
-  '/envio-nf': ['Administrador', 'Financeiro', 'Faturamento', 'Visualizador'],
-  '/financeiro': ['Administrador', 'Diretoria', 'Financeiro', 'Faturamento', 'Visualizador'],
-  '/financeiro/contas-receber': ['Administrador', 'Diretoria', 'Financeiro', 'Faturamento', 'Visualizador'],
-  '/financeiro/contas-pagar': ['Administrador', 'Diretoria', 'Financeiro', 'Faturamento', 'Visualizador'],
-  '/usuarios': ['Administrador', 'Diretoria'],
+  ...NEXUS_CARGOS_POR_ROTA,
 }
 
 const PREFIXOS_ROTA_PARA_CARGO = Object.keys(CARGOS_POR_PREFIXO_ROTA).sort(

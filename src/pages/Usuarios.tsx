@@ -18,7 +18,6 @@ import {
 } from '../lib/edgeFunctionErrors'
 import { supabase } from '../lib/supabase'
 import {
-  cargoEhAdministrador,
   cargoPodeCriarOuExcluirUsuario,
   cargoPodeGerirUsuarios,
 } from '../lib/workflowPermissions'
@@ -57,6 +56,7 @@ type FormEdicaoState = {
 const STATUS_DB = ['ativo', 'inativo', 'bloqueado'] as const
 
 const CARGOS = [
+  'Desenvolvedor',
   'Administrador',
   'Operacional',
   'Logística',
@@ -269,8 +269,6 @@ export default function Usuarios() {
   const [rotasMarcadas, setRotasMarcadas] = useState<Set<string>>(() => new Set())
   const [salvandoPaginas, setSalvandoPaginas] = useState(false)
 
-  const souAdministrador = cargoEhAdministrador(meuCargo)
-  void souAdministrador
   /** Rota restrita a Administrador + Diretoria; enquanto o cargo carrega, permite a UI (a Edge Function revalida). */
   const podeGerenciar = meuCargo === null || cargoPodeGerirUsuarios(meuCargo)
   const podeCriarOuExcluir = meuCargo === null || cargoPodeCriarOuExcluirUsuario(meuCargo)

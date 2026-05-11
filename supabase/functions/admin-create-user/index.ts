@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeadersFor, handleCorsOptions } from "../_shared/cors.ts";
+import { perfilPodeCriarOuExcluirUsuarios } from "../_shared/cargoPermissoes.ts";
 
 type CreateUserBody = {
   nome?: string;
@@ -124,9 +125,9 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    if (perfilAdmin.cargo !== "Administrador") {
+    if (!perfilPodeCriarOuExcluirUsuarios(perfilAdmin.cargo)) {
       return jsonResponse(req,403, {
-        error: "Apenas administradores podem criar usuários.",
+        error: "Apenas administradores ou desenvolvedores podem criar usuários.",
       });
     }
 

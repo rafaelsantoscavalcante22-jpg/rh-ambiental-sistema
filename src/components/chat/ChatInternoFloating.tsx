@@ -12,7 +12,7 @@ import {
   chatListarUsuariosAtivos,
   chatMarcarLida,
 } from '../../lib/chat'
-import { cargoEhAdministrador } from '../../lib/workflowPermissions'
+import { cargoEhAdministradorOuDesenvolvedor } from '../../lib/workflowPermissions'
 import { usePerfilUsuario } from '../../contexts/PerfilUsuarioContext'
 import { normalizarPresencaStatus } from '../../lib/presencaStatus'
 import type { ChatConversaLista, ChatMensagem, ChatUsuarioLista } from '../../types/chat'
@@ -88,7 +88,7 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
   const { open, setOpen, pendingUserId, clearPendingUserId } = useChatFloat()
   const { isOnline } = usePresencaAoVivo()
   const { usuario } = usePerfilUsuario()
-  const podeApagarHistoricoChat = cargoEhAdministrador(usuario?.cargo)
+  const podeApagarHistoricoChat = cargoEhAdministradorOuDesenvolvedor(usuario?.cargo)
 
   const fabRef = useRef<HTMLButtonElement | null>(null)
   const [fabPos, setFabPos] = useState<FabPos | null>(() => {
