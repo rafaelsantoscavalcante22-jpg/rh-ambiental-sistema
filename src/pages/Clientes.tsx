@@ -652,6 +652,17 @@ function isMissingMargemLucroPercentualColumnError(
   );
 }
 
+/** Conflito do índice único `uq_clientes_documento_normalizado` — já existe cliente com o mesmo CNPJ/CPF (apenas dígitos). */
+function isDuplicateClienteDocumentoError(
+  error: { message?: string; code?: string } | null | undefined
+): boolean {
+  if (!error) return false;
+  const code = String(error.code ?? "");
+  const msg = (error.message ?? "").toLowerCase();
+  if (code === "23505" && msg.includes("uq_clientes_documento_normalizado")) return true;
+  return msg.includes("uq_clientes_documento_normalizado");
+}
+
 /** Rascunho do cadastro: evita perder dados se a aba for recarregada ou descartada pelo navegador. */
 const CLIENTES_CADASTRO_DRAFT_KEY = "rg-ambiental-clientes-cadastro-draft";
 
@@ -1963,13 +1974,52 @@ export default function Clientes() {
         code: error.code,
       });
 
+      setSalvando(false);
+
+      // CNPJ/CPF já cadastrado: oferece abrir o cliente existente em vez de mostrar a mensagem crua do Postgres.
+      if (isDuplicateClienteDocumentoError(error)) {
+        const docDigitos = normalizarDocumentoParaArmazenar(form.cnpj);
+        const docFormatado = formatarCNPJ(form.cnpj) || form.cnpj;
+        const abrirExistente = window.confirm(
+          `Já existe um cliente cadastrado com o CNPJ/CPF ${docFormatado}.\n\n` +
+            `Não é possível duplicar o mesmo documento.\n\n` +
+            `Deseja abrir o cadastro existente para revisar/editar?`
+        );
+        if (abrirExistente && docDigitos) {
+          try {
+            const { data: existente } = await supabase
+              .from("clientes")
+              .select("id")
+              .filter("cnpj", "ilike", `%${docDigitos.slice(0, 4)}%`)
+              .limit(50);
+            const lista = (existente ?? []) as Array<{ id: string; cnpj?: string | null }>;
+            const match = lista.find(
+              (c) => normalizarDocumentoParaArmazenar(String(c.cnpj ?? "")) === docDigitos
+            );
+            if (match) {
+              limparFormulario();
+              setMostrarCadastro(false);
+              setBusca(docFormatado);
+              setSucesso("");
+              await handleEditar({ id: match.id } as Cliente);
+              return;
+            }
+          } catch (err) {
+            console.warn("Falha ao localizar cliente existente por documento:", err);
+          }
+          // Fallback: apenas filtra a lista pelo CNPJ para o utilizador encontrar manualmente.
+          setBusca(docFormatado);
+          setMostrarCadastro(false);
+        }
+        return;
+      }
+
       alert(
         `Erro ao salvar cliente.\n\nMensagem: ${error.message}${
           error.details ? `\nDetalhes: ${error.details}` : ""
         }`
       );
 
-      setSalvando(false);
       return;
     }
 
