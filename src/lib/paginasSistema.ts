@@ -88,12 +88,98 @@ function normalizarPath(pathname: string): string {
   return p || '/'
 }
 
+/** Igual a `ROLES_SEGUIMENTO_COLETA` em App-NEXUS.tsx (fluxo de coleta / faturamento). */
+const R_SEGUIMENTO_COLETA = [
+  'Administrador',
+  'Operacional',
+  'Logística',
+  'Balanceiro',
+  'Diretoria',
+  'Faturamento',
+  'Financeiro',
+  'Visualizador',
+] as const
+
+const R_CADASTRO_E_DASHBOARD = [
+  'Administrador',
+  'Operacional',
+  'Logística',
+  'Balanceiro',
+  'Diretoria',
+  'Faturamento',
+  'Financeiro',
+  'Visualizador',
+] as const
+
+/**
+ * Cargos autorizados por prefixo de rota — espelha `allowedRoles` em App-NEXUS.tsx.
+ * O menu lateral deve filtrar com `cargoPodeAcessarRotaMenu` para não mostrar links que o utilizador
+ * não consegue abrir (ex.: Operacional não vê Financeiro mesmo com `paginas_permitidas` vazio).
+ */
+const CARGOS_POR_PREFIXO_ROTA: Record<string, readonly string[]> = {
+  '/dashboard': R_CADASTRO_E_DASHBOARD,
+  '/clientes': R_CADASTRO_E_DASHBOARD,
+  '/motoristas': R_CADASTRO_E_DASHBOARD,
+  '/caminhoes': R_CADASTRO_E_DASHBOARD,
+  '/pos-venda': R_CADASTRO_E_DASHBOARD,
+  '/chat': R_CADASTRO_E_DASHBOARD,
+  '/representantes-rg': [
+    'Administrador',
+    'Operacional',
+    'Logística',
+    'Balanceiro',
+    'Diretoria',
+    'Faturamento',
+    'Financeiro',
+    'Comercial',
+    'Visualizador',
+  ],
+  '/programacao': ['Administrador', 'Operacional', 'Visualizador'],
+  '/mtr': ['Administrador', 'Operacional', 'Visualizador'],
+  '/controle-massa': ['Administrador', 'Operacional', 'Logística', 'Balanceiro', 'Visualizador'],
+  '/comprovantes-descarte': R_SEGUIMENTO_COLETA,
+  '/checklist-transporte': R_SEGUIMENTO_COLETA,
+  '/conferencia-transporte': R_SEGUIMENTO_COLETA,
+  '/ticket-operacional': R_SEGUIMENTO_COLETA,
+  '/aprovacao': R_SEGUIMENTO_COLETA,
+  '/faturamento': R_SEGUIMENTO_COLETA,
+  '/faturamento/regras-preco': R_SEGUIMENTO_COLETA,
+  '/envio-nf': ['Administrador', 'Financeiro', 'Faturamento', 'Visualizador'],
+  '/financeiro': ['Administrador', 'Diretoria', 'Financeiro', 'Faturamento', 'Visualizador'],
+  '/financeiro/contas-receber': ['Administrador', 'Diretoria', 'Financeiro', 'Faturamento', 'Visualizador'],
+  '/financeiro/contas-pagar': ['Administrador', 'Diretoria', 'Financeiro', 'Faturamento', 'Visualizador'],
+  '/usuarios': ['Administrador', 'Diretoria'],
+}
+
+const PREFIXOS_ROTA_PARA_CARGO = Object.keys(CARGOS_POR_PREFIXO_ROTA).sort(
+  (a, b) => normalizarPath(b).length - normalizarPath(a).length
+)
+
+/**
+ * Indica se o cargo pode aceder à rota segundo as regras do `App` (menu e CTAs).
+ * Prefixo mais longo ganha (ex.: `/financeiro/contas-receber` antes de `/financeiro`).
+ */
+export function cargoPodeAcessarRotaMenu(cargo: string | null | undefined, pathname: string): boolean {
+  const c = String(cargo ?? '').trim()
+  if (!c) return false
+  const path = normalizarPath(pathname)
+  for (const key of PREFIXOS_ROTA_PARA_CARGO) {
+    const k = normalizarPath(key)
+    if (path === k || path.startsWith(`${k}/`)) {
+      const lista = CARGOS_POR_PREFIXO_ROTA[key]
+      return lista.includes(c)
+    }
+  }
+  return true
+}
+
 /**
  * Regras (alinhadas ao documento de cargos):
  * - Página `/bem-vindo` é sempre acessível.
  * - E-mails de gestão (bypass) ignoram qualquer restrição.
  * - Cargo `Visualizador` exige `paginas_permitidas` explícita; sem lista, só vê `/bem-vindo`.
- * - Demais cargos: lista vazia/nula = sem filtro extra (regra por cargo no `App.tsx`).
+ * - Demais cargos: lista vazia/nula = sem filtro extra por **lista de páginas** (o cargo continua a ser
+ *   validado nas rotas em `App.tsx` e no menu com `cargoPodeAcessarRotaMenu`).
  *   Lista preenchida = só os prefixos listados.
  */
 export function usuarioPodeAcessarRota(usuario: UsuarioComPaginas, pathname: string): boolean {
@@ -124,7 +210,12 @@ export function labelParaPath(path: string): string {
 /** Primeira rota operacional a que o utilizador tem acesso (para CTAs na página inicial). */
 export function primeiraRotaOperacionalPermitida(usuario: UsuarioComPaginas): string | null {
   for (const { path } of ROTAS_SISTEMA) {
-    if (usuarioPodeAcessarRota(usuario, path)) return path
+    if (
+      usuarioPodeAcessarRota(usuario, path) &&
+      cargoPodeAcessarRotaMenu(usuario.cargo, path)
+    ) {
+      return path
+    }
   }
   return null
 }

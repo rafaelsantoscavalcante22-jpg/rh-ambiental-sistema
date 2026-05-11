@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  cargoPodeAcessarRotaMenu,
   emailPodeDefinirPaginasPorUsuario,
   pathEstaNaListaValida,
   usuarioPodeAcessarRota,
@@ -67,5 +68,17 @@ describe('paginasSistema', () => {
     expect(pathEstaNaListaValida('/faturamento/regras-preco')).toBe(true)
     expect(pathEstaNaListaValida('/financeiro/contas-receber')).toBe(true)
     expect(pathEstaNaListaValida('/financeiro/contas-pagar')).toBe(true)
+  })
+
+  it('cargoPodeAcessarRotaMenu: Operacional não acede a Financeiro (alinhado ao App)', () => {
+    expect(cargoPodeAcessarRotaMenu('Operacional', '/financeiro')).toBe(false)
+    expect(cargoPodeAcessarRotaMenu('Operacional', '/financeiro/contas-receber')).toBe(false)
+    expect(cargoPodeAcessarRotaMenu('Operacional', '/clientes')).toBe(true)
+    expect(cargoPodeAcessarRotaMenu('Operacional', '/mtr/abc')).toBe(true)
+  })
+
+  it('cargoPodeAcessarRotaMenu: Financeiro e Diretoria acedem a rotas financeiras', () => {
+    expect(cargoPodeAcessarRotaMenu('Financeiro', '/financeiro')).toBe(true)
+    expect(cargoPodeAcessarRotaMenu('Diretoria', '/financeiro/contas-pagar')).toBe(true)
   })
 })
