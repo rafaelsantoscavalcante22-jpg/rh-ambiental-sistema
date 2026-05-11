@@ -43,17 +43,23 @@ type FormEdicaoState = {
 
 const STATUS_DB = ['ativo', 'inativo', 'bloqueado'] as const
 
-const CARGOS = [
+const CARGOS_UI = [
+  'Desenvolvedor',
   'Administrador',
   'Operacional',
   'Logística',
-  'Balanceiro',
-  'Diretoria',
-  'Faturamento',
   'Financeiro',
   'Comercial',
-  'Visualizador',
-]
+] as const
+
+function cargosParaDropdown(cargoAtual: string | null | undefined): string[] {
+  const c = (cargoAtual ?? '').trim()
+  const base: string[] = [...CARGOS_UI]
+  if (c && !base.includes(c)) {
+    return [c, ...base]
+  }
+  return base
+}
 
 const estadoInicialFormulario: FormState = {
   nome: '',
@@ -709,7 +715,7 @@ export default function Usuarios() {
                 onChange={atualizarCampo}
                 style={inputStyle}
               >
-                {CARGOS.map((cargo) => (
+                {cargosParaDropdown(form.cargo).map((cargo) => (
                   <option key={cargo} value={cargo}>
                     {cargo}
                   </option>
@@ -1007,7 +1013,7 @@ export default function Usuarios() {
                   onChange={atualizarCampoEdicao}
                   style={inputStyle}
                 >
-                  {CARGOS.map((cargo) => (
+                  {cargosParaDropdown(formEdicao.cargo).map((cargo) => (
                     <option key={cargo} value={cargo}>
                       {cargo}
                     </option>
