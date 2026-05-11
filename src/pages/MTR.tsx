@@ -11,6 +11,7 @@ import {
 import { isBenignSupabaseFetchError } from '../lib/supabaseErrors'
 import { cargoPodeEditarMtr } from '../lib/workflowPermissions'
 import { BRAND_LOGO_MARK } from '../lib/brandLogo'
+import ProgramacaoCalendarPicker from '../components/mtr/ProgramacaoCalendarPicker'
 
 type MTRStatus = 'Rascunho' | 'Emitido' | 'Cancelado'
 
@@ -2960,20 +2961,17 @@ export default function MTR() {
                 <form onSubmit={handleSave}>
                   <div className="form-grid">
                     <div className="field">
-                      <label>Programação vinculada</label>
-                      <select
-                        value={form.programacao_id || ''}
-                        onChange={(e) => void handleProgramacaoChange(e.target.value)}
-                      >
-                        <option value="">Selecione uma programação</option>
-                        {eligibleProgramacoes.map((programacao) => (
-                          <option key={programacao.id} value={programacao.id}>
-                            {getProgramacaoLabel(programacao)}
-                          </option>
-                        ))}
-                      </select>
+                      <label htmlFor="mtr-programacao-calendar">Programação vinculada</label>
+                      <ProgramacaoCalendarPicker
+                        id="mtr-programacao-calendar"
+                        value={form.programacao_id}
+                        options={eligibleProgramacoes}
+                        onChange={(id) => void handleProgramacaoChange(id)}
+                        getLabel={getProgramacaoLabel}
+                        placeholder="Selecione a data da programação"
+                      />
                       <span className="helper">
-                        Aqui é o início correto do fluxo. A coleta será criada depois a partir desta MTR.
+                        Abra o calendário, clique no dia que tem programação (dias destacados em verde, com o número de programações no canto) e escolha uma na lista que aparece. Aqui é o início correto do fluxo — a coleta será criada depois a partir desta MTR.
                       </span>
                     </div>
 
