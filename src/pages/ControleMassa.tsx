@@ -772,7 +772,7 @@ export default function ControleMassa() {
           .select("id, numero, cliente, tipo_residuo, status, created_at")
           .order("created_at", { ascending: false })
           .limit(300),
-        queryColetasListaFluxoControle(3000),
+        queryColetasListaFluxoControle(500),
         supabase
           .from("controle_massa")
           .select("coleta_id")

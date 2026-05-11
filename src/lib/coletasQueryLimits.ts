@@ -2,7 +2,7 @@
  * Teto de linhas para listas que ordenam por `created_at` desc.
  * Evita transferir a tabela `coletas` inteira (principal custo em Dashboard / Financeiro).
  */
-export const COLETAS_LIST_MAX_ROWS = 8000
+export const COLETAS_LIST_MAX_ROWS = 2000
 
 /** Dropdowns de coleta (Faturamento, Aprovação, etc.) — lista com colunas enxutas. */
 export const COLETAS_DROPDOWN_MAX_ROWS = 2000

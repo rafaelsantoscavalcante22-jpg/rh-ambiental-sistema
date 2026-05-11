@@ -75,16 +75,35 @@ export async function queryColetasListaFluxo(limit = 500) {
 
 /**
  * Mesma ordem que `queryColetasListaFluxo`, mas com select enxuto para a lista do Controle de Massa.
+ * Filtra por data (últimos 120 dias) e exclui finalizadas/canceladas para reduzir volume na rede.
+ * O Controle de Massa só opera em coletas operacionais recentes — histórico fica em outros relatórios.
  */
 export async function queryColetasListaFluxoControle(limit: number) {
+  const dataCorte = new Date()
+  dataCorte.setDate(dataCorte.getDate() - 120)
+  const dataCorteIso = dataCorte.toISOString()
+
   const primary = await supabase
     .from('coletas')
     .select(COLETAS_SELECT_CONTROLE_LISTA)
+    .gte('created_at', dataCorteIso)
+    .not('fluxo_status', 'in', '("FINALIZADO","CANCELADA","FATURADO_CONCLUIDO")')
     .order('created_at', { ascending: false })
     .limit(limit)
 
   if (!primary.error) return primary
 
+  // fallback sem filtros de status (coluna pode não existir no remoto)
+  const semFiltroStatus = await supabase
+    .from('coletas')
+    .select(COLETAS_SELECT_CONTROLE_LISTA)
+    .gte('created_at', dataCorteIso)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (!semFiltroStatus.error) return semFiltroStatus
+
+  // fallback por id sem filtro de data
   const byId = await supabase
     .from('coletas')
     .select(COLETAS_SELECT_CONTROLE_LISTA)

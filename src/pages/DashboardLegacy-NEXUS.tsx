@@ -162,11 +162,16 @@ export default function DashboardLegacy() {
   const [tabPendencias, setTabPendencias] = useState<PendenciaSetorKey>('faturamento')
 
   const carregarDashboard = useCallback(async () => {
+    const dataCorte = new Date()
+    dataCorte.setDate(dataCorte.getDate() - 120)
+    const dataCorteIso = dataCorte.toISOString()
+
     const { data, error } = await supabase
       .from('coletas')
       .select(
         'id, numero, cliente, cliente_id, programacao_id, mtr_id, cidade, tipo_residuo, data_agendada, etapa_operacional, fluxo_status, liberado_financeiro, valor_coleta, status_pagamento, data_vencimento, peso_liquido, created_at'
       )
+      .gte('created_at', dataCorteIso)
       .order('created_at', { ascending: false })
       .limit(COLETAS_LIST_MAX_ROWS)
 

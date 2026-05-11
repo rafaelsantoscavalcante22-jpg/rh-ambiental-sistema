@@ -197,7 +197,13 @@ export function FaturamentoModalRegisto({
     let cancel = false
     queueMicrotask(() => setCarregandoRegras(true))
     void (async () => {
-      const { data, error } = await supabase.from('faturamento_precos_regras').select('*').eq('ativo', true)
+      const { data, error } = await supabase
+        .from('faturamento_precos_regras')
+        .select(
+          'id, cliente_id, tipo_residuo, tipo_servico, valor_por_kg, valor_minimo, valor_fixo, valor_transporte_por_kg, valor_tratamento_por_kg, taxa_adicional_fixa, ativo, updated_at'
+        )
+        .eq('ativo', true)
+        .limit(500)
       if (cancel) return
       if (error) {
         setRegrasPreco([])

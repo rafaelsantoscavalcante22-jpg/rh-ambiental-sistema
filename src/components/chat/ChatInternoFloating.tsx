@@ -424,28 +424,36 @@ export function ChatInternoFloating({ naoLidasBadge }: Props) {
     }
   }, [meuId, open])
 
+  // Canal de mensagens globais: mantemos sempre ativo para tocar notificação mesmo com chat minimizado,
+  // mas usamos um canal leve (só INSERT) e reconectamos apenas quando meuId muda.
+  // A recarga de conversas só ocorre se o chat estiver aberto (openRef.current).
   useEffect(() => {
     if (!meuId) return
 
-    const ch = supabase
-      .channel('chat-float-mensagens-global')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'chat_mensagens' },
-        (payload) => {
-          const row = payload.new as ChatMensagem
-          const uid = meuIdRef.current
-          if (uid && row?.remetente_id && row.remetente_id !== uid) {
-            tocarNotificacao()
+    // Pequeno delay para não abrir imediatamente no mount (aguarda hydration)
+    const tid = window.setTimeout(() => {
+      const ch = supabase
+        .channel('chat-float-mensagens-global')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'chat_mensagens' },
+          (payload) => {
+            const row = payload.new as ChatMensagem
+            const uid = meuIdRef.current
+            if (uid && row?.remetente_id && row.remetente_id !== uid) {
+              tocarNotificacao()
+            }
+            if (openRef.current) void recarregarConversas()
           }
-          if (openRef.current) void recarregarConversas()
-        }
-      )
-      .subscribe()
+        )
+        .subscribe()
 
-    channelListRef.current = ch
+      channelListRef.current = ch
+    }, 2000)
+
     return () => {
-      void ch.unsubscribe()
+      window.clearTimeout(tid)
+      void channelListRef.current?.unsubscribe()
       channelListRef.current = null
     }
   }, [meuId, recarregarConversas, tocarNotificacao])

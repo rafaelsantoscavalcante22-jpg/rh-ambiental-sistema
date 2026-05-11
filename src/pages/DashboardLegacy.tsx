@@ -166,11 +166,18 @@ export default function DashboardLegacy() {
   )
 
   const carregarDashboard = useCallback(async () => {
+    // Coletas dos últimos 120 dias + qualquer coleta não finalizada (pendente de ação).
+    // Isso cobre o operacional ativo sem trazer histórico inteiro (que era até 8000 linhas).
+    const dataCorte = new Date()
+    dataCorte.setDate(dataCorte.getDate() - 120)
+    const dataCorteIso = dataCorte.toISOString()
+
     const { data, error } = await supabase
       .from('coletas')
       .select(
         'id, numero, cliente, cliente_id, programacao_id, mtr_id, cidade, tipo_residuo, data_agendada, etapa_operacional, fluxo_status, liberado_financeiro, valor_coleta, status_pagamento, data_vencimento, peso_liquido, created_at'
       )
+      .gte('created_at', dataCorteIso)
       .order('created_at', { ascending: false })
       .limit(COLETAS_LIST_MAX_ROWS)
 
