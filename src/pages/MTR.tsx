@@ -578,12 +578,32 @@ export default function MTR() {
         )
         .order('created_at', { ascending: false })
         .limit(300),
-      supabase
-        .from('programacoes')
-        .select(
-          'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, frequencia, periodicidade, status_programacao, created_at'
-        )
-        .order('data_programada', { ascending: false }),
+      (async () => {
+        // Supabase PostgREST devolve no máximo 1000 linhas por chamada.
+        // Com coletas fixas semanais geradas, pode haver milhares de programações.
+        // Paginamos em blocos de 1000 e filtramos os últimos 12 meses + futuro.
+        const dataLimite = new Date()
+        dataLimite.setMonth(dataLimite.getMonth() - 12)
+        const dataLimiteStr = dataLimite.toISOString().slice(0, 10)
+
+        const PROG_PAGE = 1000
+        const acc: Programacao[] = []
+        for (let from = 0; from < 10000; from += PROG_PAGE) {
+          const { data, error } = await supabase
+            .from('programacoes')
+            .select(
+              'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, frequencia, periodicidade, status_programacao, created_at'
+            )
+            .neq('status_programacao', 'CANCELADA')
+            .gte('data_programada', dataLimiteStr)
+            .order('data_programada', { ascending: false })
+            .range(from, from + PROG_PAGE - 1)
+          if (error) return { data: acc, error }
+          acc.push(...((data || []) as Programacao[]))
+          if ((data || []).length < PROG_PAGE) break
+        }
+        return { data: acc, error: null }
+      })(),
       supabase
         .from('coletas')
         .select(
