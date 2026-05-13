@@ -279,7 +279,23 @@ function monthRangeIso(yyyyMm: string): { start: string; end: string } {
   }
 }
 
+/** Primeiro dia do mês anterior ao calendário + último dia do mês seguinte (cobre células “fantasma” do grid). */
+function rangeIsoProgramacaoCalendarioMaisVizinhos(mesYYYYMm: string): { ini: string; fim: string } {
+  const prev = addMonthsYyyyMm(mesYYYYMm, -1)
+  const next = addMonthsYyyyMm(mesYYYYMm, 1)
+  const { start: ini } = monthRangeIso(prev)
+  const { end: fim } = monthRangeIso(next)
+  return { ini, fim }
+}
+
 type RelatorioFiltro = 'dia' | 'semana' | 'mes'
+
+type CarregarProgramacoesOpts = {
+  /** Garante que estas datas (YYYY-MM-DD) entrem no intervalo da query. */
+  isoDatasExtras?: string[]
+  /** Após expansão de coleta fixa, recarrega o ano civil desta data (como antes, evita lista vazia). */
+  forcarAnoCalendarioDe?: string
+}
 
 type ProgramacaoRelatorioPrintProps = {
   tituloPeriodo: string
@@ -884,36 +900,94 @@ export default function Programacao() {
     navigate(`/financeiro?${montarParamsFluxo(item).toString()}`)
   }
 
-  const anoCalendario = mesSelecionado.slice(0, 4)
-
-  const carregarDados = useCallback(async () => {
+  const carregarDados = useCallback(async (opts?: CarregarProgramacoesOpts) => {
     try {
       setLoading(true)
       setErro('')
       setSucesso('')
 
-      const { data: clientesData, error: clientesError } = await supabase
-        .from('clientes')
-        .select('id, nome')
-        .order('nome', { ascending: true })
+      let rangeIni = ''
+      let rangeFim = ''
+      if (mesSelecionado.length >= 7) {
+        const cal = rangeIsoProgramacaoCalendarioMaisVizinhos(mesSelecionado)
+        rangeIni = cal.ini
+        rangeFim = cal.fim
+      } else {
+        const y = new Date().getFullYear()
+        rangeIni = `${y}-01-01`
+        rangeFim = `${y}-12-31`
+      }
+
+      if (relatorioAberto) {
+        let rrIni = ''
+        let rrFim = ''
+        if (relatorioFiltro === 'dia') {
+          rrIni = relatorioDiaRef
+          rrFim = relatorioDiaRef
+        } else if (relatorioFiltro === 'semana') {
+          const w = weekRangeMondayFirst(relatorioDiaRef)
+          rrIni = w.start
+          rrFim = w.end
+        } else {
+          const mr = monthRangeIso(relatorioMesRef)
+          rrIni = mr.start
+          rrFim = mr.end
+        }
+        if (rrIni && rrFim) {
+          if (rrIni < rangeIni) rangeIni = rrIni
+          if (rrFim > rangeFim) rangeFim = rrFim
+        }
+      }
+
+      for (const iso of opts?.isoDatasExtras ?? []) {
+        if (iso.length >= 10) {
+          const day = iso.slice(0, 10)
+          if (day < rangeIni) rangeIni = day
+          if (day > rangeFim) rangeFim = day
+        }
+      }
+      const forcarAno = opts?.forcarAnoCalendarioDe
+      if (forcarAno && forcarAno.length >= 4) {
+        const y = forcarAno.slice(0, 4)
+        const jan = `${y}-01-01`
+        const dez = `${y}-12-31`
+        if (jan < rangeIni) rangeIni = jan
+        if (dez > rangeFim) rangeFim = dez
+      }
+
+      const progSelect =
+        'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, periodicidade, programacao_dias_semana, programacao_serie_id, status_programacao, coleta_id, caminhao_id, created_at, criado_por_user_id, criado_por_nome'
+
+      const [
+        { data: clientesData, error: clientesError },
+        { data: caminhoesData, error: caminhoesError },
+        { data: programacoesData, error: programacoesError },
+      ] = await Promise.all([
+        supabase.from('clientes').select('id, nome').order('nome', { ascending: true }),
+        supabase.from('caminhoes').select('id, placa').order('placa', { ascending: true }),
+        supabase
+          .from('programacoes')
+          .select(progSelect)
+          .gte('data_programada', rangeIni)
+          .lte('data_programada', rangeFim)
+          .order('data_programada', { ascending: true }),
+      ])
 
       if (clientesError) {
         console.error('ERRO AO CARREGAR CLIENTES:', clientesError)
         throw clientesError
       }
-
-      const clientesLista = (clientesData || []) as ClienteOption[]
-      setClientes(clientesLista)
-
-      const { data: caminhoesData, error: caminhoesError } = await supabase
-        .from('caminhoes')
-        .select('id, placa')
-        .order('placa', { ascending: true })
-
       if (caminhoesError) {
         console.error('ERRO AO CARREGAR CAMINHÕES:', caminhoesError)
         throw caminhoesError
       }
+      if (programacoesError) {
+        console.error('ERRO AO CARREGAR PROGRAMAÇÕES:', programacoesError)
+        throw programacoesError
+      }
+
+      const clientesLista = (clientesData || []) as ClienteOption[]
+      setClientes(clientesLista)
 
       const caminhoesLista = ((caminhoesData || []) as CaminhaoOption[]).map((c) => ({
         id: c.id,
@@ -921,24 +995,6 @@ export default function Programacao() {
       }))
       setCaminhoes(caminhoesLista)
       const placaPorCaminhaoId = new Map(caminhoesLista.map((c) => [c.id, c.placa]))
-
-      const ano = anoCalendario
-      const rangeIni = `${ano}-01-01`
-      const rangeFim = `${ano}-12-31`
-
-      const { data: programacoesData, error: programacoesError } = await supabase
-        .from('programacoes')
-        .select(
-          'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, periodicidade, programacao_dias_semana, programacao_serie_id, status_programacao, coleta_id, caminhao_id, created_at, criado_por_user_id, criado_por_nome'
-        )
-        .gte('data_programada', rangeIni)
-        .lte('data_programada', rangeFim)
-        .order('data_programada', { ascending: true })
-
-      if (programacoesError) {
-        console.error('ERRO AO CARREGAR PROGRAMAÇÕES:', programacoesError)
-        throw programacoesError
-      }
 
       const progs = (programacoesData || []) as ProgramacaoRow[]
       const idsAutorSemNome = progs
@@ -953,13 +1009,15 @@ export default function Programacao() {
 
       if (progIds.length > 0) {
         const chunks = chunkArray(progIds, 120)
-        for (const ch of chunks) {
-          const [{ data: mtrsData, error: mtrsError }, { data: coletasData, error: coletasError }] =
-            await Promise.all([
+        const chunkResults = await Promise.all(
+          chunks.map((ch) =>
+            Promise.all([
               supabase.from('mtrs').select('id, programacao_id').in('programacao_id', ch),
               supabase.from('coletas').select('id, programacao_id, mtr_id').in('programacao_id', ch),
             ])
-
+          )
+        )
+        for (const [{ data: mtrsData, error: mtrsError }, { data: coletasData, error: coletasError }] of chunkResults) {
           if (mtrsError) {
             console.error('ERRO AO CARREGAR MTRS:', mtrsError)
             throw mtrsError
@@ -1037,7 +1095,13 @@ export default function Programacao() {
     } finally {
       setLoading(false)
     }
-  }, [anoCalendario])
+  }, [
+    mesSelecionado,
+    relatorioAberto,
+    relatorioFiltro,
+    relatorioDiaRef,
+    relatorioMesRef,
+  ])
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -1317,8 +1381,12 @@ export default function Programacao() {
       }
 
       setSucesso('Programação atualizada com sucesso.')
+      const dataSalvaEdicao = formEdicaoModal.dataProgramada
       setFormEdicaoModal(null)
-      await carregarDados()
+      await carregarDados({
+        isoDatasExtras: dataSalvaEdicao ? [dataSalvaEdicao] : undefined,
+        forcarAnoCalendarioDe: expandir ? dataSalvaEdicao : undefined,
+      })
     } catch (error) {
       setErro(getSupabaseErrorMessage(error))
     } finally {
@@ -1454,9 +1522,13 @@ export default function Programacao() {
         setSucesso('A programação foi criada com sucesso.')
       }
 
+      const dataSalvaForm = form.dataProgramada
       limparFormulario()
       setModalNovaProgramacaoAberto(false)
-      await carregarDados()
+      await carregarDados({
+        isoDatasExtras: dataSalvaForm ? [dataSalvaForm] : undefined,
+        forcarAnoCalendarioDe: expandirForm ? dataSalvaForm : undefined,
+      })
     } catch (error) {
       setErro(getSupabaseErrorMessage(error))
     } finally {
@@ -1860,7 +1932,7 @@ export default function Programacao() {
         <button
           type="button"
           className="rg-btn rg-btn--outline"
-          onClick={carregarDados}
+          onClick={() => void carregarDados()}
           disabled={loading}
         >
           {loading ? 'Atualizando...' : 'Atualizar'}
