@@ -121,8 +121,12 @@ export default defineConfig(({ mode }) => {
         navigationPreload: true,
         cleanupOutdatedCaches: true,
         clientsClaim: true,
-        /** Após deploy, activar já o novo SW evita ficar preso a chunks antigos no precache. */
-        skipWaiting: true,
+        /**
+         * false: o novo SW fica em "waiting" até o utilizador confirmar no aviso PWA —
+         * assim `useRegisterSW` consegue mostrar o botão de atualização após cada deploy.
+         * A activação e o reload são feitos ao clicar (updateServiceWorker(true)).
+         */
+        skipWaiting: false,
         runtimeCaching: [
           ...supabaseCaching,
           {

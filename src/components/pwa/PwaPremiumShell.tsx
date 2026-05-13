@@ -21,8 +21,10 @@ function isIOS(): boolean {
 
 type HelpKind = 'ios' | 'browser'
 
+const APP_VERSION = String(import.meta.env.VITE_APP_VERSION || '').trim()
+
 /**
- * PWA: atualização, botão fixo para instalar (produção) e diálogo de ajuda quando o browser não expõe prompt nativo.
+ * PWA: atualização (service worker + comparação com /version.json), instalação e ajuda.
  */
 export function PwaPremiumShell() {
   const {
@@ -34,8 +36,56 @@ export function PwaPremiumShell() {
 
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null)
   const [helpOpen, setHelpOpen] = useState<HelpKind | null>(null)
+  const [novaVersaoRemota, setNovaVersaoRemota] = useState(false)
 
   const showInstallEntry = import.meta.env.PROD && !isStandalone()
+
+  const mostrarAvisoAtualizacao = needRefreshFlag || novaVersaoRemota
+
+  useEffect(() => {
+    if (!import.meta.env.PROD || !APP_VERSION) return
+
+    let cancelado = false
+
+    async function verificarVersaoRemota() {
+      try {
+        const res = await fetch(`/version.json?${Date.now()}`, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        })
+        if (!res.ok || cancelado) return
+        const body = (await res.json()) as { version?: string }
+        const remota = String(body?.version ?? '').trim()
+        if (remota && remota !== APP_VERSION) {
+          setNovaVersaoRemota(true)
+        }
+      } catch {
+        /* rede ou ficheiro ausente (ex.: dev sem gerar version.json) */
+      }
+    }
+
+    void verificarVersaoRemota()
+    const intervalo = window.setInterval(verificarVersaoRemota, 3 * 60 * 1000)
+
+    const aoVisibilidade = () => {
+      if (document.visibilityState === 'visible') void verificarVersaoRemota()
+    }
+    document.addEventListener('visibilitychange', aoVisibilidade)
+
+    return () => {
+      cancelado = true
+      window.clearInterval(intervalo)
+      document.removeEventListener('visibilitychange', aoVisibilidade)
+    }
+  }, [])
+
+  const aplicarAtualizacao = useCallback(async () => {
+    if (needRefreshFlag) {
+      await updateServiceWorker(true)
+      return
+    }
+    window.location.reload()
+  }, [needRefreshFlag, updateServiceWorker])
 
   useEffect(() => {
     if (!showInstallEntry) return
@@ -77,15 +127,11 @@ export function PwaPremiumShell() {
 
   return (
     <>
-      {needRefreshFlag ? (
-        <div className="pwa-update-bar" role="status">
-          <span className="pwa-update-bar__text">Nova versão disponível</span>
-          <button
-            type="button"
-            className="pwa-update-bar__btn"
-            onClick={() => void updateServiceWorker(true)}
-          >
-            Atualizar
+      {mostrarAvisoAtualizacao ? (
+        <div className="pwa-update-bar" role="alert" aria-live="polite">
+          <p className="pwa-update-bar__intro">Olá! Temos uma nova atualização para você!</p>
+          <button type="button" className="pwa-update-bar__cta" onClick={() => void aplicarAtualizacao()}>
+            Clique aqui e atualize agora!
           </button>
         </div>
       ) : null}

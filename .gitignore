@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Gerado em build (versão para deteção de atualização no cliente)
+public/version.json
+
 # Ambiente (nunca commitar chaves — configurar na Vercel)
 .env
 .env.*

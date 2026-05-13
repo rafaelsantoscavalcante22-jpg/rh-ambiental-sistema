@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite --port 4173 --strictPort",
-    "build": "npm run build:brand && tsc -b && vite build",
+    "build": "npm run build:brand && node scripts/write-public-version.mjs && tsc -b && vite build",
     "build:brand": "node scripts/generate-brand-assets.mjs",
     "process:wordmark": "node scripts/process-wordmark-import.mjs",
     "lint": "eslint .",

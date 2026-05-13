@@ -5314,34 +5314,47 @@ a.rg-btn {
   right: calc(12px + var(--safe-right));
   z-index: 10060;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
   background: #0f172a;
   color: #f8fafc;
-  font-size: 13px;
-  font-weight: 600;
-  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.28);
-  max-width: min(420px, calc(100vw - 24px - var(--safe-left) - var(--safe-right)));
+  box-shadow: 0 10px 36px rgba(15, 23, 42, 0.35);
+  max-width: min(400px, calc(100vw - 24px - var(--safe-left) - var(--safe-right)));
 }
 
-.pwa-update-bar__text {
-  flex: 1;
-  min-width: 0;
-}
-
-.pwa-update-bar__btn {
-  flex-shrink: 0;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 14px;
+.pwa-update-bar__intro {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
   font-weight: 700;
-  font-size: 13px;
+}
+
+.pwa-update-bar__cta {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-weight: 800;
+  font-size: 14px;
+  line-height: 1.35;
   cursor: pointer;
-  background: #16a34a;
+  background: #0f766e;
   color: #fff;
-  min-height: 40px;
+  min-height: 48px;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.18);
+  transition: filter 0.15s ease;
+}
+
+.pwa-update-bar__cta:hover {
+  filter: brightness(1.07);
+}
+
+.pwa-update-bar__cta:focus-visible {
+  outline: 2px solid #5eead4;
+  outline-offset: 2px;
 }
 
 /* Botão fixo: canto inferior da *área de conteúdo* (evita sidebar à esquerda e o chat à direita). */

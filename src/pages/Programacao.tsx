@@ -2607,40 +2607,48 @@ export default function Programacao() {
                         style={{
                           display: 'flex',
                           justifyContent: 'space-between',
-                          alignItems: 'flex-start',
+                          alignItems: 'center',
                           gap: '12px',
-                          flexWrap: 'wrap',
-                          marginBottom: '10px',
+                          flexWrap: 'nowrap',
+                          marginBottom: '8px',
                         }}
                       >
-                        <div style={{ minWidth: 0 }}>
-                          <div
-                            style={{
-                              fontSize: '12px',
-                              color: '#64748b',
-                              fontWeight: 700,
-                              marginBottom: '4px',
-                            }}
-                          >
-                            Programação {item.numero || '—'}
-                          </div>
-                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a' }}>
-                            {item.clienteNome}
-                          </div>
-                          {secPainel ? (
-                            <div style={{ fontSize: '13px', color: '#475569', marginTop: '4px' }}>
-                              {secPainel}
-                            </div>
-                          ) : null}
-                          {formatarLancadoPorResumo(item.criadoPorNome, item.createdAt) ? (
-                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px', lineHeight: 1.35 }}>
-                              {formatarLancadoPorResumo(item.criadoPorNome, item.createdAt)}
-                            </div>
-                          ) : null}
+                        <div
+                          style={{
+                            fontSize: '12px',
+                            color: '#64748b',
+                            fontWeight: 700,
+                            minWidth: 0,
+                            flex: '1 1 auto',
+                          }}
+                        >
+                          Programação {item.numero || '—'}
                         </div>
-                        <div style={{ alignSelf: 'flex-start' }}>
+                        <div style={{ flexShrink: 0 }}>
                           <ProgramacaoStatusLabel status={item.statusProgramacao} />
                         </div>
+                      </div>
+
+                      <div
+                        style={{
+                          minWidth: 0,
+                          overflowWrap: 'anywhere',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a', lineHeight: 1.35 }}>
+                          {item.clienteNome}
+                        </div>
+                        {secPainel ? (
+                          <div style={{ fontSize: '13px', color: '#475569', marginTop: '4px' }}>
+                            {secPainel}
+                          </div>
+                        ) : null}
+                        {formatarLancadoPorResumo(item.criadoPorNome, item.createdAt) ? (
+                          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px', lineHeight: 1.35 }}>
+                            {formatarLancadoPorResumo(item.criadoPorNome, item.createdAt)}
+                          </div>
+                        ) : null}
                       </div>
 
                       <div
