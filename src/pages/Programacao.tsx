@@ -18,6 +18,11 @@ type ClienteOption = {
   nome: string
 }
 
+type CaminhaoOption = {
+  id: string
+  placa: string
+}
+
 type ProgramacaoStatus =
   | 'PENDENTE'
   | 'QUADRO_ATUALIZADO'
@@ -40,6 +45,7 @@ type ProgramacaoRow = {
   programacao_serie_id: string | null
   status_programacao: ProgramacaoStatus | null
   coleta_id: string | null
+  caminhao_id: string | null
   created_at: string | null
   criado_por_user_id: string | null
   criado_por_nome: string | null
@@ -52,6 +58,8 @@ type ProgramacaoItem = {
   clienteNome: string
   dataProgramada: string
   tipoCaminhao: string
+  caminhaoId: string
+  caminhaoPlaca: string
   tipoServico: string
   observacoes: string
   coletaFixa: boolean
@@ -71,6 +79,7 @@ type FormState = {
   clienteId: string
   dataProgramada: string
   tipoCaminhao: string
+  caminhaoId: string
   tipoServico: string
   observacoes: string
   coletaFixa: boolean
@@ -103,6 +112,7 @@ const initialFormState: FormState = {
   clienteId: '',
   dataProgramada: '',
   tipoCaminhao: '',
+  caminhaoId: '',
   tipoServico: '',
   observacoes: '',
   coletaFixa: false,
@@ -313,7 +323,8 @@ function ProgramacaoRelatorioPrintRoot(p: ProgramacaoRelatorioPrintProps) {
               <th>Prog.</th>
               <th>Cliente</th>
               <th>Status</th>
-              <th>Caminhão</th>
+              <th>Tipo equip.</th>
+              <th>Veículo</th>
               <th>Serviço</th>
               <th>MTR</th>
               <th>Coleta</th>
@@ -330,6 +341,7 @@ function ProgramacaoRelatorioPrintRoot(p: ProgramacaoRelatorioPrintProps) {
                   <td>{item.clienteNome}</td>
                   <td>{STATUS_LABELS[item.statusProgramacao]}</td>
                   <td>{item.tipoCaminhao || '—'}</td>
+                  <td>{item.caminhaoPlaca || '—'}</td>
                   <td>{item.tipoServico || '—'}</td>
                   <td>{item.mtrId ? 'Sim' : 'Não'}</td>
                   <td>{item.coletaId ? 'Sim' : 'Não'}</td>
@@ -357,6 +369,36 @@ function textoServicoCalendario(item: ProgramacaoItem): string | null {
   if (!t) return null
   if (t.toLowerCase() === 'coleta') return null
   return t
+}
+
+/** Painel do dia: placa da frota ou, se não houver, o tipo de equipamento (ex.: Polli). */
+function resumoVeiculoPainelDia(item: ProgramacaoItem): {
+  texto: string
+  backgroundColor: string
+  color: string
+} {
+  const placa = (item.caminhaoPlaca || '').trim()
+  if (placa) {
+    return {
+      texto: `Veículo ${placa}`,
+      backgroundColor: '#e0f2fe',
+      color: '#0369a1',
+    }
+  }
+  const tipo = (item.tipoCaminhao || '').trim()
+  if (tipo) {
+    const texto = tipo.length > 44 ? `${tipo.slice(0, 42)}…` : tipo
+    return {
+      texto,
+      backgroundColor: '#fef9c3',
+      color: '#854d0e',
+    }
+  }
+  return {
+    texto: 'Sem tipo / veículo',
+    backgroundColor: '#f1f5f9',
+    color: '#64748b',
+  }
 }
 
 type ProgramacaoStatusVisual = {
@@ -705,6 +747,7 @@ export default function Programacao() {
   const prevScrollKeyRef = useRef<string>('')
 
   const [clientes, setClientes] = useState<ClienteOption[]>([])
+  const [caminhoes, setCaminhoes] = useState<CaminhaoOption[]>([])
   const [programacoes, setProgramacoes] = useState<ProgramacaoItem[]>([])
   const [form, setForm] = useState<FormState>(initialFormState)
   const [formEdicaoModal, setFormEdicaoModal] = useState<FormState | null>(null)
@@ -759,8 +802,10 @@ export default function Programacao() {
     cacheKey: 'programacao',
     data: programacaoUiDraft,
     onRestore: (d) => {
-      setForm(d.form)
-      setFormEdicaoModal(d.formEdicaoModal)
+      setForm({ ...initialFormState, ...d.form })
+      setFormEdicaoModal(
+        d.formEdicaoModal ? { ...initialFormState, ...d.formEdicaoModal, id: d.formEdicaoModal.id } : null
+      )
       setMesSelecionado(d.mesSelecionado)
       setDiaPainelCalendario(d.diaPainelCalendario)
       setModalNovaProgramacaoAberto(d.modalNovaProgramacaoAberto)
@@ -860,6 +905,23 @@ export default function Programacao() {
       const clientesLista = (clientesData || []) as ClienteOption[]
       setClientes(clientesLista)
 
+      const { data: caminhoesData, error: caminhoesError } = await supabase
+        .from('caminhoes')
+        .select('id, placa')
+        .order('placa', { ascending: true })
+
+      if (caminhoesError) {
+        console.error('ERRO AO CARREGAR CAMINHÕES:', caminhoesError)
+        throw caminhoesError
+      }
+
+      const caminhoesLista = ((caminhoesData || []) as CaminhaoOption[]).map((c) => ({
+        id: c.id,
+        placa: (c.placa || '').trim(),
+      }))
+      setCaminhoes(caminhoesLista)
+      const placaPorCaminhaoId = new Map(caminhoesLista.map((c) => [c.id, c.placa]))
+
       const ano = anoCalendario
       const rangeIni = `${ano}-01-01`
       const rangeFim = `${ano}-12-31`
@@ -867,7 +929,7 @@ export default function Programacao() {
       const { data: programacoesData, error: programacoesError } = await supabase
         .from('programacoes')
         .select(
-          'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, periodicidade, programacao_dias_semana, programacao_serie_id, status_programacao, coleta_id, created_at, criado_por_user_id, criado_por_nome'
+          'id, numero, cliente_id, cliente, data_programada, tipo_caminhao, tipo_servico, observacoes, coleta_fixa, periodicidade, programacao_dias_semana, programacao_serie_id, status_programacao, coleta_id, caminhao_id, created_at, criado_por_user_id, criado_por_nome'
         )
         .gte('data_programada', rangeIni)
         .lte('data_programada', rangeFim)
@@ -945,6 +1007,8 @@ export default function Programacao() {
             'Cliente não identificado',
           dataProgramada: row.data_programada || '',
           tipoCaminhao: row.tipo_caminhao || '',
+          caminhaoId: row.caminhao_id || '',
+          caminhaoPlaca: row.caminhao_id ? placaPorCaminhaoId.get(row.caminhao_id) || '' : '',
           tipoServico: row.tipo_servico || '',
           observacoes: row.observacoes || '',
           coletaFixa: row.coleta_fixa ?? false,
@@ -1109,6 +1173,7 @@ export default function Programacao() {
       clienteId: item.clienteId,
       dataProgramada: item.dataProgramada,
       tipoCaminhao: item.tipoCaminhao,
+      caminhaoId: item.caminhaoId,
       tipoServico: item.tipoServico,
       observacoes: item.observacoes,
       coletaFixa: item.coletaFixa,
@@ -1226,6 +1291,7 @@ export default function Programacao() {
         cliente: clienteSelecionado.nome,
         data_programada: formEdicaoModal.dataProgramada,
         tipo_caminhao: formEdicaoModal.tipoCaminhao || null,
+        caminhao_id: formEdicaoModal.caminhaoId.trim() || null,
         tipo_servico: formEdicaoModal.tipoServico.trim(),
         observacoes: formEdicaoModal.observacoes.trim() || null,
         coleta_fixa: formEdicaoModal.coletaFixa,
@@ -1322,6 +1388,7 @@ export default function Programacao() {
         cliente: clienteSelecionado.nome,
         data_programada: form.dataProgramada,
         tipo_caminhao: form.tipoCaminhao || null,
+        caminhao_id: form.caminhaoId.trim() || null,
         tipo_servico: form.tipoServico.trim(),
         observacoes: form.observacoes.trim() || null,
         coleta_fixa: form.coletaFixa,
@@ -1629,6 +1696,26 @@ export default function Programacao() {
               valor atual permanece ao salvar.
             </p>
           ) : null}
+        </div>
+
+        <div>
+          <label style={labelStyle}>Veículo designado</label>
+          <select
+            value={f.caminhaoId}
+            onChange={(event) => patch('caminhaoId', event.target.value)}
+            style={inputStyle}
+          >
+            <option value="">Nenhum (definir depois)</option>
+            {caminhoes.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.placa || c.id}
+              </option>
+            ))}
+          </select>
+          <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: 1.4 }}>
+            Placa do veículo da frota escolhido para o serviço (cadastro em Veículos). É independente do
+            «tipo de caminhão» (equipamento).
+          </p>
         </div>
 
         <div>
@@ -2099,6 +2186,12 @@ export default function Programacao() {
                               }}
                               title={`${item.clienteNome}${
                                 sec ? ` · ${sec}` : ''
+                              }${
+                                item.caminhaoPlaca
+                                  ? ` · ${item.caminhaoPlaca}`
+                                  : (item.tipoCaminhao || '').trim()
+                                    ? ` · ${(item.tipoCaminhao || '').trim()}`
+                                    : ''
                               } · ${STATUS_LABELS[item.statusProgramacao]}`}
                             >
                               <div
@@ -2261,8 +2354,15 @@ export default function Programacao() {
 
                             <div style={itemAgendaMetaStripStyle}>
                               <span>
-                                <span style={itemMetaKeyStyle}>Caminhão</span>{' '}
+                                <span style={itemMetaKeyStyle}>Tipo equip.</span>{' '}
                                 {item.tipoCaminhao || '—'}
+                              </span>
+                              <span style={itemMetaSepStyle} aria-hidden>
+                                ·
+                              </span>
+                              <span>
+                                <span style={itemMetaKeyStyle}>Veículo</span>{' '}
+                                {item.caminhaoPlaca || '—'}
                               </span>
                               <span style={itemMetaSepStyle} aria-hidden>
                                 ·
@@ -2491,6 +2591,7 @@ export default function Programacao() {
                 {itensDiaPainelCalendario.map((item) => {
                   const statusStyle = getStatusStyle(item.statusProgramacao)
                   const secPainel = textoServicoCalendario(item)
+                  const chipVeiculo = resumoVeiculoPainelDia(item)
                   return (
                     <div
                       key={item.id}
@@ -2567,6 +2668,15 @@ export default function Programacao() {
                           }}
                         >
                           {item.coletaId ? 'Coleta criada' : 'Sem coleta'}
+                        </span>
+                        <span
+                          style={{
+                            ...statusBadgeCompactStyle,
+                            backgroundColor: chipVeiculo.backgroundColor,
+                            color: chipVeiculo.color,
+                          }}
+                        >
+                          {chipVeiculo.texto}
                         </span>
                       </div>
 
@@ -2915,7 +3025,13 @@ export default function Programacao() {
                             </div>
                             <div style={itemAgendaMetaStripStyle}>
                               <span>
-                                <span style={itemMetaKeyStyle}>Caminhão</span> {item.tipoCaminhao || '—'}
+                                <span style={itemMetaKeyStyle}>Tipo equip.</span> {item.tipoCaminhao || '—'}
+                              </span>
+                              <span style={itemMetaSepStyle} aria-hidden>
+                                ·
+                              </span>
+                              <span>
+                                <span style={itemMetaKeyStyle}>Veículo</span> {item.caminhaoPlaca || '—'}
                               </span>
                               <span style={itemMetaSepStyle} aria-hidden>
                                 ·
