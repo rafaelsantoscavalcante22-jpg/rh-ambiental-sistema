@@ -13,6 +13,8 @@ interface ImportMetaEnv {
   readonly VITE_FATURAMENTO_RESUMO_DESDE_DIAS?: string
   /** Injetado em build (vite.config) a partir de `package.json`. */
   readonly VITE_APP_VERSION: string
+  /** Carimbo do build; igual a `public/version.json` → `builtAt` (deteção de novo deploy). */
+  readonly VITE_APP_BUILD_STAMP: string
 }
 
 interface ImportMeta {

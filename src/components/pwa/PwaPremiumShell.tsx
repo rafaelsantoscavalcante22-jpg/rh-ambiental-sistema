@@ -22,6 +22,7 @@ function isIOS(): boolean {
 type HelpKind = 'ios' | 'browser'
 
 const APP_VERSION = String(import.meta.env.VITE_APP_VERSION || '').trim()
+const APP_BUILD_STAMP = String(import.meta.env.VITE_APP_BUILD_STAMP || '').trim()
 
 /**
  * PWA: atualização (service worker + comparação com /version.json), instalação e ajuda.
@@ -43,7 +44,7 @@ export function PwaPremiumShell() {
   const mostrarAvisoAtualizacao = needRefreshFlag || novaVersaoRemota
 
   useEffect(() => {
-    if (!import.meta.env.PROD || !APP_VERSION) return
+    if (!import.meta.env.PROD) return
 
     let cancelado = false
 
@@ -54,18 +55,30 @@ export function PwaPremiumShell() {
           credentials: 'same-origin',
         })
         if (!res.ok || cancelado) return
-        const body = (await res.json()) as { version?: string }
-        const remota = String(body?.version ?? '').trim()
-        if (remota && remota !== APP_VERSION) {
+        const ct = res.headers.get('content-type') || ''
+        if (!ct.includes('json')) {
+          return
+        }
+        const body = (await res.json()) as { version?: string; builtAt?: string }
+        const remotaV = String(body?.version ?? '').trim()
+        const remotaB = String(body?.builtAt ?? '').trim()
+
+        if (remotaV && APP_VERSION && remotaV !== APP_VERSION) {
+          setNovaVersaoRemota(true)
+          return
+        }
+        if (remotaB && APP_BUILD_STAMP && remotaB !== APP_BUILD_STAMP) {
           setNovaVersaoRemota(true)
         }
       } catch {
-        /* rede ou ficheiro ausente (ex.: dev sem gerar version.json) */
+        /* rede, HTML em vez de JSON, ou dev sem version.json */
       }
     }
 
-    void verificarVersaoRemota()
-    const intervalo = window.setInterval(verificarVersaoRemota, 3 * 60 * 1000)
+    const primeiro = window.setTimeout(() => {
+      void verificarVersaoRemota()
+    }, 4000)
+    const intervalo = window.setInterval(verificarVersaoRemota, 90 * 1000)
 
     const aoVisibilidade = () => {
       if (document.visibilityState === 'visible') void verificarVersaoRemota()
@@ -74,6 +87,7 @@ export function PwaPremiumShell() {
 
     return () => {
       cancelado = true
+      window.clearTimeout(primeiro)
       window.clearInterval(intervalo)
       document.removeEventListener('visibilitychange', aoVisibilidade)
     }

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -54,9 +54,26 @@ export default defineConfig(({ mode }) => {
   const appVersion =
     typeof pkg.version === 'string' ? pkg.version : '0.0.0'
 
+  /** Mesmo `builtAt` que `scripts/write-public-version.mjs` grava em `public/version.json` antes do build. */
+  const versionJsonPath = fileURLToPath(new URL('./public/version.json', import.meta.url))
+  let appBuildStamp = new Date().toISOString()
+  try {
+    if (existsSync(versionJsonPath)) {
+      const meta = JSON.parse(readFileSync(versionJsonPath, 'utf-8')) as {
+        builtAt?: string
+      }
+      if (meta?.builtAt && typeof meta.builtAt === 'string') {
+        appBuildStamp = meta.builtAt
+      }
+    }
+  } catch {
+    /* ignora: dev sem version.json */
+  }
+
   return {
   define: {
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
+    'import.meta.env.VITE_APP_BUILD_STAMP': JSON.stringify(appBuildStamp),
   },
   plugins: [
     react(),
