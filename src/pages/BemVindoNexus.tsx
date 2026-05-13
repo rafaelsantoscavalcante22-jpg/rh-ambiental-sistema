@@ -8,12 +8,14 @@ import {
   type UsuarioComPaginas,
 } from '../lib/paginasSistema'
 import { BRAND_WELCOME_LOGO } from '../lib/brandLogo'
+import { useVersaoRgExibir } from '../lib/appDisplayVersion'
 
 type PerfilBemVindo = UsuarioComPaginas & { nome?: string | null }
 
 export default function BemVindoNexus() {
   const [perfil, setPerfil] = useState<PerfilBemVindo | null>(null)
   const [logoSrc, setLogoSrc] = useState(BRAND_WELCOME_LOGO)
+  const versaoExibir = useVersaoRgExibir()
 
   useEffect(() => {
     let cancel = false
@@ -99,7 +101,7 @@ export default function BemVindoNexus() {
           </div>
 
           <p className="welcome-nexus__version" role="status">
-            Versão do sistema: <strong>R{import.meta.env.VITE_APP_VERSION}</strong>
+            Versão do sistema: <strong>{versaoExibir}</strong>
           </p>
 
           <div className="welcome-nexus__nexus-footer">

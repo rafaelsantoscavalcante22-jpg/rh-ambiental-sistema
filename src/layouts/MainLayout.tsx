@@ -21,6 +21,7 @@ import { useDebouncedValue } from '../lib/useDebouncedValue'
 import { ChatInternoFloating } from '../components/chat/ChatInternoFloating'
 import SuporteTecnicoFloat from '../components/SuporteTecnicoFloat'
 import { BRAND_LOGO_MARK } from '../lib/brandLogo'
+import { useVersaoRgExibir } from '../lib/appDisplayVersion'
 
 type MainLayoutProps = {
   children: ReactNode
@@ -258,6 +259,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const [fotoIndisponivel, setFotoIndisponivel] = useState(false)
   const [enviandoFoto, setEnviandoFoto] = useState(false)
   const inputFotoRef = useRef<HTMLInputElement>(null)
+  const versaoExibir = useVersaoRgExibir()
 
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
     const stored = lerSecoesSidebar()
@@ -693,9 +695,9 @@ export default function MainLayout({ children }: MainLayoutProps) {
           </button>
           <p
             className="layout-sidebar-version"
-            aria-label={`Versão do sistema R${import.meta.env.VITE_APP_VERSION}`}
+            aria-label={`Versão do sistema ${versaoExibir}`}
           >
-            R{import.meta.env.VITE_APP_VERSION}
+            {versaoExibir}
           </p>
         </div>
       </aside>

@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import { OFFICIAL_SITE_ORIGIN } from '../../lib/officialSiteUrl'
+import {
+  emitVersaoRgDisplayChanged,
+  incrementarVersaoPorBalaoAtualizacao,
+} from '../../lib/appDisplayVersion'
 
 function isStandalone(): boolean {
   if (typeof window === 'undefined') return false
@@ -42,6 +46,15 @@ export function PwaPremiumShell() {
   const showInstallEntry = import.meta.env.PROD && !isStandalone()
 
   const mostrarAvisoAtualizacao = needRefreshFlag || novaVersaoRemota
+
+  const prevBalaoVisivel = useRef(false)
+  useEffect(() => {
+    if (mostrarAvisoAtualizacao && !prevBalaoVisivel.current) {
+      incrementarVersaoPorBalaoAtualizacao()
+      emitVersaoRgDisplayChanged()
+    }
+    prevBalaoVisivel.current = mostrarAvisoAtualizacao
+  }, [mostrarAvisoAtualizacao])
 
   useEffect(() => {
     if (!import.meta.env.PROD) return
