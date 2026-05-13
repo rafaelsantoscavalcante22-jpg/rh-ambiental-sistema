@@ -1,0 +1,24 @@
+---
+description: Bump de versão em deploy (Vercel) e reflexo em "Versão do sistema"
+alwaysApply: true
+---
+
+# Versão do sistema (RG Ambiental)
+
+## Regra de produto
+
+Sempre que exista uma **atualização a subir para produção** (Vercel / `main`) que deva refletir no número **“Versão do sistema: R…”** na UI, o agente deve **incrementar o `version` em `package.json`** (semver, ex. `1.2.0` → `1.2.1`) **no mesmo commit ou imediatamente antes** do push que dispara o deploy.
+
+## Como funciona no código
+
+- O build (`npm run build`) corre `scripts/write-public-version.mjs`, que grava `public/version.json` a partir de `package.json` → `version`.
+- O Vite expõe isso como `VITE_APP_VERSION`; o texto **R**`maj.min.patch` vem de `src/lib/appDisplayVersion.ts` (base do package + lógica local do balão de atualização).
+- **Sem bump em `package.json`**, o número “oficial” da release **não** acompanha o deploy.
+
+## Checklist antes de “subir para a Vercel”
+
+1. Alterar `package.json` → `"version"`: subir patch (ou minor/major conforme a release).
+2. Commit incluindo essa alteração (ou commit dedicado só de versão).
+3. Push para `main` (ou fluxo que dispara o CI).
+
+Não criar documentação extra (README) só por causa disto, a menos que o utilizador peça.
