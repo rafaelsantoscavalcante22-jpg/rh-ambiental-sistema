@@ -380,6 +380,9 @@ function ProgramacaoRelatorioPrintRoot(p: ProgramacaoRelatorioPrintProps) {
 /** Linhas preview no calendário; contador no topo = total do dia (sem duplicar “+N mais”). */
 const CALENDAR_PREVIEW_MAX = 4
 
+/** Na agenda detalhada: cartões visíveis por dia antes de “Mostrar todas” (menos DOM = página mais leve). */
+const AGENDA_DETALHADA_MAX_VISIVEL_POR_DIA = 6
+
 function textoServicoCalendario(item: ProgramacaoItem): string | null {
   const t = (item.tipoServico || '').trim()
   if (!t) return null
@@ -778,6 +781,8 @@ export default function Programacao() {
   const [usuarioNome, setUsuarioNome] = useState<string | null>(null)
   const [edicaoCriadoPorNomeDev, setEdicaoCriadoPorNomeDev] = useState('')
   const [diaPainelCalendario, setDiaPainelCalendario] = useState<string | null>(null)
+  /** Datas (YYYY-MM-DD) em que a agenda detalhada mostra todas as programações, não só as primeiras N. */
+  const [datasAgendaExpandidas, setDatasAgendaExpandidas] = useState<Set<string>>(() => new Set())
   const [modalNovaProgramacaoAberto, setModalNovaProgramacaoAberto] = useState(false)
   const [relatorioAberto, setRelatorioAberto] = useState(false)
   const [relatorioFiltro, setRelatorioFiltro] = useState<RelatorioFiltro>('dia')
@@ -841,6 +846,10 @@ export default function Programacao() {
     const t = window.setTimeout(() => setSucesso(''), 4500)
     return () => window.clearTimeout(t)
   }, [sucesso])
+
+  useEffect(() => {
+    setDatasAgendaExpandidas(new Set())
+  }, [mesSelecionado])
 
   useEffect(() => {
     if (!modalNovaProgramacaoAberto || !form.coletaFixa || form.diasSemanaColetaFixa.length > 0) return
@@ -1675,6 +1684,19 @@ export default function Programacao() {
   }, [relatorioAberto])
 
   useEffect(() => {
+    if (!contextoDestaqueId) return
+    const item = programacoes.find((p) => p.id === contextoDestaqueId)
+    const d = item?.dataProgramada
+    if (!d) return
+    setDatasAgendaExpandidas((prev) => {
+      if (prev.has(d)) return prev
+      const n = new Set(prev)
+      n.add(d)
+      return n
+    })
+  }, [contextoDestaqueId, programacoes])
+
+  useEffect(() => {
     if (!contextoDestaqueId || loading) return
 
     const scrollKey = `${contextoDestaqueId}|${mesSelecionado}`
@@ -2349,7 +2371,8 @@ export default function Programacao() {
           <div style={cardPrincipalStyle}>
             <h2 style={cardTituloStyle}>Agenda detalhada</h2>
             <p style={cardDescricaoStyle}>
-              Por data: editar ou excluir programações.
+              Por data: editar ou excluir. Dias com muitas programações mostram as primeiras{' '}
+              {AGENDA_DETALHADA_MAX_VISIVEL_POR_DIA} e um atalho para expandir o restante.
             </p>
 
             {loading ? (
@@ -2360,7 +2383,13 @@ export default function Programacao() {
               </div>
             ) : (
               <div style={{ display: 'grid', gap: '14px' }}>
-                {agendaAgrupada.map(([data, itens]) => (
+                {agendaAgrupada.map(([data, itens]) => {
+                  const diaExpandido = datasAgendaExpandidas.has(data)
+                  const limiar = AGENDA_DETALHADA_MAX_VISIVEL_POR_DIA
+                  const itensVisiveis =
+                    diaExpandido || itens.length <= limiar ? itens : itens.slice(0, limiar)
+
+                  return (
                   <div key={data} style={grupoAgendaStyle}>
                     <div style={grupoAgendaHeaderStyle}>
                       <div style={grupoAgendaDataStyle}>{formatDate(data)}</div>
@@ -2368,7 +2397,7 @@ export default function Programacao() {
                     </div>
 
                     <div style={grupoAgendaItensWrapStyle}>
-                      {itens.map((item) => {
+                      {itensVisiveis.map((item) => {
                         const statusStyle = getStatusStyle(item.statusProgramacao)
 
                         const emDestaqueContexto = contextoDestaqueId === item.id
@@ -2552,9 +2581,47 @@ export default function Programacao() {
                           </div>
                         )
                       })}
+                      {itens.length > limiar ? (
+                        <div
+                          style={{
+                            marginTop: '12px',
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            justifyContent: 'center',
+                            gap: '8px',
+                          }}
+                        >
+                          {!diaExpandido ? (
+                            <button
+                              type="button"
+                              className="rg-btn rg-btn--outline"
+                              onClick={() =>
+                                setDatasAgendaExpandidas((prev) => new Set(prev).add(data))
+                              }
+                            >
+                              Mostrar todas ({itens.length}) — +{itens.length - limiar}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="rg-btn rg-btn--outline"
+                              onClick={() =>
+                                setDatasAgendaExpandidas((prev) => {
+                                  const n = new Set(prev)
+                                  n.delete(data)
+                                  return n
+                                })
+                              }
+                            >
+                              Resumir (mostrar só as primeiras {limiar})
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
