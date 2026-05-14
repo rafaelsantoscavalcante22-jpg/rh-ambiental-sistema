@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 import { NEXUS_CARGOS_POR_ROTA } from './lib/nexusCargosPorRota'
@@ -133,6 +133,10 @@ function App() {
   const [usuario, setUsuario] = useState<UsuarioPerfilApp | null>(null)
   const [carregandoUsuario, setCarregandoUsuario] = useState(true)
 
+  /** Evita `Carregando permissões…` (e desmontar a página) em cada refresh de token ao voltar ao separador. */
+  const perfilJaExibidoParaUserIdRef = useRef<string | null>(null)
+  const cargaPerfilRunRef = useRef(0)
+
   useEffect(() => {
     async function carregarSessao() {
       const {
@@ -156,22 +160,36 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const runId = ++cargaPerfilRunRef.current
+
     async function carregarUsuario() {
       if (!session) {
+        if (runId !== cargaPerfilRunRef.current) return
+        perfilJaExibidoParaUserIdRef.current = null
         setUsuario(null)
         setCarregandoUsuario(false)
         return
       }
 
-      setCarregandoUsuario(true)
+      const esperadoUserId = session.user.id
+      const atualizacaoSilenciosa =
+        perfilJaExibidoParaUserIdRef.current != null &&
+        perfilJaExibidoParaUserIdRef.current === esperadoUserId
+
+      if (!atualizacaoSilenciosa) {
+        setCarregandoUsuario(true)
+      }
 
       const {
         data: { user },
         error: userError,
       } = await supabase.auth.getUser()
 
+      if (runId !== cargaPerfilRunRef.current) return
+
       if (userError || !user) {
         console.error('Erro ao buscar usuário autenticado:', userError?.message)
+        perfilJaExibidoParaUserIdRef.current = null
         setUsuario(null)
         setCarregandoUsuario(false)
         return
@@ -183,24 +201,29 @@ function App() {
         .eq('id', user.id)
         .maybeSingle()
 
+      if (runId !== cargaPerfilRunRef.current) return
+
       if (error) {
         console.error('Erro ao carregar perfil do usuário:', error.message)
+        perfilJaExibidoParaUserIdRef.current = null
         setUsuario(null)
         setCarregandoUsuario(false)
         return
       }
 
       if (!data) {
+        perfilJaExibidoParaUserIdRef.current = null
         setUsuario(null)
         setCarregandoUsuario(false)
         return
       }
 
       setUsuario(data)
+      perfilJaExibidoParaUserIdRef.current = user.id
       setCarregandoUsuario(false)
     }
 
-    carregarUsuario()
+    void carregarUsuario()
   }, [session])
 
   if (session === undefined) {
