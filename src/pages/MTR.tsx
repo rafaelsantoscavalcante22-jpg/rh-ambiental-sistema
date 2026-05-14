@@ -110,6 +110,7 @@ type MTRDetalhes = {
     bairro: string
     cep: string
     estado: string
+    cidade: string
     responsavel: string
     telefone: string
   }
@@ -119,7 +120,6 @@ type MTRDetalhes = {
     estado_fisico: string
     acondicionamento: string
     quantidade_aproximada: string
-    fp_numero: string
     onu: string
   }
   blocos: {
@@ -130,6 +130,7 @@ type MTRDetalhes = {
     telefone_discrepancias: string
   }
   transportador: {
+    razao_social: string
     atividade: string
     cnpj: string
     ie: string
@@ -146,6 +147,7 @@ type MTRDetalhes = {
     telefones_gerais: string
   }
   destinatario: {
+    razao_social: string
     atividade: string
     lo: string
     cnpj: string
@@ -172,6 +174,7 @@ function detalhesVazios(): MTRDetalhes {
       bairro: '',
       cep: '',
       estado: '',
+      cidade: '',
       responsavel: '',
       telefone: '',
     },
@@ -181,7 +184,6 @@ function detalhesVazios(): MTRDetalhes {
       estado_fisico: '',
       acondicionamento: '',
       quantidade_aproximada: '',
-      fp_numero: '',
       onu: '',
     },
     blocos: {
@@ -192,6 +194,7 @@ function detalhesVazios(): MTRDetalhes {
       telefone_discrepancias: '',
     },
     transportador: {
+      razao_social: '',
       atividade: '',
       cnpj: '',
       ie: '',
@@ -208,6 +211,7 @@ function detalhesVazios(): MTRDetalhes {
       telefones_gerais: '',
     },
     destinatario: {
+      razao_social: '',
       atividade: '',
       lo: '',
       cnpj: '',
@@ -333,9 +337,11 @@ function generateMTRNumberSequencialAno(mtrNumeros: string[], ano?: number): str
 function mergeMtrDetalhesProfundo(raw: MTRDetalhes | null | undefined): MTRDetalhes {
   const z = detalhesVazios()
   if (!raw) return z
+  const residuoL = { ...(raw.residuo as Record<string, string>) }
+  delete residuoL.fp_numero
   return {
     gerador: { ...z.gerador, ...raw.gerador },
-    residuo: { ...z.residuo, ...raw.residuo },
+    residuo: { ...z.residuo, ...(residuoL as MTRDetalhes['residuo']) },
     transportador: { ...z.transportador, ...raw.transportador },
     destinatario: { ...z.destinatario, ...raw.destinatario },
     blocos: { ...z.blocos, ...(raw.blocos ?? z.blocos) },
@@ -381,6 +387,7 @@ function mergeDetalhesParaDocumento(
   }
   if (nomeIndicaRgAmbiental(mtr.destinador)) {
     const padDest: Partial<MTRDetalhes['destinatario']> = {
+      razao_social: (mtr.destinador ?? '').trim(),
       atividade: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.atividade,
       cnpj: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.cnpj,
       ie: TRANSPORTADOR_RG_AMBIENTAL_PADRAO.ie,
@@ -398,6 +405,19 @@ function mergeDetalhesParaDocumento(
   const plc = (d.transportador.placa || placaColeta || '').trim()
   d = { ...d, transportador: { ...d.transportador, motorista: mot, placa: plc } }
 
+  if (!d.transportador.razao_social.trim() && (mtr.transportador ?? '').trim()) {
+    d = {
+      ...d,
+      transportador: { ...d.transportador, razao_social: mtr.transportador.trim() },
+    }
+  }
+  if (!d.destinatario.razao_social.trim() && (mtr.destinador ?? '').trim()) {
+    d = {
+      ...d,
+      destinatario: { ...d.destinatario, razao_social: mtr.destinador.trim() },
+    }
+  }
+
   const telDisc =
     d.conformidade.telefone_discrepancias.trim() ||
     d.gerador.telefone.trim() ||
@@ -414,6 +434,9 @@ function mergeDetalhesParaDocumento(
 function avisosImpressaoMtr(mtr: MTR, d: MTRDetalhes): string[] {
   const f: string[] = []
   if (!mtr.numero?.trim()) f.push('Número da MTR')
+  if (!(mtr.cidade ?? '').trim() && !(d.gerador.cidade ?? '').trim()) {
+    f.push('Cidade do gerador (município/UF)')
+  }
   if (!mtr.gerador?.trim()) f.push('Razão social (Gerador)')
   if (!(mtr.endereco ?? '').trim() && !(mtr.cidade ?? '').trim() && !(d.gerador.cep ?? '').trim()) {
     f.push('Endereço de coleta ou município')
@@ -512,6 +535,17 @@ function resolverMtrContexto(
   return null
 }
 
+const MTR_ATIVIDADE_SUGESTOES = [
+  'Industrial',
+  'Comercial',
+  'Serviços',
+  'Residencial',
+  'Construção civil',
+  'Hospitalar',
+  'Automotivo',
+  'Agrossilvipastoril',
+]
+
 export default function MTR() {
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -537,6 +571,7 @@ export default function MTR() {
   const [usuarioNome, setUsuarioNome] = useState<string | null>(null)
   const [mtrEdicaoCreatedAtIso, setMtrEdicaoCreatedAtIso] = useState('')
   const [mtrDevCriadoPorNome, setMtrDevCriadoPorNome] = useState('')
+  const [caminhoesPlacas, setCaminhoesPlacas] = useState<Array<{ id: string; placa: string }>>([])
 
   const mtrUiDraft = useMemo(
     () => ({
@@ -677,6 +712,25 @@ export default function MTR() {
     queueMicrotask(() => {
       void loadData()
     })
+  }, [])
+
+  useEffect(() => {
+    void supabase
+      .from('caminhoes')
+      .select('id, placa')
+      .order('placa', { ascending: true })
+      .then(({ data, error }) => {
+        if (error) {
+          if (import.meta.env.DEV) {
+            console.debug('[MTR] caminhões (lista placas):', error.message)
+          }
+          return
+        }
+        const rows = ((data ?? []) as Array<{ id: string; placa: string | null }>).filter((r) =>
+          (r.placa ?? '').trim()
+        )
+        setCaminhoesPlacas(rows.map((r) => ({ id: String(r.id), placa: String(r.placa).trim() })))
+      })
   }, [])
 
   useEffect(() => {
@@ -949,6 +1003,7 @@ export default function MTR() {
       const dz = detalhesVazios()
       const unidade = (row.unidade_medida ?? '').trim()
       const atividadeGerador =
+        (row.classificacao ?? '').trim() ||
         (programacao.tipo_servico ?? '').trim() ||
         (row.observacoes_operacionais ?? '').trim().slice(0, 120) ||
         (row.observacoes_gerais ?? '').trim().slice(0, 120) ||
@@ -1014,6 +1069,7 @@ export default function MTR() {
             bairro: (row.bairro ?? '').trim() || dz.gerador.bairro,
             cep: (row.cep ?? '').trim() || dz.gerador.cep,
             estado: (row.estado ?? '').trim() || dz.gerador.estado,
+            cidade: montarCidadeUfCliente(row) || (prev.detalhes?.gerador?.cidade ?? '').trim() || dz.gerador.cidade,
           },
           residuo: {
             ...dz.residuo,
@@ -1191,6 +1247,11 @@ export default function MTR() {
       return
     }
 
+    if (!(form.cidade ?? '').trim()) {
+      alert('Preencha a cidade do gerador (município/UF).')
+      return
+    }
+
     if (!form.data_emissao) {
       alert('Preencha a data de emissão.')
       return
@@ -1202,6 +1263,12 @@ export default function MTR() {
       form.quantidade === null || form.quantidade === undefined
         ? null
         : Number(form.quantidade)
+
+    const detBase = form.detalhes ?? detalhesVazios()
+    const detalhesGravar: MTRDetalhes = {
+      ...detBase,
+      gerador: { ...detBase.gerador, cidade: form.cidade.trim() },
+    }
 
     const payload: Record<string, unknown> = {
       numero: form.numero.trim(),
@@ -1215,7 +1282,7 @@ export default function MTR() {
       unidade: form.unidade.trim() || '',
       destinador: form.destinador.trim(),
       transportador: form.transportador.trim(),
-      detalhes: form.detalhes ?? detalhesVazios(),
+      detalhes: detalhesGravar,
       data_emissao: form.data_emissao,
       observacoes: form.observacoes.trim(),
       /** Fluxo único: documento salvo é tratado como emitido (sem gestão de status na UI). */
@@ -2049,10 +2116,10 @@ export default function MTR() {
 
         .mtr-excel__header {
           display: grid;
-          grid-template-columns: 180px 1fr 160px;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 6px;
+          grid-template-columns: minmax(120px, 180px) 1fr minmax(11.5rem, 32%);
+          align-items: start;
+          gap: 10px 12px;
+          margin-bottom: 8px;
         }
 
         .mtr-excel__logo img {
@@ -2064,15 +2131,35 @@ export default function MTR() {
           text-align: center;
           font-weight: 800;
           font-size: 12px;
+          align-self: center;
         }
 
         .mtr-excel__mtrno {
           text-align: right;
           font-size: 11px;
+          align-self: center;
         }
 
         .mtr-excel__mtrno-label {
           font-weight: 800;
+          font-size: 11px;
+          color: #334155;
+          margin-bottom: 2px;
+        }
+
+        .mtr-excel__mtrno-value {
+          font-size: clamp(1.5rem, 3.2vw, 2rem);
+          font-weight: 900;
+          line-height: 1.05;
+          letter-spacing: 0.03em;
+          color: #0f172a;
+          border: 2px solid #0f172a;
+          border-radius: 10px;
+          padding: 6px 10px;
+          display: inline-block;
+          min-width: 5.5ch;
+          text-align: center;
+          box-sizing: border-box;
         }
 
         .mtr-excel__table {
@@ -2458,7 +2545,7 @@ export default function MTR() {
         @media print {
           @page {
             size: A4 portrait;
-            margin: 10mm;
+            margin: 7mm;
           }
 
           html,
@@ -2563,10 +2650,10 @@ export default function MTR() {
 
           .mtr-excel__header {
             display: grid !important;
-            grid-template-columns: 180px 1fr 160px !important;
-            align-items: center !important;
-            gap: 8px !important;
-            margin-bottom: 6px !important;
+            grid-template-columns: minmax(100px, 150px) 1fr minmax(10rem, 30%) !important;
+            align-items: start !important;
+            gap: 6px 8px !important;
+            margin-bottom: 4px !important;
           }
 
           .mtr-excel__logo img {
@@ -2578,15 +2665,36 @@ export default function MTR() {
             text-align: center !important;
             font-weight: 800 !important;
             font-size: 11px !important;
+            align-self: center !important;
           }
 
           .mtr-excel__mtrno {
             text-align: right !important;
-            font-size: 10px !important;
+            font-size: 9px !important;
+            align-self: center !important;
           }
 
           .mtr-excel__mtrno-label {
             font-weight: 800 !important;
+            font-size: 9px !important;
+            color: #334155 !important;
+            margin-bottom: 1px !important;
+          }
+
+          .mtr-excel__mtrno-value {
+            font-size: 19pt !important;
+            font-weight: 900 !important;
+            line-height: 1 !important;
+            letter-spacing: 0.04em !important;
+            color: #000 !important;
+            border: 2px solid #000 !important;
+            border-radius: 8px !important;
+            padding: 4px 8px !important;
+            display: inline-block !important;
+            min-width: 5.5ch !important;
+            text-align: center !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
 
           .mtr-excel__table {
@@ -2597,13 +2705,22 @@ export default function MTR() {
 
           .mtr-excel__table td {
             border: 1px solid #111 !important;
-            padding: 5px 7px !important;
+            padding: 4px 6px !important;
             vertical-align: top !important;
           }
 
+          /* Espaço “filler” na pré-visualização — na impressão empurra assinaturas para fora da folha. */
+          tr.mtr-excel__stretch-wrap {
+            display: none !important;
+          }
+
           td.mtr-excel__stretch {
-            min-height: 28mm !important;
-            padding: 10mm 6px !important;
+            min-height: 0 !important;
+            height: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            overflow: hidden !important;
+            visibility: hidden !important;
           }
 
           .mtr-excel__sec {
@@ -2652,10 +2769,17 @@ export default function MTR() {
           }
 
           .mtr-excel__signrow {
-            margin-top: 10px !important;
+            margin-top: 6px !important;
             display: grid !important;
-            grid-template-columns: 1fr 1.2fr 0.6fr !important;
-            gap: 10px !important;
+            grid-template-columns: 1fr 1.15fr 0.55fr !important;
+            gap: 6px !important;
+            font-size: 8px !important;
+            line-height: 1.2 !important;
+          }
+
+          tr.mtr-excel__avoid-print-break {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
           }
 
           .no-print,
@@ -3148,7 +3272,9 @@ export default function MTR() {
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Município:</td>
-                                    <td className="mtr-excel__v">{mtrTextoCelula(selectedMTR.cidade)}</td>
+                                    <td className="mtr-excel__v">
+                                      {mtrTextoCelula((d.gerador.cidade || selectedMTR.cidade || '').trim())}
+                                    </td>
                                     <td className="mtr-excel__k">CEP:</td>
                                     <td className="mtr-excel__v">{mtrTextoCelula(d.gerador.cep)}</td>
                                     <td className="mtr-excel__k">Estado:</td>
@@ -3176,7 +3302,6 @@ export default function MTR() {
                                             <td className="mtr-excel__th">Estado Físico</td>
                                             <td className="mtr-excel__th">Tipo de Acondicionamento</td>
                                             <td className="mtr-excel__th">Qtde aprox.</td>
-                                            <td className="mtr-excel__th">FP (Nº)</td>
                                             <td className="mtr-excel__th">Nº ONU</td>
                                           </tr>
                                           <tr>
@@ -3187,7 +3312,6 @@ export default function MTR() {
                                             <td className="mtr-excel__v">{mtrTextoCelula(d.residuo.estado_fisico)}</td>
                                             <td className="mtr-excel__v">{mtrTextoCelula(d.residuo.acondicionamento)}</td>
                                             <td className="mtr-excel__v">{mtrTextoCelula(d.residuo.quantidade_aproximada)}</td>
-                                            <td className="mtr-excel__v">{mtrTextoCelula(d.residuo.fp_numero)}</td>
                                             <td className="mtr-excel__v">{mtrTextoCelula(d.residuo.onu)}</td>
                                           </tr>
                                         </tbody>
@@ -3226,7 +3350,11 @@ export default function MTR() {
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Razão Social:</td>
-                                    <td className="mtr-excel__v" colSpan={3}>{mtrTextoCelula(selectedMTR.transportador)}</td>
+                                    <td className="mtr-excel__v" colSpan={3}>
+                                      {mtrTextoCelula(
+                                        (d.transportador.razao_social || selectedMTR.transportador || '').trim()
+                                      )}
+                                    </td>
                                     <td className="mtr-excel__k">I.E:</td>
                                     <td className="mtr-excel__v">{mtrTextoCelula(d.transportador.ie)}</td>
                                   </tr>
@@ -3282,7 +3410,11 @@ export default function MTR() {
                                   </tr>
                                   <tr>
                                     <td className="mtr-excel__k">Razão Social:</td>
-                                    <td className="mtr-excel__v" colSpan={3}>{mtrTextoCelula(selectedMTR.destinador)}</td>
+                                    <td className="mtr-excel__v" colSpan={3}>
+                                      {mtrTextoCelula(
+                                        (d.destinatario.razao_social || selectedMTR.destinador || '').trim()
+                                      )}
+                                    </td>
                                     <td className="mtr-excel__k">CNPJ:</td>
                                     <td className="mtr-excel__v">{mtrTextoCelula(d.destinatario.cnpj)}</td>
                                   </tr>
@@ -3318,10 +3450,10 @@ export default function MTR() {
                                     </td>
                                   </tr>
 
-                                  <tr>
+                                  <tr className="mtr-excel__avoid-print-break">
                                     <td className="mtr-excel__sec" colSpan={6}>6. RESPONSÁVEIS</td>
                                   </tr>
-                                  <tr className="mtr-excel__throw">
+                                  <tr className="mtr-excel__throw mtr-excel__avoid-print-break">
                                     <td className="mtr-excel__th" colSpan={2}>
                                       a) Gerador
                                     </td>
@@ -3332,7 +3464,7 @@ export default function MTR() {
                                       c) Instalação receptora
                                     </td>
                                   </tr>
-                                  <tr>
+                                  <tr className="mtr-excel__avoid-print-break">
                                     <td className="mtr-excel__k">Nome:</td>
                                     <td className="mtr-excel__v">{mtrTextoCelula(selectedMTR.gerador)}</td>
                                     <td className="mtr-excel__k">Nome:</td>
@@ -3340,7 +3472,7 @@ export default function MTR() {
                                     <td className="mtr-excel__k">Nome:</td>
                                     <td className="mtr-excel__v">{mtrTextoCelula(selectedMTR.destinador)}</td>
                                   </tr>
-                                  <tr>
+                                  <tr className="mtr-excel__avoid-print-break">
                                     <td className="mtr-excel__k">Assinatura:</td>
                                     <td className="mtr-excel__v">&nbsp;</td>
                                     <td className="mtr-excel__k">Assinatura:</td>
@@ -3348,7 +3480,7 @@ export default function MTR() {
                                     <td className="mtr-excel__k">Assinatura:</td>
                                     <td className="mtr-excel__v">&nbsp;</td>
                                   </tr>
-                                  <tr>
+                                  <tr className="mtr-excel__avoid-print-break">
                                     <td className="mtr-excel__k">Data:</td>
                                     <td className="mtr-excel__v">____/____/________</td>
                                     <td className="mtr-excel__k">Data:</td>
@@ -3373,7 +3505,7 @@ export default function MTR() {
                                       8. CERTIFICAÇÃO DA INSTALAÇÃO RECEPTORA
                                     </td>
                                   </tr>
-                                  <tr>
+                                  <tr className="mtr-excel__avoid-print-break">
                                     <td className="mtr-excel__v" colSpan={6}>
                                       Certificação de recebimento do material perigoso descrito neste manifesto, na quantidade
                                       e tipo discriminados, exceto quando ocorrer o disposto na Seção 7 (Comunicação de
@@ -3385,7 +3517,7 @@ export default function MTR() {
                                       </div>
                                     </td>
                                   </tr>
-                                  <tr aria-hidden="true">
+                                  <tr className="mtr-excel__stretch-wrap" aria-hidden="true">
                                     <td className="mtr-excel__stretch" colSpan={6} />
                                   </tr>
                                 </tbody>
@@ -3562,11 +3694,24 @@ export default function MTR() {
                     </div>
 
                     <div className="field">
-                      <label>Cidade</label>
+                      <label>Cidade (obrigatório — município/UF)</label>
                       <input
                         value={form.cidade}
-                        onChange={(e) => setForm((prev) => ({ ...prev, cidade: e.target.value }))}
-                        placeholder="Cidade"
+                        onChange={(e) => {
+                          const v = e.target.value
+                          setForm((prev) => ({
+                            ...prev,
+                            cidade: v,
+                            detalhes: {
+                              ...(prev.detalhes ?? detalhesVazios()),
+                              gerador: {
+                                ...(prev.detalhes?.gerador ?? detalhesVazios().gerador),
+                                cidade: v,
+                              },
+                            },
+                          }))
+                        }}
+                        placeholder="Ex.: Araçariguama — SP"
                       />
                     </div>
 
@@ -3666,6 +3811,17 @@ export default function MTR() {
                           Estes campos espelham o modelo de MTR (planilha) e são usados na impressão do documento.
                         </div>
 
+                        <datalist id="mtr-atividade-sugestoes">
+                          {MTR_ATIVIDADE_SUGESTOES.map((s) => (
+                            <option key={s} value={s} />
+                          ))}
+                        </datalist>
+                        <datalist id="mtr-placas-frota">
+                          {caminhoesPlacas.map((c) => (
+                            <option key={c.id} value={c.placa} />
+                          ))}
+                        </datalist>
+
                         <div className="form-grid" style={{ marginTop: 12 }}>
                           <div className="field field-full">
                             <div style={{ fontWeight: 800 }}>1. Gerador</div>
@@ -3673,6 +3829,7 @@ export default function MTR() {
                           <div className="field">
                             <label>Atividade</label>
                             <input
+                              list="mtr-atividade-sugestoes"
                               value={form.detalhes?.gerador.atividade ?? ''}
                               onChange={(e) =>
                                 setForm((prev) => ({
@@ -3944,24 +4101,6 @@ export default function MTR() {
                               }
                             />
                           </div>
-                          <div className="field">
-                            <label>FP (Nº)</label>
-                            <input
-                              value={form.detalhes?.residuo.fp_numero ?? ''}
-                              onChange={(e) =>
-                                setForm((prev) => ({
-                                  ...prev,
-                                  detalhes: {
-                                    ...(prev.detalhes ?? detalhesVazios()),
-                                    residuo: {
-                                      ...(prev.detalhes?.residuo ?? detalhesVazios().residuo),
-                                      fp_numero: e.target.value,
-                                    },
-                                  },
-                                }))
-                              }
-                            />
-                          </div>
 
                           <div className="field field-full">
                             <div style={{ fontWeight: 800 }}>Blocos adicionais e discrepâncias</div>
@@ -4025,6 +4164,25 @@ export default function MTR() {
 
                           <div className="field field-full">
                             <div style={{ fontWeight: 800 }}>3. Transportador</div>
+                          </div>
+                          <div className="field field-full">
+                            <label>Razão social (impresso)</label>
+                            <input
+                              value={form.detalhes?.transportador.razao_social ?? ''}
+                              onChange={(e) =>
+                                setForm((prev) => ({
+                                  ...prev,
+                                  detalhes: {
+                                    ...(prev.detalhes ?? detalhesVazios()),
+                                    transportador: {
+                                      ...(prev.detalhes?.transportador ?? detalhesVazios().transportador),
+                                      razao_social: e.target.value,
+                                    },
+                                  },
+                                }))
+                              }
+                              placeholder="Ex.: igual ao campo Transportador acima"
+                            />
                           </div>
                           <div className="field">
                             <label>Atividade</label>
@@ -4245,6 +4403,7 @@ export default function MTR() {
                           <div className="field">
                             <label>Placa do veículo</label>
                             <input
+                              list="mtr-placas-frota"
                               value={form.detalhes?.transportador.placa ?? ''}
                               onChange={(e) =>
                                 setForm((prev) => ({
@@ -4282,6 +4441,25 @@ export default function MTR() {
 
                           <div className="field field-full">
                             <div style={{ fontWeight: 800 }}>4. Unidade destinatária (instalação receptora)</div>
+                          </div>
+                          <div className="field field-full">
+                            <label>Razão social (impresso)</label>
+                            <input
+                              value={form.detalhes?.destinatario.razao_social ?? ''}
+                              onChange={(e) =>
+                                setForm((prev) => ({
+                                  ...prev,
+                                  detalhes: {
+                                    ...(prev.detalhes ?? detalhesVazios()),
+                                    destinatario: {
+                                      ...(prev.detalhes?.destinatario ?? detalhesVazios().destinatario),
+                                      razao_social: e.target.value,
+                                    },
+                                  },
+                                }))
+                              }
+                              placeholder="Ex.: igual ao campo Destinador acima"
+                            />
                           </div>
                           <div className="field">
                             <label>Atividade</label>

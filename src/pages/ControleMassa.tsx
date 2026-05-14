@@ -16,6 +16,7 @@ import {
   queryColetasListaFluxoControle,
 } from "../lib/coletasSelectSeguimento";
 import { fetchResiduosCatalogo, mapResiduosPorId, type ResiduoCatalogo } from "../lib/residuosCatalogo";
+import { obterProximoNumeroTicketOperacional } from "../lib/nextTicketOperacionalNumero";
 import { supabase } from "../lib/supabase";
 import MainLayout from "../layouts/MainLayout";
 import { cargoPodeLancarPesagem, cargoPodeExcluirMtr } from "../lib/workflowPermissions";
@@ -34,6 +35,17 @@ function normalizarTextoBusca(s: string): string {
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .trim();
+}
+
+/** Valor sentinela no `<select>` do catálogo — não existe em `residuos` (não gravar como FK). */
+const RESIDUO_CATALOGO_ID_OUTROS_URBANOS = "__outros_residuos_urbanos__";
+const TEXTO_RESIDUO_OUTROS_URBANOS_PADRAO =
+  "Outros resíduos urbanos não recicláveis (Classe II A), conforme legislação municipal/estadual aplicável.";
+
+function residuoCatalogoIdParaDb(raw: string): string | null {
+  const t = (raw ?? "").trim();
+  if (!t || t === RESIDUO_CATALOGO_ID_OUTROS_URBANOS) return null;
+  return t;
 }
 
 type ColetaOpcao = {
@@ -275,29 +287,46 @@ async function fetchUltimaPesagemPorColetaIds(
   return ultima;
 }
 
-/** Tipos de ticket por coleta (um ticket por coleta na base). */
-async function fetchTipoTicketPorColetaIds(coletaIds: string[]): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+/** Dados resumidos do ticket operacional por coleta (no máx. um ticket por coleta). */
+async function fetchTicketOperacionalPorColetaIds(coletaIds: string[]): Promise<{
+  tipoPorColeta: Map<string, string>;
+  numeroPorColeta: Map<string, string>;
+}> {
+  const tipoPorColeta = new Map<string, string>();
+  const numeroPorColeta = new Map<string, string>();
   const uniq = [...new Set(coletaIds.map((id) => id.trim()).filter(Boolean))];
-  if (uniq.length === 0) return out;
+  if (uniq.length === 0) return { tipoPorColeta, numeroPorColeta };
   const chunkSize = 200;
+  const visto = new Set<string>();
   for (let i = 0; i < uniq.length; i += chunkSize) {
     const chunk = uniq.slice(i, i + chunkSize);
     const { data, error } = await supabase
       .from("tickets_operacionais")
-      .select("coleta_id, tipo_ticket")
+      .select("coleta_id, tipo_ticket, numero")
       .in("coleta_id", chunk);
     if (error) {
-      console.error("Erro ao buscar tipo de ticket por coleta:", error);
+      console.error("Erro ao buscar ticket operacional por coleta:", error);
       continue;
     }
-    for (const row of (data as { coleta_id?: string; tipo_ticket?: string | null }[]) || []) {
+    const rows =
+      (data as
+        | Array<{
+            coleta_id?: string;
+            tipo_ticket?: string | null;
+            numero?: string | null;
+          }>
+        | null) ?? [];
+    for (const row of rows) {
       const cid = row.coleta_id != null ? String(row.coleta_id) : "";
+      if (!cid || visto.has(cid)) continue;
+      visto.add(cid);
       const tt = row.tipo_ticket != null ? String(row.tipo_ticket).trim() : "";
-      if (cid && tt && !out.has(cid)) out.set(cid, tt);
+      const num = row.numero != null ? String(row.numero).trim() : "";
+      if (tt) tipoPorColeta.set(cid, tt);
+      numeroPorColeta.set(cid, num);
     }
   }
-  return out;
+  return { tipoPorColeta, numeroPorColeta };
 }
 
 function formatarTipoTicketLista(raw: string | null | undefined): string {
@@ -326,6 +355,13 @@ async function garantirTicketAposPesagem(params: {
   const descExtra = (params.descricaoExtra ?? "").trim();
   const descricao = descExtra || null;
 
+  let numeroFinal = params.numeroTicket.trim();
+  if (!numeroFinal) {
+    const nx = await obterProximoNumeroTicketOperacional(supabase);
+    if (!nx.ok) return { ok: false, message: nx.message };
+    numeroFinal = nx.numero;
+  }
+
   const { data: existentes, error: errSel } = await supabase
     .from("tickets_operacionais")
     .select("id")
@@ -343,7 +379,7 @@ async function garantirTicketAposPesagem(params: {
     const { error } = await supabase
       .from("tickets_operacionais")
       .update({
-        numero: params.numeroTicket.trim() || null,
+        numero: numeroFinal || null,
         descricao,
         tipo_ticket: params.tipoTicket,
       })
@@ -355,7 +391,7 @@ async function garantirTicketAposPesagem(params: {
 
   const { error } = await supabase.from("tickets_operacionais").insert({
     coleta_id: params.coletaId,
-    numero: params.numeroTicket.trim() || null,
+    numero: numeroFinal || null,
     descricao,
     tipo_ticket: params.tipoTicket,
     created_by: user?.id ?? null,
@@ -377,7 +413,7 @@ async function garantirTicketAposPesagem(params: {
       const { error: upErr } = await supabase
         .from("tickets_operacionais")
         .update({
-          numero: params.numeroTicket.trim() || null,
+          numero: numeroFinal || null,
           descricao,
           tipo_ticket: params.tipoTicket,
         })
@@ -511,7 +547,7 @@ async function criarColetaVinculadaAMtr(
     opts.residuoFallback.trim() ||
     String(m.tipo_residuo ?? "");
 
-  const resCat = opts.residuo_catalogo_id?.trim() || null;
+  const resCat = residuoCatalogoIdParaDb(String(opts.residuo_catalogo_id ?? ""));
 
   const row: Record<string, unknown> = {
     mtr_id: mtrId,
@@ -595,6 +631,9 @@ export default function ControleMassa() {
     Map<string, { data: string | null; hora_entrada: string | null; hora_saida: string | null }>
   >(() => new Map());
   const [tipoTicketPorColeta, setTipoTicketPorColeta] = useState<Map<string, string>>(() => new Map());
+  const [numeroTicketPorColeta, setNumeroTicketPorColeta] = useState<Map<string, string>>(
+    () => new Map()
+  );
   const [sucesso, setSucesso] = useState("");
   const [erroTela, setErroTela] = useState("");
   const [form, setForm] = useState<FormRegistro>(formInicial);
@@ -602,6 +641,7 @@ export default function ControleMassa() {
   const [mtrSemColetaSelecionado, setMtrSemColetaSelecionado] = useState<string | null>(null);
   const [mtrPickerAberto, setMtrPickerAberto] = useState(false);
   const [filtroMtr, setFiltroMtr] = useState("");
+  const [filtroCodigoCatalogoResiduo, setFiltroCodigoCatalogoResiduo] = useState("");
   const mtrComboRef = useRef<HTMLDivElement | null>(null);
   const dataInputRef = useRef<HTMLInputElement | null>(null);
   const placaInputRef = useRef<HTMLInputElement | null>(null);
@@ -676,9 +716,17 @@ export default function ControleMassa() {
     const id = form.coleta_id.trim();
     const temSelecao = Boolean(id || mtrSemColetaSelecionado);
     const temPesagem = id ? ultimaPesagemPorColeta.has(id) : false;
-    const temTicket = id ? Boolean(tipoTicketPorColeta.get(id)) : false;
+    const temTicket = id
+      ? Boolean(tipoTicketPorColeta.get(id) || (numeroTicketPorColeta.get(id) ?? "").trim())
+      : false;
     return { temSelecao, temPesagem, temTicket, prontoImprimir: temTicket };
-  }, [form.coleta_id, mtrSemColetaSelecionado, ultimaPesagemPorColeta, tipoTicketPorColeta]);
+  }, [
+    form.coleta_id,
+    mtrSemColetaSelecionado,
+    ultimaPesagemPorColeta,
+    tipoTicketPorColeta,
+    numeroTicketPorColeta,
+  ]);
 
   const podeImprimirTicket = Boolean(form.coleta_id.trim() && estadoFluxo.prontoImprimir);
 
@@ -855,14 +903,15 @@ export default function ControleMassa() {
       }
 
       const coletaIds = merged.map((c) => c.id);
-      const [ultima, tiposTicket] = await Promise.all([
+      const [ultima, ticketPorColeta] = await Promise.all([
         fetchUltimaPesagemPorColetaIds(coletaIds),
-        fetchTipoTicketPorColetaIds(coletaIds),
+        fetchTicketOperacionalPorColetaIds(coletaIds),
       ]);
 
       setTipoCaminhaoPorProgramacao(tipoCam);
       setUltimaPesagemPorColeta(ultima);
-      setTipoTicketPorColeta(tiposTicket);
+      setTipoTicketPorColeta(ticketPorColeta.tipoPorColeta);
+      setNumeroTicketPorColeta(ticketPorColeta.numeroPorColeta);
       setTodasColetas(merged);
     } finally {
       setLoadingVinculo(false);
@@ -1006,6 +1055,13 @@ export default function ControleMassa() {
     [residuosCatalogo]
   );
 
+  const residuosCatalogoFiltrados = useMemo(() => {
+    const base = residuosCatalogo.filter((r) => r.ativo);
+    const q = normalizarTextoBusca(filtroCodigoCatalogoResiduo);
+    if (!q) return base;
+    return base.filter((r) => normalizarTextoBusca(r.codigo).includes(q));
+  }, [residuosCatalogo, filtroCodigoCatalogoResiduo]);
+
   const coletasComCatalogoResiduo = useMemo(() => {
     return todasColetas.map((c) => {
       const rid = c.residuo_catalogo_id;
@@ -1033,6 +1089,15 @@ export default function ControleMassa() {
       setForm((prev) => {
         if (!value) {
           return { ...prev, residuo_catalogo_id: "" };
+        }
+        if (value === RESIDUO_CATALOGO_ID_OUTROS_URBANOS) {
+          const texto =
+            (prev.residuo ?? "").trim() || TEXTO_RESIDUO_OUTROS_URBANOS_PADRAO;
+          return {
+            ...prev,
+            residuo_catalogo_id: value,
+            residuo: texto,
+          };
         }
         const r = catalogoResiduosPorId.get(value);
         const texto = r ? `${r.codigo} — ${r.nome}` : prev.residuo;
@@ -1420,7 +1485,7 @@ export default function ControleMassa() {
         motorista: form.motorista,
         placa: form.placa,
         residuoFallback: form.residuo,
-        residuo_catalogo_id: form.residuo_catalogo_id.trim() || null,
+        residuo_catalogo_id: residuoCatalogoIdParaDb(form.residuo_catalogo_id),
       });
 
       if (!criada.ok) {
@@ -1444,8 +1509,8 @@ export default function ControleMassa() {
       return;
     }
 
-    const catalogIdNorm = form.residuo_catalogo_id.trim();
-    const rCatRow = catalogIdNorm ? catalogoResiduosPorId.get(catalogIdNorm) : undefined;
+    const catalogIdPersist = residuoCatalogoIdParaDb(form.residuo_catalogo_id);
+    const rCatRow = catalogIdPersist ? catalogoResiduosPorId.get(catalogIdPersist) : undefined;
     const textoDoCatalogo = rCatRow ? `${rCatRow.codigo} — ${rCatRow.nome}` : "";
     const tipoResiduoColeta = (coletaVinculo?.tipo_residuo ?? "").trim();
     const tipoResiduoMtr = (mtrLinha?.tipo_residuo != null ? String(mtrLinha.tipo_residuo) : "").trim();
@@ -1536,7 +1601,7 @@ export default function ControleMassa() {
     const fluxoPosPesagem = ticketAuto.ok ? "TICKET_GERADO" : "CONTROLE_PESAGEM_LANCADO";
 
     const tipoResGravar = residuoParaInsert;
-    const resCatGravar = form.residuo_catalogo_id.trim() || null;
+    const resCatGravar = catalogIdPersist;
 
     const { error: errorColeta } = await supabase
       .from("coletas")
@@ -1612,6 +1677,8 @@ export default function ControleMassa() {
       const mtrNo = c.mtr_id ? mtrsLista.find((m) => m.id === c.mtr_id)?.numero ?? "" : "";
       const tc = c.programacao_id ? tipoCaminhaoPorProgramacao[c.programacao_id] ?? "" : "";
       const up = c.id ? ultimaPesagemPorColeta.get(c.id) : undefined;
+      const ticketNo = c.id ? (numeroTicketPorColeta.get(c.id) ?? "").trim() : "";
+      const ticketTipo = c.id ? formatarTipoTicketLista(tipoTicketPorColeta.get(c.id)) : "";
       const blob = [
         c.numero,
         c.cliente,
@@ -1624,6 +1691,8 @@ export default function ControleMassa() {
         tc,
         formatarEtapaParaUI(c.etapaFluxo),
         up?.data ?? "",
+        ticketNo,
+        ticketTipo,
       ]
         .join(" ");
       return normalizarTextoBusca(blob).includes(t);
@@ -1636,6 +1705,8 @@ export default function ControleMassa() {
     mtrsLista,
     tipoCaminhaoPorProgramacao,
     ultimaPesagemPorColeta,
+    tipoTicketPorColeta,
+    numeroTicketPorColeta,
   ]);
 
   return (
@@ -2105,6 +2176,7 @@ export default function ControleMassa() {
                         <th style={thListaColetaStyle}>Hora entrada</th>
                         <th style={thListaColetaStyle}>Hora saída</th>
                         <th style={thListaColetaStyle}>Tipo ticket</th>
+                        <th style={{ ...thListaColetaStyle, whiteSpace: "nowrap" }}>N.º ticket</th>
                       </>
                     ) : null}
                     <th style={thListaColetaStyle}>Placa</th>
@@ -2181,11 +2253,26 @@ export default function ControleMassa() {
                               }}
                               title={
                                 tipoTicketPorColeta.get(c.id)
-                                  ? `Ticket operacional: ${formatarTipoTicketLista(tipoTicketPorColeta.get(c.id))}`
+                                  ? `Ticket operacional: ${formatarTipoTicketLista(tipoTicketPorColeta.get(c.id))}${
+                                      (numeroTicketPorColeta.get(c.id) ?? "").trim()
+                                        ? ` · n.º ${(numeroTicketPorColeta.get(c.id) ?? "").trim()}`
+                                        : ""
+                                    }`
                                   : "Sem ticket operacional — use o bloco abaixo após a pesagem"
                               }
                             >
                               {formatarTipoTicketLista(tipoTicketPorColeta.get(c.id))}
+                            </td>
+                            <td
+                              style={{
+                                ...tdListaColetaStyle,
+                                fontWeight: 800,
+                                color: (numeroTicketPorColeta.get(c.id) ?? "").trim() ? "#0f172a" : "#94a3b8",
+                                whiteSpace: "nowrap",
+                              }}
+                              title="Número do ticket operacional (impresso)"
+                            >
+                              {(numeroTicketPorColeta.get(c.id) ?? "").trim() || "—"}
                             </td>
                           </>
                         ) : null}
@@ -2712,6 +2799,18 @@ export default function ControleMassa() {
 
                   <div style={{ gridColumn: "span 4" }} className="field">
                     <label style={{ fontSize: 11, fontWeight: 800, color: "#475569" }}>Resíduo (catálogo)</label>
+                    <input
+                      aria-label="Filtrar catálogo de resíduos por código"
+                      value={filtroCodigoCatalogoResiduo}
+                      onChange={(e) => setFiltroCodigoCatalogoResiduo(e.target.value)}
+                      placeholder="Filtrar por código…"
+                      style={{
+                        ...inputStyle,
+                        height: "36px",
+                        fontSize: "12px",
+                        marginBottom: "8px",
+                      }}
+                    />
                     <select
                       name="residuo_catalogo_id"
                       value={form.residuo_catalogo_id}
@@ -2720,13 +2819,14 @@ export default function ControleMassa() {
                       aria-label="Catálogo de resíduos (código)"
                     >
                       <option value="">Selecione (opcional)</option>
-                      {residuosCatalogo
-                        .filter((r) => r.ativo)
-                        .map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.codigo} — {r.nome}
-                          </option>
-                        ))}
+                      <option value={RESIDUO_CATALOGO_ID_OUTROS_URBANOS}>
+                        Outros resíduos urbanos (texto livre — sem código de catálogo)
+                      </option>
+                      {residuosCatalogoFiltrados.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.codigo} — {r.nome}
+                        </option>
+                      ))}
                     </select>
                   </div>
 

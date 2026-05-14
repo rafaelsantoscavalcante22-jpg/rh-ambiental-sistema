@@ -3,6 +3,7 @@
  * Usados só para preencher campos vazios do bloco Transportador quando o nome indica RG Ambiental.
  */
 export const TRANSPORTADOR_RG_AMBIENTAL_PADRAO = {
+  razao_social: 'RG Ambiental Transportes Ltda.',
   atividade: 'Tratamento e disposição de resíduos perigosos de contaminação não radioativa (CNAE 3822-0/00)',
   cnpj: '02.785.402/0001-74',
   ie: '',

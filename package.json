@@ -1,13 +1,13 @@
 {
   "name": "rg-ambiental-sistema",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "module",
   "engines": {
     "node": ">=20.19.0"
   },
   "scripts": {
-    "dev": "vite --port 4173 --strictPort",
+    "dev": "vite --port 4173",
     "build": "npm run build:brand && node scripts/write-public-version.mjs && tsc -b && vite build",
     "build:brand": "node scripts/generate-brand-assets.mjs",
     "process:wordmark": "node scripts/process-wordmark-import.mjs",

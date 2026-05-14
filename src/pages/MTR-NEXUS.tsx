@@ -95,6 +95,7 @@ type MTRDetalhes = {
     bairro: string
     cep: string
     estado: string
+    cidade: string
     responsavel: string
     telefone: string
   }
@@ -107,6 +108,7 @@ type MTRDetalhes = {
     onu: string
   }
   transportador: {
+    razao_social: string
     atividade: string
     cnpj: string
     ie: string
@@ -123,6 +125,7 @@ type MTRDetalhes = {
     telefones_gerais: string
   }
   destinatario: {
+    razao_social: string
     atividade: string
     lo: string
     cnpj: string
@@ -149,6 +152,7 @@ function detalhesVazios(): MTRDetalhes {
       bairro: '',
       cep: '',
       estado: '',
+      cidade: '',
       responsavel: '',
       telefone: '',
     },
@@ -161,6 +165,7 @@ function detalhesVazios(): MTRDetalhes {
       onu: '',
     },
     transportador: {
+      razao_social: '',
       atividade: '',
       cnpj: '',
       ie: '',
@@ -177,6 +182,7 @@ function detalhesVazios(): MTRDetalhes {
       telefones_gerais: '',
     },
     destinatario: {
+      razao_social: '',
       atividade: '',
       lo: '',
       cnpj: '',

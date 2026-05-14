@@ -1,6 +1,7 @@
 /**
- * Checklist motorista simplificado: 15 itens (checkbox) + assinaturas na UI.
- * IDs estáveis para JSON em `checklist_transporte.respostas` (valores gravados: ok / não).
+ * Checklist «CONFERÊNCIA DO CAMINHÃO» — modelo papel RG (14 itens, SIM/NÃO no digital).
+ * IDs estáveis para JSON em `checklist_transporte.respostas` (valores: ok / não).
+ * Registos antigos (ids legados) são ignorados na UI; não quebram a página.
  */
 
 export type ItemChecklistMotorista = {
@@ -8,23 +9,35 @@ export type ItemChecklistMotorista = {
   label: string
 }
 
-/** 15 itens operacionais (modelo simplificado RG). */
+/** Coluna esquerda do modelo físico (7 itens). */
+export const CHECKLIST_MOTORISTA_COL_ESQ: ItemChecklistMotorista[] = [
+  { id: 'cm_documentos', label: 'Documentos' },
+  { id: 'cm_macaco', label: 'Macaco' },
+  { id: 'cm_chave_roda', label: 'Chave de Roda' },
+  { id: 'cm_extintor', label: 'Extintor' },
+  { id: 'cm_tacografo', label: 'Tacógrafo' },
+  { id: 'cm_oleo', label: 'Óleo' },
+  { id: 'cm_triangulo_cones', label: 'Triângulo/cones' },
+]
+
+/** Coluna direita do modelo físico (7 itens). */
+export const CHECKLIST_MOTORISTA_COL_DIR: ItemChecklistMotorista[] = [
+  { id: 'cm_cones', label: 'Cones' },
+  { id: 'cm_parte_eletrica', label: 'Parte elétrica' },
+  { id: 'cm_avarias_cabine', label: 'Avarias Cabine' },
+  { id: 'cm_parte_mecanica', label: 'Parte mecânica' },
+  { id: 'cm_mao_forca', label: 'Mão de força' },
+  { id: 'cm_agua', label: 'Água' },
+  {
+    id: 'cm_placa_residuos_perigosos',
+    label: 'Placa de Identificação de Resíduos Perigosos',
+  },
+]
+
+/** Lista única (14 itens) — ordem: esquerda de cima a baixo, depois direita. */
 export const CHECKLIST_MOTORISTA_ITENS: ItemChecklistMotorista[] = [
-  { id: 'luz_freio', label: 'Luz de freio' },
-  { id: 'lanternas', label: 'Lanternas' },
-  { id: 'chave_forca', label: 'Chave de força' },
-  { id: 'macaco', label: 'Macaco' },
-  { id: 'avarias_cabine', label: 'Avarias na cabine' },
-  { id: 'farol', label: 'Farol' },
-  { id: 'para_choque', label: 'Pára-choque' },
-  { id: 'cirene_re', label: 'Cirene de ré' },
-  { id: 'abastecimento', label: 'Abastecimento' },
-  { id: 'bolsa_classe_i_lacrada', label: 'Bolsa — Classe I — lacrada' },
-  { id: 'epi_motorista', label: 'EPIs — motorista' },
-  { id: 'epi_caminhao', label: 'EPIs — caminhão' },
-  { id: 'tacografo', label: 'Tacógrafo' },
-  { id: 'extintores', label: 'Extintores interno e externo' },
-  { id: 'faixa_refletiva', label: 'Faixa refletiva' },
+  ...CHECKLIST_MOTORISTA_COL_ESQ,
+  ...CHECKLIST_MOTORISTA_COL_DIR,
 ]
 
 const IDS = new Set(CHECKLIST_MOTORISTA_ITENS.map((i) => i.id))
@@ -40,7 +53,7 @@ export function respostasChecklistMotoristaIniciais(): RespostasChecklistMotoris
   return o
 }
 
-/** Grava ok/não por item (compatível com JSON já existente no Supabase). */
+/** Grava ok/não por item. */
 export function serializarRespostasMotoristaParaGravar(
   r: RespostasChecklistMotorista
 ): Record<string, string> {
@@ -52,15 +65,13 @@ export function serializarRespostasMotoristaParaGravar(
 }
 
 /**
- * Mescla JSON gravado com o modelo atual (15 itens).
- * Aceita legado: 'ok' / 'nao', booleanos, e chaves antigas com mais de 15 itens.
+ * Mescla JSON gravado com o modelo actual (14 itens).
+ * Chaves legadas (ex.: luz_freio) são ignoradas — checklist novo começa desmarcado.
  */
 export function mesclarRespostasChecklistMotorista(raw: unknown): RespostasChecklistMotorista {
   const base = respostasChecklistMotoristaIniciais()
   if (!raw || typeof raw !== 'object') return base
   const o = raw as Record<string, unknown>
-
-  const temChaveId = Object.keys(o).some((k) => IDS.has(k))
 
   for (const id of IDS) {
     if (!(id in o)) continue
@@ -70,22 +81,5 @@ export function mesclarRespostasChecklistMotorista(raw: unknown): RespostasCheck
     else base[id] = false
   }
 
-  if (!temChaveId) {
-    if (o.veiculo_condicoes_ok) {
-      base.luz_freio = true
-      base.farol = true
-      base.faixa_refletiva = true
-    }
-    if (o.ep_motorista_ok) {
-      base.epi_motorista = true
-      base.epi_caminhao = true
-    }
-    if (o.documentacao_mtr_ok) base.tacografo = true
-    if (o.carga_acondicionada_ok) base.bolsa_classe_i_lacrada = true
-    if (o.rota_seguranca_ok) {
-      base.cirene_re = true
-      base.lanternas = true
-    }
-  }
   return base
 }
