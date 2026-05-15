@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useSearchParams } from "react-router-dom";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import MainLayout from "../layouts/MainLayout";
@@ -809,6 +810,7 @@ export default function Clientes() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useSessionPersistedState("lista-busca", "");
+  const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useSessionPersistedState("lista-page", 1);
   const [pageSize, setPageSize] = useSessionPersistedState("lista-page-size", DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState<number | null>(null);
@@ -950,6 +952,15 @@ export default function Clientes() {
       setMostrarCadastro(true);
     },
   });
+
+  useEffect(() => {
+    const b = searchParams.get("busca")?.trim();
+    if (!b) return;
+    setBusca(b);
+    const next = new URLSearchParams(searchParams);
+    next.delete("busca");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, setBusca]);
 
   const fetchClientes = useCallback(async () => {
     setLoading(true);

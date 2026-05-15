@@ -12,11 +12,12 @@ const DEFAULT_ORIGINS = [
 
 function parseAllowedOrigins(): string[] {
   const raw = (Deno.env.get("EDGE_FUNCTION_ALLOWED_ORIGINS") || "").trim();
-  if (!raw) return [...DEFAULT_ORIGINS];
-  return raw
+  const fromSecret = raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  // Mescla com DEFAULT_ORIGINS: o secret em produção não deve bloquear localhost no dev.
+  return [...new Set([...DEFAULT_ORIGINS, ...fromSecret])];
 }
 
 let cachedAllow: Set<string> | null = null;

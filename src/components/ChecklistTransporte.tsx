@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
-import type { ItemChecklistMotorista, RespostasChecklistMotorista } from '../lib/checklistMotoristaItens'
+import type {
+  ItemChecklistMotorista,
+  RespostaChecklistItem,
+  RespostasChecklistMotorista,
+} from '../lib/checklistMotoristaItens'
 
 const ACCENT = '#0d9488'
 
@@ -35,7 +39,7 @@ const cardInnerStyle: CSSProperties = {
 
 const rowStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '44px 1fr',
+  gridTemplateColumns: '1fr auto',
   alignItems: 'center',
   gap: '12px',
   padding: '12px 14px',
@@ -44,34 +48,52 @@ const rowStyle: CSSProperties = {
   color: '#0f172a',
 }
 
+const btnSnStyle = (ativo: boolean, cor: string, dis: boolean): CSSProperties => ({
+  padding: '6px 12px',
+  borderRadius: '8px',
+  border: `1px solid ${ativo ? cor : '#cbd5e1'}`,
+  background: ativo ? `${cor}18` : '#fff',
+  color: ativo ? '#0f172a' : '#64748b',
+  fontWeight: 700,
+  fontSize: '12px',
+  cursor: dis ? 'not-allowed' : 'pointer',
+  opacity: dis ? 0.75 : 1,
+})
+
 export type ChecklistTransporteProps = {
   itens: readonly ItemChecklistMotorista[]
   respostas: RespostasChecklistMotorista
-  onToggle: (id: string, checked: boolean) => void
+  onRespostaChange: (id: string, valor: RespostaChecklistItem) => void
   assinaturaMotorista: string
   assinaturaResponsavel: string
   onAssinaturaMotoristaChange: (valor: string) => void
   onAssinaturaResponsavelChange: (valor: string) => void
   observacoes: string
   onObservacoesChange: (valor: string) => void
+  /** Quando false, esconde a caixa de observações (ex.: conferência usa «Avarias» na folha). */
+  mostrarObservacoes?: boolean
+  /** Conteúdo extra entre o bloco de itens e as assinaturas (ex.: caixa «Avarias» na folha RG). */
+  entreItensEAssinaturas?: ReactNode
   disabled: boolean
   loading?: boolean
 }
 
 /**
- * Checklist motorista simplificado: 15 checkboxes + assinatura motorista + assinatura responsável.
+ * Checklist «conferência do caminhão»: 14 itens com SIM / NÃO / limpar, assinaturas e observações opcionais.
  * Integrado em Conferência de transportes; gravação em `checklist_transporte` via página pai.
  */
 export default function ChecklistTransporte({
   itens,
   respostas,
-  onToggle,
+  onRespostaChange,
   assinaturaMotorista,
   assinaturaResponsavel,
   onAssinaturaMotoristaChange,
   onAssinaturaResponsavelChange,
   observacoes,
   onObservacoesChange,
+  mostrarObservacoes = true,
+  entreItensEAssinaturas,
   disabled,
   loading,
 }: ChecklistTransporteProps) {
@@ -155,39 +177,49 @@ export default function ChecklistTransporte({
 
       <div style={cardInnerStyle}>
         {itens.map((item, index) => {
-          const marcado = respostas[item.id] === true
-          const id = `ct-mot-${item.id}`
+          const v = respostas[item.id] ?? null
           return (
-            <label
+            <div
               key={item.id}
-              htmlFor={id}
               style={{
                 ...rowStyle,
-                cursor: disabled ? 'default' : 'pointer',
                 background: index % 2 === 0 ? '#ffffff' : '#fafbfc',
               }}
             >
-              <span style={{ textAlign: 'center' }}>
-                <input
-                  id={id}
-                  type="checkbox"
-                  checked={marcado}
+              <span style={{ lineHeight: 1.45, fontWeight: 600 }}>{item.label}</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
                   disabled={disabled}
-                  onChange={(e) => onToggle(item.id, e.target.checked)}
-                  style={{
-                    width: '20px',
-                    height: '20px',
-                    accentColor: ACCENT,
-                    cursor: disabled ? 'not-allowed' : 'pointer',
-                  }}
-                  aria-label={item.label}
-                />
-              </span>
-              <span style={{ lineHeight: 1.45, fontWeight: 500 }}>{item.label}</span>
-            </label>
+                  style={btnSnStyle(v === true, '#0d9488', disabled)}
+                  onClick={() => onRespostaChange(item.id, true)}
+                >
+                  SIM
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  style={btnSnStyle(v === false, '#b91c1c', disabled)}
+                  onClick={() => onRespostaChange(item.id, false)}
+                >
+                  NÃO
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  style={btnSnStyle(v === null, '#94a3b8', disabled)}
+                  onClick={() => onRespostaChange(item.id, null)}
+                  title="Limpar resposta"
+                >
+                  —
+                </button>
+              </div>
+            </div>
           )
         })}
       </div>
+
+      {entreItensEAssinaturas}
 
       <div>
         <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', marginBottom: '6px' }}>
@@ -443,29 +475,31 @@ export default function ChecklistTransporte({
         />
       </div>
 
-      <div>
-        <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', marginBottom: '6px' }}>
-          Observações (opcional)
+      {mostrarObservacoes ? (
+        <div>
+          <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', marginBottom: '6px' }}>
+            Observações (opcional)
+          </div>
+          <textarea
+            value={observacoes}
+            onChange={(e) => onObservacoesChange(e.target.value)}
+            readOnly={disabled}
+            rows={3}
+            placeholder="Notas adicionais"
+            style={{
+              width: '100%',
+              maxWidth: '100%',
+              padding: '10px 12px',
+              borderRadius: '10px',
+              border: '1px solid #cbd5e1',
+              fontSize: '14px',
+              resize: 'vertical',
+              opacity: disabled ? 0.85 : 1,
+              boxSizing: 'border-box',
+            }}
+          />
         </div>
-        <textarea
-          value={observacoes}
-          onChange={(e) => onObservacoesChange(e.target.value)}
-          readOnly={disabled}
-          rows={3}
-          placeholder="Notas adicionais"
-          style={{
-            width: '100%',
-            maxWidth: '100%',
-            padding: '10px 12px',
-            borderRadius: '10px',
-            border: '1px solid #cbd5e1',
-            fontSize: '14px',
-            resize: 'vertical',
-            opacity: disabled ? 0.85 : 1,
-            boxSizing: 'border-box',
-          }}
-        />
-      </div>
+      ) : null}
     </div>
   )
 }

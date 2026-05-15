@@ -20,6 +20,7 @@ import { ROTAS_SISTEMA, cargoPodeAcessarRotaMenu, usuarioPodeAcessarRota } from 
 import { useDebouncedValue } from '../lib/useDebouncedValue'
 import { ChatInternoFloating } from '../components/chat/ChatInternoFloating'
 import SuporteTecnicoFloat from '../components/SuporteTecnicoFloat'
+import { LayoutCabecalhoBusca } from '../components/layout/LayoutCabecalhoBusca'
 import { BRAND_LOGO_MARK } from '../lib/brandLogo'
 import { useVersaoRgExibir } from '../lib/appDisplayVersion'
 
@@ -712,23 +713,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
             <p className="layout-tagline">RG Ambiental</p>
           </div>
 
-          <div className="layout-header-search">
-            <div className="layout-search-wrap">
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path
-                  fill="currentColor"
-                  d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"
-                />
-              </svg>
-              <input
-                type="search"
-                className="layout-search-input"
-                placeholder="Buscar no sistema..."
-                aria-label="Buscar no sistema"
-                autoComplete="off"
-              />
-            </div>
-          </div>
+          <LayoutCabecalhoBusca usuario={usuario} />
 
           <div className="layout-header-actions">
             <select

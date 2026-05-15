@@ -19,6 +19,11 @@ export function cargoEhDesenvolvedor(cargo: string | null | undefined): boolean 
   return normalizarTextoCargo(cargo).includes('desenvolvedor')
 }
 
+/** Limpar histórico de conversa no chat interno — apenas Desenvolvedor. */
+export function cargoPodeApagarHistoricoChat(cargo: string | null | undefined): boolean {
+  return cargoEhDesenvolvedor(cargo)
+}
+
 /** Criar / excluir utilizadores — só Administrador e Desenvolvedor (perfil master). */
 export function cargoEhAdministradorOuDesenvolvedor(cargo: string | null | undefined): boolean {
   return cargoEhAdministrador(cargo) || cargoEhDesenvolvedor(cargo)

@@ -11,7 +11,7 @@ type Props = {
   presencaOutro: PresencaStatus
   mensagens: ChatMensagem[]
   enviando: boolean
-  /** Só administradores: mostra o menu com exclusão de histórico. */
+  /** Só Desenvolvedor: menu com exclusão de histórico. */
   podeApagarHistorico?: boolean
   apagandoHistorico?: boolean
   onApagarHistorico?: () => void

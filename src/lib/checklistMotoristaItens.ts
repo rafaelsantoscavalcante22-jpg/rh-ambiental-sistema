@@ -42,24 +42,28 @@ export const CHECKLIST_MOTORISTA_ITENS: ItemChecklistMotorista[] = [
 
 const IDS = new Set(CHECKLIST_MOTORISTA_ITENS.map((i) => i.id))
 
-/** Estado na UI: marcado = verificado / conforme. */
-export type RespostasChecklistMotorista = Record<string, boolean>
+/** null = não assinalado; true = SIM; false = NÃO (modelo papel). */
+export type RespostaChecklistItem = boolean | null
+
+export type RespostasChecklistMotorista = Record<string, RespostaChecklistItem>
 
 export function respostasChecklistMotoristaIniciais(): RespostasChecklistMotorista {
   const o: RespostasChecklistMotorista = {}
   for (const i of CHECKLIST_MOTORISTA_ITENS) {
-    o[i.id] = false
+    o[i.id] = null
   }
   return o
 }
 
-/** Grava ok/não por item. */
+/** Grava ok/não por item (omitir chaves ainda não assinaladas). */
 export function serializarRespostasMotoristaParaGravar(
   r: RespostasChecklistMotorista
 ): Record<string, string> {
   const out: Record<string, string> = {}
   for (const i of CHECKLIST_MOTORISTA_ITENS) {
-    out[i.id] = r[i.id] === true ? 'ok' : 'nao'
+    const v = r[i.id]
+    if (v === true) out[i.id] = 'ok'
+    else if (v === false) out[i.id] = 'nao'
   }
   return out
 }
@@ -78,7 +82,7 @@ export function mesclarRespostasChecklistMotorista(raw: unknown): RespostasCheck
     const v = o[id]
     if (v === 'ok' || v === true) base[id] = true
     else if (v === 'nao' || v === false) base[id] = false
-    else base[id] = false
+    else base[id] = null
   }
 
   return base

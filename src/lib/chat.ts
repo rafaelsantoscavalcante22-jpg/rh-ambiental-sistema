@@ -313,8 +313,33 @@ export async function chatTotalMensagensNaoLidas(): Promise<number> {
 }
 
 /**
- * Apaga todas as mensagens da conversa (e anexos em `chat-anexos`).
- * Só utilizadores com cargo de administrador que participam na conversa (RLS via RPC).
+ * Limpa mensagens na BD (RPC) e ficheiros em `chat-anexos` via Storage API.
+ * O Supabase hosted bloqueia DELETE em `storage.objects` dentro de funções SQL.
+ */
+async function chatRemoverAnexosConversaStorage(conversaId: string): Promise<void> {
+  const folder = conversaId.trim()
+  if (!folder) return
+  const { data: items, error: listErr } = await supabase.storage.from(BUCKET).list(folder, {
+    limit: 1000,
+    sortBy: { column: 'name', order: 'asc' },
+  })
+  if (listErr) {
+    console.warn('[chat] listar anexos ao limpar conversa:', listErr.message)
+    return
+  }
+  const paths = (items ?? [])
+    .filter((o) => Boolean(o?.name))
+    .map((o) => `${folder}/${o.name}`)
+  if (paths.length === 0) return
+  const { error: remErr } = await supabase.storage.from(BUCKET).remove(paths)
+  if (remErr) {
+    console.warn('[chat] remover anexos da conversa:', remErr.message)
+  }
+}
+
+/**
+ * Apaga todas as mensagens da conversa e remove anexos no bucket `chat-anexos`.
+ * Só cargo Desenvolvedor, participante da conversa (RPC `chat_admin_apagar_historico_conversa`).
  */
 export async function chatAdminApagarHistoricoConversa(conversaId: string): Promise<void> {
   const {
@@ -328,13 +353,19 @@ export async function chatAdminApagarHistoricoConversa(conversaId: string): Prom
   if (error) {
     const msg = [error.message, error.details].filter(Boolean).join(' — ')
     if (/forbidden|42501/i.test(msg)) {
-      throw new Error('Apenas administradores podem excluir o histórico desta conversa.')
+      throw new Error(
+        'O servidor ainda não reconhece o seu cargo como Desenvolvedor para esta ação. ' +
+          'No Supabase (SQL Editor), execute o ficheiro supabase/sql_editor_chat_desenvolvedor_apagar_historico.sql ' +
+          'e confirme em Usuários que o seu registo tem cargo «Desenvolvedor».'
+      )
     }
     if (/not_participant/i.test(msg)) {
       throw new Error('Não é participante desta conversa.')
     }
     throw normalizarErroChat(error)
   }
+
+  await chatRemoverAnexosConversaStorage(conversaId)
 }
 
 export async function chatMarcarLida(conversaId: string, meuId: string): Promise<void> {

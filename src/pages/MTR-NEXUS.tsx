@@ -249,6 +249,16 @@ function montarCidadeUfCliente(row: ClienteRowAutofill): string {
   return c || uf || ''
 }
 
+function cidadeCompletaGeradorParaGravar(cidadeTopo: string, gerador: MTRDetalhes['gerador']): string {
+  const top = (cidadeTopo ?? '').trim()
+  if (top) return top
+  const c = (gerador.cidade ?? '').trim()
+  const u = (gerador.estado ?? '').trim()
+  if (c && u) return `${c} — ${u}`
+  if (c) return c
+  return u || ''
+}
+
 /** data_programada vinda do banco (date ou timestamptz) → yyyy-mm-dd para input type=date */
 function dataProgramacaoParaEmissao(dataProgramada: string | null | undefined): string | null {
   if (!dataProgramada) return null
@@ -744,6 +754,10 @@ export default function MTR() {
             bairro: (row.bairro ?? '').trim() || dz.gerador.bairro,
             cep: (row.cep ?? '').trim() || dz.gerador.cep,
             estado: (row.estado ?? '').trim() || dz.gerador.estado,
+            cidade:
+              (row.cidade ?? '').trim() ||
+              (prev.detalhes?.gerador?.cidade ?? '').trim() ||
+              dz.gerador.cidade,
           },
           residuo: {
             ...dz.residuo,
@@ -889,6 +903,12 @@ export default function MTR() {
       return
     }
 
+    const detBasePrev = form.detalhes ?? detalhesVazios()
+    if (!cidadeCompletaGeradorParaGravar(form.cidade, detBasePrev.gerador).trim()) {
+      alert('Preencha a cidade do gerador (município e UF nos campos do layout, ou cidade no topo do formulário).')
+      return
+    }
+
     if (!form.data_emissao) {
       alert('Preencha a data de emissão.')
       return
@@ -901,19 +921,26 @@ export default function MTR() {
         ? null
         : Number(form.quantidade)
 
+    const detBase = form.detalhes ?? detalhesVazios()
+    const cidadeSalvar = cidadeCompletaGeradorParaGravar(form.cidade, detBase.gerador)
+    const detalhesGravar: MTRDetalhes = {
+      ...detBase,
+      gerador: { ...detBase.gerador },
+    }
+
     const payload = {
       numero: form.numero.trim(),
       programacao_id: form.programacao_id,
       cliente: form.cliente.trim(),
       gerador: form.gerador.trim(),
       endereco: form.endereco.trim(),
-      cidade: form.cidade.trim(),
+      cidade: cidadeSalvar,
       tipo_residuo: form.tipo_residuo.trim(),
       quantidade: qtd,
       unidade: form.unidade.trim() || '',
       destinador: form.destinador.trim(),
       transportador: form.transportador.trim(),
-      detalhes: form.detalhes ?? detalhesVazios(),
+      detalhes: detalhesGravar,
       data_emissao: form.data_emissao,
       observacoes: form.observacoes.trim(),
       /** Fluxo único: documento salvo é tratado como emitido (sem gestão de status na UI). */
@@ -3220,6 +3247,24 @@ export default function MTR() {
                                     gerador: {
                                       ...(prev.detalhes?.gerador ?? detalhesVazios().gerador),
                                       bairro: e.target.value,
+                                    },
+                                  },
+                                }))
+                              }
+                            />
+                          </div>
+                          <div className="field field-full">
+                            <label>Cidade</label>
+                            <input
+                              value={form.detalhes?.gerador.cidade ?? ''}
+                              onChange={(e) =>
+                                setForm((prev) => ({
+                                  ...prev,
+                                  detalhes: {
+                                    ...(prev.detalhes ?? detalhesVazios()),
+                                    gerador: {
+                                      ...(prev.detalhes?.gerador ?? detalhesVazios().gerador),
+                                      cidade: e.target.value,
                                     },
                                   },
                                 }))

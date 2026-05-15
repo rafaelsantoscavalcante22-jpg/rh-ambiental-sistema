@@ -15,6 +15,7 @@ import {
   mesclarRespostasChecklistMotorista,
   respostasChecklistMotoristaIniciais,
   serializarRespostasMotoristaParaGravar,
+  type RespostaChecklistItem,
   type RespostasChecklistMotorista,
 } from '../lib/checklistMotoristaItens'
 import { idsContextoFromSearchParams, resolverColetaPorContextoUrl } from '../lib/coletaContextoUrl'
@@ -31,6 +32,16 @@ import { BRAND_LOGO_MARK } from '../lib/brandLogo'
 import ChecklistTransporte from '../components/ChecklistTransporte'
 import { RgReportPdfIcon } from '../components/ui/RgReportPdfIcon'
 import { useSessionObjectDraft } from '../lib/usePageSessionPersistence'
+import {
+  extrairFolhaBrutaDeRespostas,
+  folhaConferenciaVazia,
+  folhaPrefillParaColeta,
+  incorporarFolhaNasRespostas,
+  mesclarFolhaConferenciaTransporte,
+  ROTAS_CONFERENCIA_LINHAS,
+  type FolhaConferenciaTransporte,
+} from '../lib/conferenciaTransporteFolha'
+import { ConferenciaTransporteFolhaPrintView } from '../components/ConferenciaTransporteFolhaPrint'
 
 type ColetaResumo = {
   id: string
@@ -44,6 +55,8 @@ type ColetaResumo = {
   cliente_id: string | null
   placa: string
   motorista: string
+  /** Ticket operacional / numeração interna, quando existir na coleta. */
+  ticket_numero: string
 }
 
 function textoColetaParaBusca(c: ColetaResumo): string {
@@ -95,35 +108,19 @@ const cardStyle: CSSProperties = {
   marginBottom: '22px',
 }
 
-const thStyle: CSSProperties = {
-  border: '1px solid #e2e8f0',
+/** Campos de texto pequenos na folha (ecrã). */
+const inpFolha: CSSProperties = {
+  width: '100%',
+  boxSizing: 'border-box',
   padding: '8px 10px',
-  fontWeight: 700,
-  fontSize: '11px',
-  textAlign: 'center',
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
-  color: '#475569',
-  background: '#f8fafc',
-}
-
-const tdOkNaoStyle: CSSProperties = {
-  border: '1px solid #e2e8f0',
-  padding: '6px 8px',
-  textAlign: 'center',
-  width: '56px',
-  verticalAlign: 'middle',
-  background: '#fff',
+  borderRadius: '8px',
+  border: '1px solid #cbd5e1',
+  fontSize: '13px',
 }
 
 function hojeBr() {
   const d = new Date()
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
-}
-
-/** Rótulos no PDF alinhados ao modelo (ex.: EPIs sem apóstrofo). */
-function rotuloItemImpressao(label: string) {
-  return label.replace(/EPI's/g, 'EPIs')
 }
 
 export default function ConferenciaTransporte() {
@@ -141,7 +138,7 @@ export default function ConferenciaTransporte() {
   const [respostasMotorista, setRespostasMotorista] = useState<RespostasChecklistMotorista>(() =>
     respostasChecklistMotoristaIniciais()
   )
-  const [observacoesMotorista, setObservacoesMotorista] = useState('')
+  const [folha, setFolha] = useState<FolhaConferenciaTransporte>(() => folhaConferenciaVazia())
   const [assinaturaMotorista, setAssinaturaMotorista] = useState('')
   const [assinaturaResponsavel, setAssinaturaResponsavel] = useState('')
   const [carregandoChecklistMotorista, setCarregandoChecklistMotorista] = useState(false)
@@ -158,7 +155,7 @@ export default function ConferenciaTransporte() {
       pesquisaColeta,
       sp: searchParams.toString(),
       respostasMotorista,
-      observacoesMotorista,
+      folha,
       assinaturaMotorista,
       assinaturaResponsavel,
       secaoColetaExpandida,
@@ -168,7 +165,7 @@ export default function ConferenciaTransporte() {
       pesquisaColeta,
       searchParams,
       respostasMotorista,
-      observacoesMotorista,
+      folha,
       assinaturaMotorista,
       assinaturaResponsavel,
       secaoColetaExpandida,
@@ -183,7 +180,12 @@ export default function ConferenciaTransporte() {
       setPesquisaColeta(d.pesquisaColeta)
       setSearchParams(new URLSearchParams(d.sp), { replace: true })
       setRespostasMotorista(d.respostasMotorista)
-      setObservacoesMotorista(d.observacoesMotorista)
+      const legado = d as { folha?: FolhaConferenciaTransporte; observacoesMotorista?: string }
+      let f = legado.folha ?? folhaConferenciaVazia()
+      if (!f.avarias.trim() && legado.observacoesMotorista?.trim()) {
+        f = { ...f, avarias: legado.observacoesMotorista.trim() }
+      }
+      setFolha(f)
       setAssinaturaMotorista(d.assinaturaMotorista)
       setAssinaturaResponsavel(d.assinaturaResponsavel)
       setSecaoColetaExpandida(d.secaoColetaExpandida)
@@ -243,6 +245,11 @@ export default function ConferenciaTransporte() {
         cliente_id: item.cliente_id != null ? String(item.cliente_id) : null,
         placa: String(item.placa ?? ''),
         motorista: String(item.motorista_nome ?? item.motorista ?? ''),
+        ticket_numero: String(
+          (item as Record<string, unknown>).ticket_numero ??
+            (item as Record<string, unknown>).numero_ticket ??
+            ''
+        ).trim(),
       }
     })
 
@@ -290,14 +297,16 @@ export default function ConferenciaTransporte() {
     void carregarCargo()
   }, [])
 
-  const carregarChecklistMotorista = useCallback(async (coletaId: string) => {
+  const carregarChecklistMotorista = useCallback(async (coleta: ColetaResumo | null) => {
+    if (!coleta) return
+
     setCarregandoChecklistMotorista(true)
     setErroMotorista('')
     setMensagemMotorista('')
     const { data, error } = await supabase
       .from('checklist_transporte')
       .select('id, respostas, observacoes, assinatura_motorista, assinatura_responsavel')
-      .eq('coleta_id', coletaId)
+      .eq('coleta_id', coleta.id)
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle()
@@ -307,7 +316,7 @@ export default function ConferenciaTransporte() {
       setErroMotorista('Não foi possível carregar o checklist do motorista.')
       setChecklistMotoristaId(null)
       setRespostasMotorista(respostasChecklistMotoristaIniciais())
-      setObservacoesMotorista('')
+      setFolha(folhaConferenciaVazia())
       setAssinaturaMotorista('')
       setAssinaturaResponsavel('')
       setCarregandoChecklistMotorista(false)
@@ -317,13 +326,27 @@ export default function ConferenciaTransporte() {
     if (data) {
       setChecklistMotoristaId(data.id)
       setRespostasMotorista(mesclarRespostasChecklistMotorista(data.respostas))
-      setObservacoesMotorista(data.observacoes ?? '')
+      let fMerge = mesclarFolhaConferenciaTransporte(
+        extrairFolhaBrutaDeRespostas(data.respostas),
+        data.observacoes
+      )
+      if (!fMerge.dataStr.trim()) {
+        fMerge = { ...fMerge, dataStr: hojeBr() }
+      }
+      setFolha(fMerge)
       setAssinaturaMotorista(data.assinatura_motorista ?? '')
       setAssinaturaResponsavel(data.assinatura_responsavel ?? '')
     } else {
       setChecklistMotoristaId(null)
       setRespostasMotorista(respostasChecklistMotoristaIniciais())
-      setObservacoesMotorista('')
+      const pre = folhaPrefillParaColeta({
+        dataStr: hojeBr(),
+        numeroTicket: coleta.ticket_numero || '',
+      })
+      if (coleta.cliente) {
+        pre.rotas[0] = { ...pre.rotas[0], cliente: coleta.cliente }
+      }
+      setFolha(pre)
       setAssinaturaMotorista('')
       setAssinaturaResponsavel('')
     }
@@ -333,13 +356,13 @@ export default function ConferenciaTransporte() {
   useEffect(() => {
     if (coletaAtiva) {
       queueMicrotask(() => {
-        void carregarChecklistMotorista(coletaAtiva.id)
+        void carregarChecklistMotorista(coletaAtiva)
       })
     } else {
       queueMicrotask(() => {
         setChecklistMotoristaId(null)
         setRespostasMotorista(respostasChecklistMotoristaIniciais())
-        setObservacoesMotorista('')
+        setFolha(folhaConferenciaVazia())
         setAssinaturaMotorista('')
         setAssinaturaResponsavel('')
       })
@@ -356,9 +379,9 @@ export default function ConferenciaTransporte() {
     setPesquisaColeta('')
   }
 
-  function setRespostaMotoristaItem(id: string, checked: boolean) {
+  function setRespostaMotorista(id: string, valor: RespostaChecklistItem) {
     if (!podeEditarMotorista) return
-    setRespostasMotorista((prev) => ({ ...prev, [id]: checked }))
+    setRespostasMotorista((prev) => ({ ...prev, [id]: valor }))
   }
 
   function imprimirDocumentoUnificado() {
@@ -369,10 +392,10 @@ export default function ConferenciaTransporte() {
     e.preventDefault()
     if (!coletaAtiva || !podeEditarMotorista) return
 
-    const todosPreenchidos = CHECKLIST_MOTORISTA_ITENS.every((i) => respostasMotorista[i.id] === true)
-    if (!todosPreenchidos) {
+    const todosRespondidos = CHECKLIST_MOTORISTA_ITENS.every((i) => respostasMotorista[i.id] !== null)
+    if (!todosRespondidos) {
       const ok = window.confirm(
-        'Ainda há itens do checklist por marcar. Deseja gravar mesmo assim?'
+        'Ainda há itens do checklist sem SIM ou NÃO. Deseja gravar mesmo assim?'
       )
       if (!ok) return
     }
@@ -385,13 +408,14 @@ export default function ConferenciaTransporte() {
       data: { user },
     } = await supabase.auth.getUser()
     const agora = new Date().toISOString()
+    const respostasJson = incorporarFolhaNasRespostas(
+      serializarRespostasMotoristaParaGravar(respostasMotorista),
+      folha
+    )
     const payloadBase = {
       coleta_id: coletaAtiva.id,
-      respostas: serializarRespostasMotoristaParaGravar(respostasMotorista) as unknown as Record<
-        string,
-        unknown
-      >,
-      observacoes: observacoesMotorista.trim() || null,
+      respostas: respostasJson as unknown as Record<string, unknown>,
+      observacoes: folha.avarias.trim() || null,
       assinatura_motorista: assinaturaMotorista.trim() || null,
       assinatura_responsavel: assinaturaResponsavel.trim() || null,
       preenchido_por: user?.id ?? null,
@@ -423,7 +447,7 @@ export default function ConferenciaTransporte() {
           .eq('id', existente.id)
         if (error) throw error
         setChecklistMotoristaId(existente.id)
-        setMensagemMotorista('Checklist do motorista atualizado.')
+        setMensagemMotorista('Conferência de transportes atualizada.')
       } else {
         const { data, error } = await supabase
           .from('checklist_transporte')
@@ -439,7 +463,7 @@ export default function ConferenciaTransporte() {
           .single()
         if (error) throw error
         if (data?.id) setChecklistMotoristaId(data.id)
-        setMensagemMotorista('Checklist do motorista gravado.')
+        setMensagemMotorista('Conferência de transportes gravada.')
       }
     } catch (err: unknown) {
       console.error(err)
@@ -460,11 +484,6 @@ export default function ConferenciaTransporte() {
   const opcoesColetaFiltradas = useMemo(
     () => opcoesSelect.filter((c) => coletaCorrespondePesquisa(c, pesquisaColeta)),
     [opcoesSelect, pesquisaColeta]
-  )
-
-  const motoristaItensRespondidos = useMemo(
-    () => CHECKLIST_MOTORISTA_ITENS.filter((i) => respostasMotorista[i.id] === true).length,
-    [respostasMotorista]
   )
 
   return (
@@ -672,16 +691,16 @@ export default function ConferenciaTransporte() {
             min-height: auto !important;
           }
           .ct-print-unificado-inner {
-            max-width: 720px !important;
+            max-width: 200mm !important;
             width: 100% !important;
             margin-left: auto !important;
             margin-right: auto !important;
-            text-align: center !important;
+            text-align: left !important;
             box-sizing: border-box !important;
           }
           .ct-print-mtr-body {
             text-align: left !important;
-            max-width: 680px !important;
+            max-width: 100% !important;
             width: 100% !important;
             margin-left: auto !important;
             margin-right: auto !important;
@@ -705,11 +724,12 @@ export default function ConferenciaTransporte() {
               letterSpacing: '-0.02em',
             }}
           >
-            Checklist e assinaturas do transporte
+            Conferência de transportes
           </h1>
-          <p style={{ margin: '14px auto 0', maxWidth: 580, fontSize: '15px', color: '#64748b', lineHeight: 1.6 }}>
-            Fluxo em <strong>2 passos</strong>: escolha a coleta, marque os <strong>15 itens</strong> do checklist,
-            as <strong>assinaturas</strong> e grave. O PDF reflete o mesmo conteúdo.
+          <p style={{ margin: '14px auto 0', maxWidth: 620, fontSize: '15px', color: '#64748b', lineHeight: 1.6 }}>
+            Fluxo em <strong>2 passos</strong>: escolha a coleta e preencha a <strong>folha modelo RG Ambiental Transportes</strong>{' '}
+            (dados de viagem, tabela de clientes, <strong>conferência do caminhão</strong> com SIM/NÃO, termo e assinaturas).
+            O PDF segue o mesmo layout do papel.
           </p>
           {coletaAtiva ? (
             <div style={{ marginTop: 22 }}>
@@ -731,7 +751,7 @@ export default function ConferenciaTransporte() {
           <span className="conf-trans-step-sep" aria-hidden>
             →
           </span>
-          <span className="conf-trans-step-num">2</span> Checklist motorista (15 itens)
+          <span className="conf-trans-step-num">2</span> Folha de conferência (modelo RG)
         </div>
 
         {erroListaColetas ? (
@@ -977,7 +997,7 @@ export default function ConferenciaTransporte() {
                     className="conf-trans-acc-title"
                     style={{ fontWeight: 800, color: '#0f172a', fontSize: 17, display: 'block' }}
                   >
-                    Checklist motorista
+                    Folha de conferência (modelo papel)
                   </span>
                 </span>
                 <span
@@ -990,20 +1010,279 @@ export default function ConferenciaTransporte() {
               </button>
               {!secaoChecklistExpandida ? (
                 <p style={{ margin: 0, fontSize: '13px', color: '#64748b', paddingLeft: '4px' }}>
-                  Clique para expandir o checklist (15 itens, assinaturas e gravar).
+                  Clique para expandir a folha (dados, rotas, checklist SIM/NÃO, avarias e assinaturas).
                 </p>
               ) : null}
             </div>
             {secaoChecklistExpandida ? (
             <>
-            <p style={{ margin: '0 0 14px', fontSize: '14px', color: '#334155', lineHeight: 1.5 }}>
-              Marque cada item verificado, preencha as assinaturas e opcionalmente observações. Grave ao finalizar.
+            <p style={{ margin: '0 0 16px', fontSize: '14px', color: '#334155', lineHeight: 1.5 }}>
+              Preencha os campos como no impresso. A placa e o motorista no PDF usam os dados da coleta. Grave ao finalizar.
             </p>
+
+            <div
+              style={{
+                marginBottom: 20,
+                padding: '16px 18px',
+                borderRadius: 12,
+                border: '1px solid #e2e8f0',
+                background: '#fafafa',
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 10 }}>
+                Cabeçalho e veículo
+              </div>
+              <p style={{ margin: '0 0 12px', fontSize: 12, color: '#64748b', lineHeight: 1.45 }}>
+                <strong>Placa</strong> e <strong>motorista</strong> na impressão:{' '}
+                <span style={{ color: '#0f766e' }}>{coletaAtiva.placa || '—'}</span> ·{' '}
+                <span style={{ color: '#0f766e' }}>{coletaAtiva.motorista || '—'}</span>. O{' '}
+                <strong>ticket nº</strong> pode ser editado (numerar a partir de 1340, conforme procedimento interno).
+              </p>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: 12,
+                  marginBottom: 12,
+                }}
+              >
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 700, color: '#475569' }}>
+                  Data
+                  <input
+                    style={inpFolha}
+                    value={folha.dataStr}
+                    onChange={(e) => setFolha((p) => ({ ...p, dataStr: e.target.value }))}
+                    disabled={!podeEditarMotorista}
+                    placeholder={hojeBr()}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 700, color: '#475569' }}>
+                  Ticket nº
+                  <input
+                    style={inpFolha}
+                    value={folha.numeroTicket}
+                    onChange={(e) => setFolha((p) => ({ ...p, numeroTicket: e.target.value }))}
+                    disabled={!podeEditarMotorista}
+                    placeholder="ex.: 1340"
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 700, color: '#475569' }}>
+                  Horário saída RG
+                  <input
+                    style={inpFolha}
+                    value={folha.horarioSaidaRg}
+                    onChange={(e) => setFolha((p) => ({ ...p, horarioSaidaRg: e.target.value }))}
+                    disabled={!podeEditarMotorista}
+                    placeholder="__:__"
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 700, color: '#475569' }}>
+                  Horário chegada
+                  <input
+                    style={inpFolha}
+                    value={folha.horarioChegada}
+                    onChange={(e) => setFolha((p) => ({ ...p, horarioChegada: e.target.value }))}
+                    disabled={!podeEditarMotorista}
+                    placeholder="__:__"
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 700, color: '#475569' }}>
+                  Pedágio (1)
+                  <input
+                    style={inpFolha}
+                    value={folha.pedagio1}
+                    onChange={(e) => setFolha((p) => ({ ...p, pedagio1: e.target.value }))}
+                    disabled={!podeEditarMotorista}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 700, color: '#475569' }}>
+                  Pedágio (2)
+                  <input
+                    style={inpFolha}
+                    value={folha.pedagio2}
+                    onChange={(e) => setFolha((p) => ({ ...p, pedagio2: e.target.value }))}
+                    disabled={!podeEditarMotorista}
+                  />
+                </label>
+                <label
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: '#475569',
+                    gridColumn: '1 / -1',
+                  }}
+                >
+                  Nome do ajudante
+                  <input
+                    style={inpFolha}
+                    value={folha.nomeAjudante}
+                    onChange={(e) => setFolha((p) => ({ ...p, nomeAjudante: e.target.value }))}
+                    disabled={!podeEditarMotorista}
+                  />
+                </label>
+              </div>
+
+              <div style={{ overflowX: 'auto', marginBottom: 14 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 480 }}>
+                  <thead>
+                    <tr style={{ background: '#f1f5f9' }}>
+                      {['Veículo', 'Qtd. combustível', 'Km inicial', 'Km final', 'Km total'].map((h) => (
+                        <th
+                          key={h}
+                          style={{
+                            border: '1px solid #cbd5e1',
+                            padding: '8px',
+                            textAlign: 'center',
+                            fontWeight: 800,
+                            color: '#475569',
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style={{ border: '1px solid #e2e8f0', padding: 4 }}>
+                        <input
+                          style={{ ...inpFolha, border: 'none' }}
+                          value={folha.veiculo}
+                          onChange={(e) => setFolha((p) => ({ ...p, veiculo: e.target.value }))}
+                          disabled={!podeEditarMotorista}
+                          placeholder="Tipo / modelo"
+                        />
+                      </td>
+                      <td style={{ border: '1px solid #e2e8f0', padding: 4 }}>
+                        <input
+                          style={{ ...inpFolha, border: 'none' }}
+                          value={folha.qtdCombustivel}
+                          onChange={(e) => setFolha((p) => ({ ...p, qtdCombustivel: e.target.value }))}
+                          disabled={!podeEditarMotorista}
+                        />
+                      </td>
+                      <td style={{ border: '1px solid #e2e8f0', padding: 4 }}>
+                        <input
+                          style={{ ...inpFolha, border: 'none' }}
+                          value={folha.kmInicial}
+                          onChange={(e) => setFolha((p) => ({ ...p, kmInicial: e.target.value }))}
+                          disabled={!podeEditarMotorista}
+                        />
+                      </td>
+                      <td style={{ border: '1px solid #e2e8f0', padding: 4 }}>
+                        <input
+                          style={{ ...inpFolha, border: 'none' }}
+                          value={folha.kmFinal}
+                          onChange={(e) => setFolha((p) => ({ ...p, kmFinal: e.target.value }))}
+                          disabled={!podeEditarMotorista}
+                        />
+                      </td>
+                      <td style={{ border: '1px solid #e2e8f0', padding: 4 }}>
+                        <input
+                          style={{ ...inpFolha, border: 'none' }}
+                          value={folha.kmTotal}
+                          onChange={(e) => setFolha((p) => ({ ...p, kmTotal: e.target.value }))}
+                          disabled={!podeEditarMotorista}
+                        />
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 8 }}>
+                Clientes / rota (5 linhas)
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 520 }}>
+                  <thead>
+                    <tr style={{ background: '#f1f5f9' }}>
+                      <th style={{ border: '1px solid #cbd5e1', padding: 8, width: 36 }}>#</th>
+                      <th style={{ border: '1px solid #cbd5e1', padding: 8 }}>Cliente</th>
+                      <th style={{ border: '1px solid #cbd5e1', padding: 8 }}>Km chegada</th>
+                      <th style={{ border: '1px solid #cbd5e1', padding: 8 }}>Hora entrada</th>
+                      <th style={{ border: '1px solid #cbd5e1', padding: 8 }}>Hora saída</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {folha.rotas.slice(0, ROTAS_CONFERENCIA_LINHAS).map((row, i) => (
+                      <tr key={i}>
+                        <td style={{ border: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 800 }}>{i + 1}</td>
+                        <td style={{ border: '1px solid #e2e8f0', padding: 4 }}>
+                          <input
+                            style={{ ...inpFolha, border: 'none' }}
+                            value={row.cliente}
+                            onChange={(e) =>
+                              setFolha((p) => {
+                                const rotas = p.rotas.slice()
+                                rotas[i] = { ...rotas[i], cliente: e.target.value }
+                                return { ...p, rotas }
+                              })
+                            }
+                            disabled={!podeEditarMotorista}
+                            placeholder={i === 2 ? 'ex.: ALMOÇO' : ''}
+                          />
+                        </td>
+                        <td style={{ border: '1px solid #e2e8f0', padding: 4 }}>
+                          <input
+                            style={{ ...inpFolha, border: 'none' }}
+                            value={row.kmChegada}
+                            onChange={(e) =>
+                              setFolha((p) => {
+                                const rotas = p.rotas.slice()
+                                rotas[i] = { ...rotas[i], kmChegada: e.target.value }
+                                return { ...p, rotas }
+                              })
+                            }
+                            disabled={!podeEditarMotorista}
+                          />
+                        </td>
+                        <td style={{ border: '1px solid #e2e8f0', padding: 4 }}>
+                          <input
+                            style={{ ...inpFolha, border: 'none' }}
+                            value={row.horaEntrada}
+                            onChange={(e) =>
+                              setFolha((p) => {
+                                const rotas = p.rotas.slice()
+                                rotas[i] = { ...rotas[i], horaEntrada: e.target.value }
+                                return { ...p, rotas }
+                              })
+                            }
+                            disabled={!podeEditarMotorista}
+                          />
+                        </td>
+                        <td style={{ border: '1px solid #e2e8f0', padding: 4 }}>
+                          <input
+                            style={{ ...inpFolha, border: 'none' }}
+                            value={row.horaSaida}
+                            onChange={(e) =>
+                              setFolha((p) => {
+                                const rotas = p.rotas.slice()
+                                rotas[i] = { ...rotas[i], horaSaida: e.target.value }
+                                return { ...p, rotas }
+                              })
+                            }
+                            disabled={!podeEditarMotorista}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a', marginBottom: 8, textAlign: 'center' }}>
+              Conferência do caminhão
+            </div>
             <div className="conf-trans-checklist-unico">
               <ChecklistTransporte
                 itens={CHECKLIST_MOTORISTA_ITENS}
                 respostas={respostasMotorista}
-                onToggle={setRespostaMotoristaItem}
+                onRespostaChange={(id, valor) => setRespostaMotorista(id, valor)}
                 assinaturaMotorista={assinaturaMotorista}
                 assinaturaResponsavel={assinaturaResponsavel}
                 onAssinaturaMotoristaChange={(v) =>
@@ -1012,8 +1291,34 @@ export default function ConferenciaTransporte() {
                 onAssinaturaResponsavelChange={(v) =>
                   podeEditarMotorista ? setAssinaturaResponsavel(v) : undefined
                 }
-                observacoes={observacoesMotorista}
-                onObservacoesChange={(v) => (podeEditarMotorista ? setObservacoesMotorista(v) : undefined)}
+                observacoes=""
+                onObservacoesChange={() => {}}
+                mostrarObservacoes={false}
+                entreItensEAssinaturas={
+                  <div style={{ marginTop: 4, marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6 }}>
+                      Avarias (termo de responsabilidade)
+                    </div>
+                    <textarea
+                      value={folha.avarias}
+                      onChange={(e) => setFolha((p) => ({ ...p, avarias: e.target.value }))}
+                      readOnly={!podeEditarMotorista}
+                      rows={5}
+                      placeholder="Descreva avarias ou deixe em branco se não houver."
+                      style={{
+                        width: '100%',
+                        maxWidth: '100%',
+                        padding: '10px 12px',
+                        borderRadius: '10px',
+                        border: '1px solid #cbd5e1',
+                        fontSize: '14px',
+                        resize: 'vertical',
+                        boxSizing: 'border-box',
+                        opacity: podeEditarMotorista ? 1 : 0.85,
+                      }}
+                    />
+                  </div>
+                }
                 disabled={!podeEditarMotorista}
                 loading={carregandoChecklistMotorista}
               />
@@ -1053,7 +1358,7 @@ export default function ConferenciaTransporte() {
                       cursor: podeEditarMotorista && !salvandoMotorista ? 'pointer' : 'not-allowed',
                     }}
                   >
-                    {salvandoMotorista ? 'A gravar…' : checklistMotoristaId ? 'Atualizar checklist motorista' : 'Gravar checklist motorista'}
+                    {salvandoMotorista ? 'A gravar…' : checklistMotoristaId ? 'Atualizar folha' : 'Gravar folha'}
                   </button>
                 </div>
               </>
@@ -1073,7 +1378,7 @@ export default function ConferenciaTransporte() {
               margin: '0 auto',
             }}
           >
-            Escolha uma coleta acima para preencher o checklist do motorista.
+            Escolha uma coleta acima para preencher a folha de conferência.
           </div>
         ) : null}
       </div>
@@ -1083,205 +1388,30 @@ export default function ConferenciaTransporte() {
           <div
             className="ct-print-unificado-inner"
             style={{
-              fontFamily: 'system-ui, "Segoe UI", sans-serif',
-              color: '#0f172a',
-              fontSize: '10px',
+              fontFamily: 'Arial, Helvetica, sans-serif',
+              color: '#000',
+              fontSize: '10pt',
               lineHeight: 1.35,
               width: '100%',
               margin: '0 auto',
             }}
           >
             <div className="ct-print-mtr-body">
-              <div style={{ marginBottom: 12, width: '100%', textAlign: 'center' }}>
-                <img
-                  src={BRAND_LOGO_MARK}
-                  alt=""
-                  style={{
-                    height: 28,
-                    width: 'auto',
-                    maxWidth: '100%',
-                    display: 'inline-block',
-                  }}
-                />
-              </div>
-              <div style={{ textAlign: 'center', fontWeight: 800, fontSize: '16px', letterSpacing: '0.05em' }}>
-                RG Ambiental
-              </div>
-              <div style={{ textAlign: 'center', fontWeight: 800, fontSize: '13px', marginTop: '8px', color: '#0f172a' }}>
-                Checklist motorista
-              </div>
-              <div
-                style={{
-                  textAlign: 'center',
-                  fontWeight: 500,
-                  fontSize: '10px',
-                  marginTop: '8px',
-                  marginBottom: '12px',
-                  color: '#475569',
-                  maxWidth: 520,
-                  marginLeft: 'auto',
-                  marginRight: 'auto',
-                  lineHeight: 1.45,
+              <ConferenciaTransporteFolhaPrintView
+                logoSrc={BRAND_LOGO_MARK}
+                coleta={{
+                  numero: coletaAtiva.numero,
+                  cliente: coletaAtiva.cliente,
+                  placa: coletaAtiva.placa,
+                  motorista: coletaAtiva.motorista,
+                  mtr_numero: coletaAtiva.mtr_numero,
                 }}
-              >
-                Marque os itens verificados. Total de 15 itens.
-              </div>
-              <div
-                style={{
-                  border: '1px solid #94a3b8',
-                  borderRadius: '4px',
-                  padding: '10px 12px',
-                  marginBottom: '14px',
-                  fontSize: '10px',
-                  background: '#fff',
-                }}
-              >
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', textAlign: 'left' }}>
-                  <div>
-                    <strong>Cliente:</strong> {coletaAtiva.cliente || '—'}
-                  </div>
-                  <div>
-                    <strong>Data:</strong> {hojeBr()}
-                  </div>
-                  <div>
-                    <strong>Veículo / Placa:</strong> {coletaAtiva.placa || '—'}
-                  </div>
-                  <div>
-                    <strong>Motorista:</strong> {coletaAtiva.motorista || '—'}
-                  </div>
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <strong>Coleta nº:</strong> {coletaAtiva.numero}
-                  </div>
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <strong>Fase (fluxo oficial):</strong> {formatarFaseFluxoOficialParaUI(coletaAtiva.etapaFluxo)}{' '}
-                    <span style={{ color: '#94a3b8' }}>({formatarEtapaParaUI(coletaAtiva.etapaFluxo)})</span>
-                  </div>
-                  <div
-                    style={{
-                      gridColumn: '1 / -1',
-                      marginTop: 4,
-                      paddingTop: 8,
-                      borderTop: '1px solid #e2e8f0',
-                      color: '#475569',
-                    }}
-                  >
-                    Itens verificados:{' '}
-                    <strong>
-                      {motoristaItensRespondidos}/{CHECKLIST_MOTORISTA_ITENS.length}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  borderRadius: '6px',
-                  overflow: 'hidden',
-                  border: '1px solid #94a3b8',
-                  marginBottom: '12px',
-                  printColorAdjust: 'exact',
-                  WebkitPrintColorAdjust: 'exact',
-                }}
-              >
-                <table
-                  style={{
-                    width: '100%',
-                    borderCollapse: 'collapse',
-                    fontSize: '9px',
-                    tableLayout: 'fixed',
-                  }}
-                >
-                  <thead>
-                    <tr style={{ background: '#f1f5f9' }}>
-                      <th
-                        style={{
-                          ...thStyle,
-                          border: '1px solid #94a3b8',
-                          width: '78%',
-                          fontSize: '9px',
-                          textAlign: 'left',
-                          paddingLeft: 10,
-                        }}
-                      >
-                        ITENS
-                      </th>
-                      <th style={{ ...thStyle, border: '1px solid #94a3b8', width: '22%', fontSize: '9px' }}>✓</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {CHECKLIST_MOTORISTA_ITENS.map((item) => {
-                      const marcado = respostasMotorista[item.id] === true
-                      return (
-                        <tr key={`pdf-mot-${item.id}`}>
-                          <td
-                            style={{
-                              border: '1px solid #cbd5e1',
-                              padding: '6px 10px',
-                              wordBreak: 'break-word',
-                              background: '#fff',
-                              fontSize: '9px',
-                              color: '#0f172a',
-                              textAlign: 'left',
-                            }}
-                          >
-                            {rotuloItemImpressao(item.label)}
-                          </td>
-                          <td style={{ ...tdOkNaoStyle, border: '1px solid #cbd5e1', fontSize: '9px' }}>
-                            {marcado ? 'X' : ''}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div
-                style={{
-                  marginTop: '8px',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: '6px',
-                  padding: '10px 12px',
-                  minHeight: '36px',
-                  marginBottom: '12px',
-                  textAlign: 'left',
-                  fontSize: '10px',
-                }}
-              >
-                <strong>Observações:</strong> {observacoesMotorista.trim() || '—'}
-              </div>
-
-              <p style={{ marginTop: '8px', fontSize: '9px', color: '#475569', textAlign: 'justify' }}>
-                O motorista declara que recebeu o veículo e conferiu os itens de segurança e equipamentos obrigatórios,
-                ficando ciente de que danos, multas ou ausência de equipamentos poderão ser de sua responsabilidade,
-                conforme procedimento interno.
-              </p>
-              <div
-                style={{
-                  marginTop: '16px',
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: '16px',
-                  maxWidth: 520,
-                  marginLeft: 'auto',
-                  marginRight: 'auto',
-                  fontSize: '9px',
-                  textAlign: 'left',
-                }}
-              >
-                <div>
-                  <div style={{ marginBottom: 4 }}>
-                    <strong>Assinatura — motorista:</strong> {assinaturaMotorista.trim() || '—'}
-                  </div>
-                  <div style={{ borderBottom: '1px solid #0f172a', minHeight: '20px' }} />
-                </div>
-                <div>
-                  <div style={{ marginBottom: 4 }}>
-                    <strong>Assinatura — responsável:</strong> {assinaturaResponsavel.trim() || '—'}
-                  </div>
-                  <div style={{ borderBottom: '1px solid #0f172a', minHeight: '20px' }} />
-                </div>
-              </div>
+                folha={folha}
+                dataExibicao={folha.dataStr.trim() || hojeBr()}
+                respostas={respostasMotorista}
+                assinaturaMotorista={assinaturaMotorista}
+                assinaturaResponsavel={assinaturaResponsavel}
+              />
             </div>
           </div>
         </div>

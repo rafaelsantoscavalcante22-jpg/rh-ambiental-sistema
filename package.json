@@ -1,7 +1,7 @@
 {
   "name": "rg-ambiental-sistema",
   "private": true,
-  "version": "1.2.2",
+  "version": "1.2.5",
   "type": "module",
   "engines": {
     "node": ">=20.19.0"
@@ -28,6 +28,7 @@
     "reset:e-seed-coletas-50": "tsx scripts/reset-coletas-operacao.ts --yes && tsx scripts/seed-simulacao-coletas.ts",
     "reset:e-seed-fluxo-20": "tsx scripts/reset-coletas-operacao.ts --yes && tsx scripts/seed-fluxo-completo-20.ts",
     "db:apply:sql": "tsx scripts/apply-supabase-sql.ts",
+    "db:apply:chat-dev-apagar-historico": "tsx scripts/apply-supabase-sql.ts supabase/sql_editor_chat_desenvolvedor_apagar_historico.sql",
     "db:apply:clientes-etapa1": "tsx scripts/apply-supabase-sql.ts supabase/migrations/20260413120000_clientes_enderecos_email_nf.sql",
     "db:apply:clientes-status-datas": "tsx scripts/apply-supabase-sql.ts supabase/migrations/20260427140000_clientes_status_datas.sql",
     "db:apply:faturamento-view": "tsx scripts/apply-supabase-sql.ts supabase/sql_editor_vw_faturamento_resumo.sql",
